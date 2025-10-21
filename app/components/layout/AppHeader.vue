@@ -33,6 +33,21 @@
 
           <!-- Action Buttons -->
           <div class="flex items-center space-x-3 ml-6">
+            <button
+              v-if="connected"
+              @click="handleDisconnect"
+              class="px-3 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600 transition-colors"
+            >
+              {{ address?.slice(0, 6) }}...{{ address?.slice(-4) }}
+            </button>
+            <button
+              v-else
+              @click="openWalletConnector"
+              class="px-3 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/80 transition-colors"
+            >
+              {{ loading ? 'Connecting...' : 'Connect Wallet' }}
+            </button>
+
             <UButton to="/schemas/create" color="primary" variant="outline">
               Create Schema
             </UButton>
@@ -106,6 +121,20 @@
             Docs
           </NuxtLink>
           <div class="pt-4 space-y-2">
+            <button
+              v-if="connected"
+              @click="handleDisconnect"
+              class="w-full px-3 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600 transition-colors"
+            >
+              Disconnect
+            </button>
+            <button
+              v-else
+              @click="openWalletConnector"
+              class="w-full px-3 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/80 transition-colors"
+            >
+              {{ loading ? 'Connecting...' : 'Connect Wallet' }}
+            </button>
             <UButton
               to="/schemas/create"
               color="primary"
@@ -121,11 +150,49 @@
         </div>
       </div>
     </nav>
+
+    <!-- Wallet Connector Web Component -->
+    <ClientOnly>
+      <xrpl-wallet-connector
+        ref="walletConnectorRef"
+        background-color="#1a202c"
+        text-color="#F5F4E7"
+        primary-color="#0ea5e9"
+        primary-wallet="crossmark"
+        font-family="'Inter', sans-serif"
+      />
+    </ClientOnly>
   </header>
 </template>
 
 <script setup lang="ts">
+import { ref, computed, onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { useWallet } from '~/composables/useWallet';
+
 const mobileMenuOpen = ref(false);
+const walletConnectorRef = ref();
+
+// Use wallet composable
+const { account, connected, loading, disconnect } = useWallet();
+const { $walletManager } = useNuxtApp();
+// Computed
+const address = computed(() => account.value?.address || null);
+
+// Methods
+const openWalletConnector = () => {
+  walletConnectorRef.value.setWalletManager($walletManager);
+  if (walletConnectorRef.value) {
+    walletConnectorRef.value.open();
+  } else {
+    console.error('[AppHeader] Wallet connector ref not available');
+  }
+};
+
+const handleDisconnect = async () => {
+  await disconnect();
+  mobileMenuOpen.value = false;
+};
 
 // Close mobile menu on route change
 const route = useRoute();
