@@ -8,37 +8,6 @@ export default defineNuxtConfig({
       isCustomElement: (tag) => tag === 'xrpl-wallet-connector',
     },
   },
-  vite: {
-    optimizeDeps: {
-      exclude: ['xrpl-connect', 'xumm-oauth2-pkce', 'xumm'],
-      esbuildOptions: {
-        define: {
-          global: 'globalThis',
-        },
-      },
-    },
-    resolve: {
-      alias: {
-        'xumm-oauth2-pkce': 'xumm-oauth2-pkce/dist/browser.min.js',
-        events: 'eventemitter3',
-      },
-    },
-    build: {
-      rollupOptions: {
-        external: ['crypto', 'zlib', 'util', 'stream', 'buffer'],
-        output: {
-          manualChunks: {
-            'xrpl-connect': ['xrpl-connect'],
-          },
-          globals: {
-            crypto: 'Crypto',
-            zlib: 'Zlib',
-          },
-        },
-      },
-    },
-  },
-
   runtimeConfig: {
     // Private (server-only)
     xrplServer:
