@@ -24,7 +24,7 @@
     "vue": "^3.5.22",
     "vue-router": "^4.5.1",
     "xrpl": "^4.4.2",
-    "xrpl-connect": "file:../codingDay/xrpl-connect/packages/xrpl-connect/xrpl-connect-0.1.6.tgz",
+    "xrpl-connect": "^0.2.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {

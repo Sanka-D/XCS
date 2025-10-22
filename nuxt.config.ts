@@ -3,7 +3,6 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   modules: ['@nuxt/ui'],
   css: ['~/assets/css/main.css'],
-  ssr: false,
   vue: {
     compilerOptions: {
       isCustomElement: (tag) => tag === 'xrpl-wallet-connector',
