@@ -1,13 +1,13 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   modules: ['@nuxt/ui'],
   css: ['~/assets/css/main.css'],
-
-  // Use default component auto-import
-  // Components will be auto-imported from ~/components
-
+  vue: {
+    compilerOptions: {
+      isCustomElement: (tag) => tag === 'xrpl-wallet-connector',
+    },
+  },
   runtimeConfig: {
     // Private (server-only)
     xrplServer:
@@ -28,6 +28,8 @@ export default defineNuxtConfig({
     public: {
       baseUrl: process.env.BASE_URL || 'http://localhost:3000',
       ipfsGateway: process.env.IPFS_GATEWAY || 'https://ipfs.io',
+      walletConnectProjectId:
+        process.env.NUXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
     },
   },
 

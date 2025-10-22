@@ -10,36 +10,16 @@
           >
         </NuxtLink>
 
-        <!-- Desktop Navigation -->
-        <div class="hidden md:flex items-center space-x-8">
-          <NuxtLink
-            to="/schemas"
-            class="text-gray-700 hover:text-primary transition-colors"
-          >
-            Schemas
-          </NuxtLink>
-          <NuxtLink
-            to="/credentials"
-            class="text-gray-700 hover:text-primary transition-colors"
-          >
-            Credentials
-          </NuxtLink>
-          <NuxtLink
-            to="/docs"
-            class="text-gray-700 hover:text-primary transition-colors"
-          >
-            Docs
-          </NuxtLink>
-
-          <!-- Action Buttons -->
-          <div class="flex items-center space-x-3 ml-6">
-            <UButton to="/schemas/create" color="primary" variant="outline">
-              Create Schema
-            </UButton>
-            <UButton to="/credentials/issue" color="primary">
-              Issue Credential
-            </UButton>
-          </div>
+        <div class="flex items-center space-x-3 ml-6">
+          <xrpl-wallet-connector
+            ref="walletConnectorRef"
+            background-color="#1a202c"
+            text-color="#F5F4E7"
+            primary-color="#0ea5e9"
+            primary-wallet="xaman"
+            font-family="'Inter', sans-serif"
+            @wallet-connected="onWalletConnected"
+          />
         </div>
 
         <!-- Mobile menu button -->
@@ -125,7 +105,22 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
+import { useWallet } from '~/composables/useWallet';
+
 const mobileMenuOpen = ref(false);
+const walletConnectorRef = ref();
+
+// Use wallet composable
+const { account, connected, loading, disconnect } = useWallet();
+const { $walletManager } = useNuxtApp();
+
+// Methods
+const onWalletConnected = () => {
+  // Additional logic if needed when wallet is connected
+  mobileMenuOpen.value = false;
+};
 
 // Close mobile menu on route change
 const route = useRoute();
@@ -135,4 +130,11 @@ watch(
     mobileMenuOpen.value = false;
   }
 );
+
+// Ensure wallet manager is set on component mount
+onMounted(() => {
+  if (walletConnectorRef.value) {
+    walletConnectorRef.value.setWalletManager($walletManager);
+  }
+});
 </script>
