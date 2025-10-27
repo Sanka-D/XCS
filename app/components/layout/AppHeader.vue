@@ -13,11 +13,16 @@
         <div class="flex items-center space-x-3 ml-6">
           <xrpl-wallet-connector
             ref="walletConnectorRef"
-            background-color="#1a202c"
-            text-color="#F5F4E7"
-            primary-color="#0ea5e9"
+            style="
+              --xc-background-color: #ffffff;
+              --xc-background-secondary: #f5f5f5;
+              --xc-background-tertiary: #eeeeee;
+              --xc-text-color: #111111;
+              --xc-text-muted-color: rgba(17, 17, 17, 0.6);
+              --xc-primary-color: #0ea5e9;
+              --xc-font-family: 'Inter', sans-serif;
+            "
             primary-wallet="xaman"
-            font-family="'Inter', sans-serif"
             @wallet-connected="onWalletConnected"
           />
         </div>
