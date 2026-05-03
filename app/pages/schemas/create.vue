@@ -110,7 +110,7 @@ const handleSubmit = async (schemaData: any) => {
 
       try {
         await waitForIndex({
-          fetcher: () => $fetch(`/api/schema?id=${result.value!.uid}`),
+          fetcher: () => $fetch(`/api/schema?uid=${result.value!.uid}`),
           predicate: (r: any) => !!r?.data?.schema?.uid,
         });
       } catch {

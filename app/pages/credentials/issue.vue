@@ -93,14 +93,6 @@ const handleSubmit = async (credentialData: {
     });
 
     if (response.success) {
-      toast.add({
-        title: 'Success',
-        description: response.data.ipfsCid
-          ? `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}… (pinned: ${response.data.ipfsCid.slice(0, 16)}…)`
-          : `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}…`,
-        color: 'success',
-      });
-
       isIssuing.value = false;
 
       try {
@@ -115,10 +107,18 @@ const handleSubmit = async (credentialData: {
           }),
           predicate: (r: any) => (r?.data?.credentials?.length ?? 0) > 0,
         });
+
+        toast.add({
+          title: 'Success',
+          description: response.data.ipfsCid
+            ? `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}… (pinned: ${response.data.ipfsCid.slice(0, 16)}…)`
+            : `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}…`,
+          color: 'success',
+        });
       } catch {
         toast.add({
-          title: 'Indexer slow',
-          description: 'Credential submitted but not yet visible.',
+          title: 'Submitted',
+          description: `TX ${response.data.txHash.slice(0, 12)}… submitted to XRPL — indexer is slow, credential will appear shortly.`,
           color: 'warning',
         });
       }

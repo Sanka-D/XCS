@@ -12,15 +12,28 @@ export async function waitForIndexer<T>(opts: WaitOptions<T>): Promise<T> {
   const timeout = opts.timeoutMs ?? 60_000;
   const start = Date.now();
 
-  while (Date.now() - start < timeout) {
+  while (true) {
+    let value: T;
     try {
-      const value = await opts.fetcher();
-      if (opts.predicate(value)) return value;
+      value = await opts.fetcher();
     } catch {
-      // swallow transient errors
+      // swallow fetcher errors — keep polling
+      const elapsed = Date.now() - start;
+      const remaining = timeout - elapsed;
+      if (remaining <= 0) break;
+      await new Promise((r) => setTimeout(r, Math.min(interval, remaining)));
+      continue;
     }
-    await new Promise((r) => setTimeout(r, interval));
+
+    // Predicate errors propagate (a buggy predicate is a real bug, not noise).
+    if (opts.predicate(value)) return value;
+
+    const elapsed = Date.now() - start;
+    const remaining = timeout - elapsed;
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(interval, remaining)));
   }
+
   throw new Error(`indexer wait timeout after ${timeout}ms`);
 }
 
