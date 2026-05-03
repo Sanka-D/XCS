@@ -1,8 +1,5 @@
-import { db } from '../../db';
-import { credentials } from '../../db/schema';
 import { acceptCredentialSchema } from '../../utils/validation';
 import { useXRPL } from '../../utils/xrpl';
-import { eq, and } from 'drizzle-orm';
 import { Wallet } from 'xrpl';
 
 export default defineEventHandler(async (event) => {
@@ -10,68 +7,27 @@ export default defineEventHandler(async (event) => {
     const body = await readBody(event);
     const validated = acceptCredentialSchema.parse(body);
 
-    // Get credential
-    const [credential] = await db
-      .select()
-      .from(credentials)
-      .where(eq(credentials.id, validated.credentialId))
-      .limit(1);
-
-    if (!credential) {
-      throw createError({
-        statusCode: 404,
-        message: 'Credential not found',
-      });
-    }
-
-    // Check if already accepted
-    if (credential.accepted) {
-      throw createError({
-        statusCode: 400,
-        message: 'Credential already accepted',
-      });
-    }
-
-    // Verify subject seed matches credential subject
+    // Derive subject address from seed to include in response
     const subjectWallet = Wallet.fromSeed(validated.subjectSeed);
-    if (subjectWallet.address !== credential.subject) {
-      throw createError({
-        statusCode: 403,
-        message: 'Subject seed does not match credential subject',
-      });
-    }
 
-    // Accept on XRPL
     const xrpl = useXRPL();
-    const xrplResult = await xrpl.acceptCredential({
+    const result = await xrpl.acceptCredential({
       subjectSeed: validated.subjectSeed,
-      issuer: credential.issuer,
-      credentialType: credential.credentialType,
+      issuer: validated.issuer,
+      credentialType: validated.credentialType,
     });
-
-    // Update database
-    const [updatedCredential] = await db
-      .update(credentials)
-      .set({
-        accepted: true,
-        acceptedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(credentials.id, validated.credentialId))
-      .returning();
 
     return {
       success: true,
       data: {
-        credential: updatedCredential,
-        xrplTxHash: xrplResult.txHash,
+        txHash: result.txHash,
+        subject: subjectWallet.address,
+        issuer: validated.issuer,
+        credentialType: validated.credentialType,
       },
     };
-  } catch (error) {
-    if (error.statusCode) {
-      throw error;
-    }
-
+  } catch (error: any) {
+    if (error.statusCode) throw error;
     console.error('Error accepting credential:', error);
     throw createError({
       statusCode: 500,

@@ -1,0 +1,103 @@
+specVersion: v0.1.0
+package:
+  name: xcs
+  version: v0.1.0
+  doc: XCS Protocol indexer — tracks schema registrations and credential lifecycle on XRPL
+
+protobuf:
+  files:
+    - sf/xrpl/type/v1/amount.proto
+    - sf/xrpl/type/v1/signer.proto
+    - sf/xrpl/type/v1/payment.proto
+    - sf/xrpl/type/v1/offer.proto
+    - sf/xrpl/type/v1/trustline.proto
+    - sf/xrpl/type/v1/account.proto
+    - sf/xrpl/type/v1/escrow.proto
+    - sf/xrpl/type/v1/nft.proto
+    - sf/xrpl/type/v1/payment_channel.proto
+    - sf/xrpl/type/v1/check.proto
+    - sf/xrpl/type/v1/deposit_preauth.proto
+    - sf/xrpl/type/v1/ticket.proto
+    - sf/xrpl/type/v1/clawback.proto
+    - sf/xrpl/type/v1/amm.proto
+    - sf/xrpl/type/v1/did.proto
+    - sf/xrpl/type/v1/oracle.proto
+    - sf/xrpl/type/v1/mptoken.proto
+    - sf/xrpl/type/v1/credential.proto
+    - sf/xrpl/type/v1/permissioned_domain.proto
+    - sf/xrpl/type/v1/delegate.proto
+    - sf/xrpl/type/v1/batch.proto
+    - sf/xrpl/type/v1/system.proto
+    - sf/xrpl/type/v1/block.proto
+    - xcs/v1/types.proto
+    - sf/substreams/sink/database/v1/database.proto
+  descriptorSets:
+    - module: buf.build/streamingfast/substreams-sink-sql
+  importPaths:
+    - ./proto
+
+binaries:
+  default:
+    type: wasm/rust-v1
+    file: ./target/wasm32-unknown-unknown/release/substreams_xcs.wasm
+
+modules:
+  # Step 1: extract schema registrations from Payment transactions with xcs: memos.
+  # Runs before store_schemas so the store can be used by map_xcs_ops for
+  # credential validation in the same pipeline.
+  - name: map_schema_ops
+    kind: map
+    initialBlock: 0
+    inputs:
+      - source: sf.xrpl.type.v1.Block
+    output:
+      type: proto:xcs.v1.XcsOperations
+
+  # Step 2: accumulate the schema registry.
+  # Schemas are immutable once registered so we use set_if_not_exists.
+  - name: store_schemas
+    kind: store
+    initialBlock: 0
+    updatePolicy: set_if_not_exists
+    valueType: proto:xcs.v1.SchemaRegistration
+    inputs:
+      - map: map_schema_ops
+
+  # Step 3: emit all XCS operations (schemas + credentials).
+  # Credential accept/revoke ops are only emitted when credential_type
+  # resolves to a known XCS schema in store_schemas.
+  - name: map_xcs_ops
+    kind: map
+    initialBlock: 0
+    inputs:
+      - source: sf.xrpl.type.v1.Block
+      - store: store_schemas
+    output:
+      type: proto:xcs.v1.XcsOperations
+
+  # Step 4: maintain per-credential state for downstream lookups.
+  - name: store_credentials
+    kind: store
+    initialBlock: 0
+    updatePolicy: set
+    valueType: proto:xcs.v1.CredentialState
+    inputs:
+      - map: map_xcs_ops
+
+  # Step 5: translate XCS operations into SQL DatabaseChanges for substreams-sink-sql.
+  - name: db_out
+    kind: map
+    initialBlock: 0
+    inputs:
+      - map: map_xcs_ops
+    output:
+      type: proto:sf.substreams.sink.database.v1.DatabaseChanges
+
+network: xrpl
+
+sink:
+  module: db_out
+  type: sf.substreams.sink.sql.v1.Service
+  config:
+    engine: postgres
+    schema: ./schema.sql

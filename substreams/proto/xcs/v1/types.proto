@@ -1,0 +1,80 @@
+syntax = "proto3";
+package xcs.v1;
+
+option go_package = "github.com/xrpl-commons/xcs/pb/xcs/v1;pbxcs";
+
+// XcsOperations is the output type of all XCS map modules.
+// Each block produces zero or more operations.
+message XcsOperations {
+  repeated XcsOperation operations = 1;
+}
+
+// XcsOperation is a single protocol event observed in a ledger.
+message XcsOperation {
+  uint64 ledger_index = 1;
+  uint32 tx_index     = 2;
+  // Uppercase hex, matching XRPL convention.
+  string tx_hash      = 3;
+
+  oneof op {
+    SchemaRegistration schema_reg    = 4;
+    CredentialCreated  cred_created  = 5;
+    CredentialAccepted cred_accepted = 6;
+    CredentialRevoked  cred_revoked  = 7;
+  }
+}
+
+// SchemaRegistration is emitted when a Payment to the registry address is
+// observed with a memo of type "xcs:schema_register".
+// The UID is computed deterministically by the indexer:
+//   SHA256(schema_json_bytes || issuer_bytes || ledger_index_be64 || tx_index_be32)
+message SchemaRegistration {
+  string issuer      = 1;
+  // UTF-8 JSON decoded from the hex memo_data field.
+  string schema_json = 2;
+  // Lowercase hex SHA-256 digest — the canonical schema identifier.
+  string uid         = 3;
+}
+
+// CredentialCreated is emitted for a CredentialCreate transaction that carries
+// a memo of type "xcs:credential_create" (required by the protocol).
+message CredentialCreated {
+  string issuer          = 1;
+  string subject         = 2;
+  // Uppercase hex credential_type from the XRPL transaction.
+  // For XCS credentials this equals the schema UID.
+  string credential_type = 3;
+  string uri             = 4;
+  // XRPL ripple epoch timestamp; 0 if not set.
+  uint32 expiration      = 5;
+}
+
+// CredentialAccepted is emitted for a CredentialAccept transaction whose
+// credential_type resolves to a known XCS schema in store_schemas.
+message CredentialAccepted {
+  string issuer          = 1;
+  // The account that submitted the CredentialAccept tx (= subject).
+  string subject         = 2;
+  string credential_type = 3;
+}
+
+// CredentialRevoked is emitted for a CredentialDelete transaction whose
+// credential_type resolves to a known XCS schema in store_schemas.
+message CredentialRevoked {
+  string issuer          = 1;
+  string subject         = 2;
+  string credential_type = 3;
+}
+
+// CredentialState is what store_credentials persists per credential key.
+// Key format: "{issuer}:{subject}:{credential_type}"
+message CredentialState {
+  string issuer          = 1;
+  string subject         = 2;
+  string credential_type = 3;
+  string uri             = 4;
+  uint32 expiration      = 5;
+  uint64 created_ledger  = 6;
+  // "created" | "accepted" | "revoked"
+  string status          = 7;
+}

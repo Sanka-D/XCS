@@ -8,12 +8,6 @@
         size="lg"
         class="w-full sm:w-48"
       />
-      <USelectMenu
-        v-model="selectedVisibility"
-        :options="visibilityOptions"
-        size="lg"
-        class="w-full sm:w-48"
-      />
       <UInput
         v-model="subjectFilter"
         placeholder="Filter by subject address..."
@@ -31,7 +25,7 @@
     <!-- Error State -->
     <UAlert
       v-else-if="error"
-      color="red"
+      color="error"
       variant="soft"
       title="Error loading credentials"
       :description="error.message"
@@ -102,47 +96,23 @@
 import type { Credential } from '~/lib/types/schema';
 
 const selectedStatus = ref('all');
-const selectedVisibility = ref('all');
 const subjectFilter = ref('');
 const currentPage = ref(1);
 const limit = 9;
 
 const statusOptions = [
   { label: 'All Status', value: 'all' },
-  { label: 'Pending', value: 'pending' },
+  { label: 'Pending', value: 'created' },
   { label: 'Accepted', value: 'accepted' },
   { label: 'Revoked', value: 'revoked' },
 ];
 
-const visibilityOptions = [
-  { label: 'All Credentials', value: 'all' },
-  { label: 'Public Only', value: 'public' },
-  { label: 'Private Only', value: 'private' },
-];
-
-// Computed offset for pagination
 const offset = computed(() => (currentPage.value - 1) * limit);
 
-// Watch for changes and refetch
-watch([selectedStatus, selectedVisibility, subjectFilter, currentPage], () => {
+watch([selectedStatus, subjectFilter, currentPage], () => {
   refresh();
 });
 
-// Determine accepted/revoked status from filter
-const getAcceptedFilter = () => {
-  if (selectedStatus.value === 'accepted') return true;
-  if (selectedStatus.value === 'pending') return false;
-  return undefined;
-};
-
-const getRevokedFilter = () => {
-  if (selectedStatus.value === 'revoked') return true;
-  if (selectedStatus.value === 'pending' || selectedStatus.value === 'accepted')
-    return false;
-  return undefined;
-};
-
-// Fetch credentials
 const {
   data: credentialsData,
   pending,
@@ -152,18 +122,13 @@ const {
   method: 'POST',
   body: computed(() => ({
     subject: subjectFilter.value || undefined,
-    accepted: getAcceptedFilter(),
-    revoked: getRevokedFilter(),
-    isPublic:
-      selectedVisibility.value === 'all'
-        ? undefined
-        : selectedVisibility.value === 'public',
+    status: selectedStatus.value === 'all' ? undefined : selectedStatus.value,
     limit,
     offset: offset.value,
   })),
   watch: false,
 });
 
-const credentials = computed(() => credentialsData.value?.data?.credentials || []);
+const credentials = computed(() => (credentialsData.value?.data?.credentials as unknown as Credential[]) || []);
 const total = computed(() => credentialsData.value?.data?.total || 0);
 </script>

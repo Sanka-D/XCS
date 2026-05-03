@@ -15,8 +15,8 @@
           class="flex-1 px-4 py-2 border rounded-lg"
         />
         <button
-          @click="refresh"
-          class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          @click="() => refresh()"
+          class="px-6 py-2 bg-primary text-white rounded-lg hover:opacity-90"
         >
           Search
         </button>
@@ -46,6 +46,8 @@
 </template>
 
 <script setup lang="ts">
+import type { Credential } from '~/lib/types/schema';
+
 const route = useRoute();
 const toast = useToast();
 
@@ -56,23 +58,23 @@ const { data: credentialsData, refresh } = await useFetch(
   {
     method: 'POST',
     body: computed(() => ({
-      subject: subjectAddress.value,
-      accepted: false,
-      revoked: false,
+      subject: subjectAddress.value || undefined,
+      status: 'created', // only show pending (not yet accepted)
     })),
   }
 );
 
 const pendingCredentials = computed(
-  () => credentialsData.value?.data.credentials || []
+  () => (credentialsData.value?.data?.credentials as unknown as Credential[]) || []
 );
 
-const handleAccept = async (credential: any, subjectSeed: string) => {
+const handleAccept = async (credential: Credential, subjectSeed: string) => {
   try {
     const response = await $fetch('/api/credential/accept', {
       method: 'POST',
       body: {
-        credentialId: credential.id,
+        issuer: credential.issuer,
+        credentialType: credential.credential_type,
         subjectSeed,
       },
     });
@@ -80,18 +82,17 @@ const handleAccept = async (credential: any, subjectSeed: string) => {
     if (response.success) {
       toast.add({
         title: 'Success',
-        description: 'Credential accepted successfully',
-        color: 'green',
+        description: 'Credential accepted on XRPL',
+        color: 'success',
       });
 
-      // Refresh the list
       await refresh();
     }
-  } catch (error) {
+  } catch (error: any) {
     toast.add({
       title: 'Error',
       description: error.data?.message || 'Failed to accept credential',
-      color: 'red',
+      color: 'error',
     });
   }
 };

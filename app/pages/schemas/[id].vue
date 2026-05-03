@@ -9,7 +9,7 @@
     <!-- Error State -->
     <UAlert
       v-else-if="error"
-      color="red"
+      color="error"
       variant="soft"
       title="Error loading schema"
       :description="error.message"
@@ -22,38 +22,37 @@
         <div class="flex items-start justify-between mb-4">
           <div>
             <h1 class="text-3xl font-bold text-gray-900 mb-2">
-              {{ schema.name }}
+              {{ schema.schema_json.name }}
             </h1>
             <div class="flex items-center gap-3 flex-wrap">
-              <UBadge :color="schema.isPublic ? 'green' : 'gray'" variant="subtle">
-                {{ schema.isPublic ? 'Public' : 'Private' }}
+              <UBadge color="info" variant="subtle">
+                v{{ schema.schema_json.version }}
               </UBadge>
-              <UBadge color="blue" variant="subtle"> v{{ schema.version }} </UBadge>
               <span class="text-sm text-gray-500">
-                Created {{ formatDate(schema.createdAt) }}
+                Ledger {{ schema.ledger_index }}
               </span>
             </div>
           </div>
           <div class="flex gap-2">
             <UButton
-              :to="`/credentials/issue?schemaId=${schema.id}`"
+              :to="`/credentials/issue?schemaId=${schema.uid}`"
               color="primary"
             >
               Issue Credential
             </UButton>
           </div>
         </div>
-        <p v-if="schema.description" class="text-gray-600">
-          {{ schema.description }}
+        <p v-if="schema.schema_json.description" class="text-gray-600">
+          {{ schema.schema_json.description }}
         </p>
       </div>
 
       <!-- Schema Info Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <UCard>
           <div class="text-center">
             <div class="text-3xl font-bold text-primary mb-2">
-              {{ schema.fields.fields.length }}
+              {{ schema.schema_json.fields.length }}
             </div>
             <div class="text-sm text-gray-600">Fields Defined</div>
           </div>
@@ -61,27 +60,21 @@
 
         <UCard>
           <div class="text-center">
-            <div class="text-sm text-gray-600 mb-1">Creator</div>
+            <div class="text-sm text-gray-600 mb-1">Issuer</div>
             <code class="text-xs bg-gray-100 px-2 py-1 rounded">
-              {{ truncateAddress(schema.creator) }}
+              {{ truncateAddress(schema.issuer) }}
             </code>
           </div>
         </UCard>
-
-        <UCard v-if="schema.ipfsCid">
-          <div class="text-center">
-            <div class="text-sm text-gray-600 mb-1">IPFS CID</div>
-            <a
-              :href="`${ipfsGateway}/ipfs/${schema.ipfsCid}`"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-xs text-primary hover:underline"
-            >
-              View on IPFS →
-            </a>
-          </div>
-        </UCard>
       </div>
+
+      <!-- UID -->
+      <UCard>
+        <template #header>
+          <h3 class="font-semibold">Schema UID</h3>
+        </template>
+        <code class="text-xs break-all">{{ schema.uid }}</code>
+      </UCard>
 
       <!-- Fields -->
       <UCard>
@@ -91,7 +84,7 @@
 
         <div class="space-y-4">
           <div
-            v-for="(field, index) in schema.fields.fields"
+            v-for="(field, index) in schema.schema_json.fields"
             :key="index"
             class="p-4 border border-gray-200 rounded-lg"
           >
@@ -99,7 +92,7 @@
               <div>
                 <div class="flex items-center gap-2">
                   <span class="font-semibold text-gray-900">{{ field.name }}</span>
-                  <UBadge v-if="field.required" color="orange" variant="subtle" size="xs">
+                  <UBadge v-if="field.required" color="warning" variant="subtle" size="xs">
                     Required
                   </UBadge>
                 </div>
@@ -111,55 +104,53 @@
             <p v-if="field.description" class="text-sm text-gray-600 mt-2">
               {{ field.description }}
             </p>
-            <div v-if="field.pattern || field.min || field.max" class="mt-2 text-xs text-gray-500">
+            <div v-if="field.pattern || field.min !== undefined || field.max !== undefined" class="mt-2 text-xs text-gray-500 flex gap-4">
               <span v-if="field.pattern">Pattern: {{ field.pattern }}</span>
-              <span v-if="field.min">Min: {{ field.min }}</span>
-              <span v-if="field.max">Max: {{ field.max }}</span>
+              <span v-if="field.min !== undefined">Min: {{ field.min }}</span>
+              <span v-if="field.max !== undefined">Max: {{ field.max }}</span>
             </div>
           </div>
         </div>
       </UCard>
 
-      <!-- Version History -->
-      <SchemaVersionHistory
-        v-if="versions && versions.length > 0"
-        :versions="versions"
-        :current-version-id="schema.id"
-      />
+      <!-- TX Hash -->
+      <UCard>
+        <template #header>
+          <h3 class="font-semibold">Registration Transaction</h3>
+        </template>
+        <div class="flex items-center gap-2">
+          <code class="text-xs bg-gray-100 px-3 py-2 rounded flex-1 break-all">
+            {{ schema.tx_hash }}
+          </code>
+          <UButton
+            :to="`https://testnet.xrpl.org/transactions/${schema.tx_hash}`"
+            target="_blank"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-heroicons-arrow-top-right-on-square"
+          />
+        </div>
+      </UCard>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import type { Schema } from '~/lib/types/schema';
+
 const route = useRoute();
-const schemaId = route.params.id as string;
+const schemaUid = route.params.id as string;
 
-const config = useRuntimeConfig();
-const ipfsGateway = config.public.ipfsGateway;
-
-// Fetch schema with versions
 const {
   data: schemaData,
   pending,
   error,
 } = await useFetch(`/api/schema`, {
-  query: {
-    id: schemaId,
-    includeVersions: 'true',
-  },
+  query: { uid: schemaUid },
 });
 
-const schema = computed(() => schemaData.value?.data?.schema);
-const versions = computed(() => schemaData.value?.data?.versions);
-
-const formatDate = (date: Date | string) => {
-  const d = new Date(date);
-  return new Intl.DateTimeFormat('en', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(d);
-};
+const schema = computed(() => schemaData.value?.data?.schema as Schema | undefined);
 
 const truncateAddress = (address: string) => {
   if (address.length <= 12) return address;
@@ -167,6 +158,8 @@ const truncateAddress = (address: string) => {
 };
 
 useHead({
-  title: computed(() => schema.value ? `${schema.value.name} - XCS` : 'Schema - XCS'),
+  title: computed(() =>
+    schema.value ? `${schema.value.schema_json.name} - XCS` : 'Schema - XCS'
+  ),
 });
 </script>

@@ -9,12 +9,6 @@
         size="lg"
         class="flex-1"
       />
-      <USelectMenu
-        v-model="selectedFilter"
-        :options="filterOptions"
-        size="lg"
-        class="w-full sm:w-48"
-      />
     </div>
 
     <!-- Loading State -->
@@ -25,7 +19,7 @@
     <!-- Error State -->
     <UAlert
       v-else-if="error"
-      color="red"
+      color="error"
       variant="soft"
       title="Error loading schemas"
       :description="error.message"
@@ -62,7 +56,7 @@
 
     <!-- Schemas Grid -->
     <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <SchemaCard v-for="schema in schemas" :key="schema.id" :schema="schema" />
+      <SchemaCard v-for="schema in schemas" :key="schema.uid" :schema="schema" />
     </div>
 
     <!-- Pagination -->
@@ -81,25 +75,15 @@
 import type { Schema } from '~/lib/types/schema';
 
 const searchQuery = ref('');
-const selectedFilter = ref('all');
 const currentPage = ref(1);
 const limit = 9;
 
-const filterOptions = [
-  { label: 'All Schemas', value: 'all' },
-  { label: 'Public Only', value: 'public' },
-  { label: 'Private Only', value: 'private' },
-];
-
-// Computed offset for pagination
 const offset = computed(() => (currentPage.value - 1) * limit);
 
-// Watch for changes and refetch
-watch([searchQuery, selectedFilter, currentPage], () => {
+watch([searchQuery, currentPage], () => {
   refresh();
 });
 
-// Fetch schemas
 const {
   data: schemasData,
   pending,
@@ -109,16 +93,12 @@ const {
   method: 'POST',
   body: computed(() => ({
     search: searchQuery.value || undefined,
-    isPublic:
-      selectedFilter.value === 'all'
-        ? undefined
-        : selectedFilter.value === 'public',
     limit,
     offset: offset.value,
   })),
   watch: false,
 });
 
-const schemas = computed(() => schemasData.value?.data?.schemas || []);
+const schemas = computed(() => (schemasData.value?.data?.schemas as unknown as Schema[]) || []);
 const total = computed(() => schemasData.value?.data?.total || 0);
 </script>

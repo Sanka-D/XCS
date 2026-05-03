@@ -8,7 +8,7 @@ declare global {
 
 export default defineNuxtPlugin(async () => {
   // Only run on client side
-  if (process.server) return;
+  if (process.server) return { provide: { walletManager: null } };
 
   try {
     const {
@@ -16,6 +16,7 @@ export default defineNuxtPlugin(async () => {
       GemWalletAdapter,
       WalletConnectAdapter,
       XamanAdapter,
+      LedgerAdapter,
       WalletManager,
     } = (await import('xrpl-connect')) as any;
 
@@ -54,6 +55,9 @@ export default defineNuxtPlugin(async () => {
     } catch (err) {
       console.error('[Wallet Plugin] Failed to create GemWalletAdapter:', err);
     }
+
+    const ledger = new LedgerAdapter();
+    adapters.push(ledger);
 
     if (adapters.length === 0) {
       throw new Error('No wallet adapters could be initialized');

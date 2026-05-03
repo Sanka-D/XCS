@@ -9,14 +9,14 @@
     <!-- Error State -->
     <UAlert
       v-else-if="error"
-      color="red"
+      color="error"
       variant="soft"
       title="Error loading credential"
       :description="error.message"
     />
 
     <!-- Credential Details -->
-    <div v-else-if="credential && schema" class="space-y-8">
+    <div v-else-if="credential" class="space-y-8">
       <!-- Header -->
       <div>
         <div class="flex items-start justify-between mb-4">
@@ -25,13 +25,10 @@
               Verifiable Credential
             </h1>
             <div class="flex items-center gap-3 flex-wrap">
-              <UBadge :color="getStatusColor()" variant="subtle">
-                {{ getStatusText() }}
+              <UBadge :color="statusColor" variant="subtle">
+                {{ statusText }}
               </UBadge>
-              <UBadge :color="credential.isPublic ? 'green' : 'gray'" variant="subtle">
-                {{ credential.isPublic ? 'Public' : 'Private' }}
-              </UBadge>
-              <UBadge v-if="isExpired" color="red" variant="subtle">
+              <UBadge v-if="isExpired" color="error" variant="subtle">
                 Expired
               </UBadge>
             </div>
@@ -39,7 +36,7 @@
         </div>
       </div>
 
-      <!-- Credential Info -->
+      <!-- Issuer & Subject -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <UCard>
           <template #header>
@@ -57,13 +54,13 @@
       </div>
 
       <!-- Schema Info -->
-      <UCard>
+      <UCard v-if="schema">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="font-semibold">Schema</h3>
             <UButton
-              :to="`/schemas/${schema.id}`"
-              color="gray"
+              :to="`/schemas/${schema.uid}`"
+              color="neutral"
               variant="ghost"
               size="xs"
             >
@@ -73,39 +70,34 @@
         </template>
         <div class="space-y-2">
           <div class="flex items-center gap-2">
-            <span class="font-semibold">{{ schema.name }}</span>
-            <UBadge color="blue" variant="subtle" size="xs">
-              v{{ schema.version }}
+            <span class="font-semibold">{{ schema.schema_json.name }}</span>
+            <UBadge color="info" variant="subtle" size="xs">
+              v{{ schema.schema_json.version }}
             </UBadge>
           </div>
-          <p v-if="schema.description" class="text-sm text-gray-600">
-            {{ schema.description }}
+          <p v-if="schema.schema_json.description" class="text-sm text-gray-600">
+            {{ schema.schema_json.description }}
           </p>
         </div>
       </UCard>
 
-      <!-- Credential Data -->
-      <UCard>
+      <!-- URI / Off-chain Data Link -->
+      <UCard v-if="credential.uri">
         <template #header>
-          <h3 class="font-semibold">Credential Data</h3>
+          <h3 class="font-semibold">Credential URI</h3>
         </template>
-        <div class="space-y-4">
-          <div
-            v-for="(value, key) in credential.vcDocument.credentialSubject"
-            :key="key"
-            v-show="key !== 'id'"
-            class="border-b border-gray-100 pb-3 last:border-0"
-          >
-            <div class="text-sm font-medium text-gray-700 mb-1">{{ key }}</div>
-            <div class="text-sm text-gray-900">
-              {{ formatValue(value) }}
-            </div>
-          </div>
-        </div>
+        <a
+          :href="credential.uri"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-sm text-primary hover:underline break-all"
+        >
+          {{ credential.uri }}
+        </a>
       </UCard>
 
       <!-- XRPL Transaction -->
-      <UCard v-if="credential.xrplTxHash">
+      <UCard v-if="credential.tx_hash">
         <template #header>
           <h3 class="font-semibold">XRPL Transaction</h3>
         </template>
@@ -116,124 +108,89 @@
             </div>
             <div class="flex items-center gap-2">
               <code class="text-xs bg-gray-100 px-3 py-2 rounded flex-1 break-all">
-                {{ credential.xrplTxHash }}
+                {{ credential.tx_hash }}
               </code>
               <UButton
-                :to="`https://testnet.xrpl.org/transactions/${credential.xrplTxHash}`"
+                :to="`https://testnet.xrpl.org/transactions/${credential.tx_hash}`"
                 target="_blank"
-                color="gray"
+                color="neutral"
                 variant="ghost"
                 size="xs"
                 icon="i-heroicons-arrow-top-right-on-square"
               />
             </div>
           </div>
-          <div v-if="credential.xrplLedgerIndex">
+          <div v-if="credential.created_ledger">
             <div class="text-sm font-medium text-gray-700 mb-1">
-              Ledger Index
+              Ledger
             </div>
             <code class="text-xs bg-gray-100 px-3 py-2 rounded">
-              {{ credential.xrplLedgerIndex }}
+              {{ credential.created_ledger }}
             </code>
           </div>
         </div>
       </UCard>
 
-      <!-- Timestamps -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <UCard>
-          <div class="text-sm">
-            <div class="font-medium text-gray-700 mb-1">Issued</div>
-            <div class="text-gray-900">{{ formatDate(credential.createdAt) }}</div>
+      <!-- Expiration -->
+      <UCard v-if="credential.expiration">
+        <div class="text-sm">
+          <div class="font-medium text-gray-700 mb-1">Expires</div>
+          <div :class="isExpired ? 'text-red-600' : 'text-gray-900'">
+            {{ expirationDate }}
           </div>
-        </UCard>
-
-        <UCard v-if="credential.acceptedAt">
-          <div class="text-sm">
-            <div class="font-medium text-gray-700 mb-1">Accepted</div>
-            <div class="text-gray-900">
-              {{ formatDate(credential.acceptedAt) }}
-            </div>
-          </div>
-        </UCard>
-
-        <UCard v-if="credential.expiresAt">
-          <div class="text-sm">
-            <div class="font-medium text-gray-700 mb-1">Expires</div>
-            <div :class="isExpired ? 'text-red-600' : 'text-gray-900'">
-              {{ formatDate(credential.expiresAt) }}
-            </div>
-          </div>
-        </UCard>
-      </div>
-
-      <!-- Raw VC Document -->
-      <UCard>
-        <template #header>
-          <h3 class="font-semibold">W3C VC Document (Raw)</h3>
-        </template>
-        <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{{
-          JSON.stringify(credential.vcDocument, null, 2)
-        }}</pre>
+        </div>
       </UCard>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-const route = useRoute();
-const credentialId = route.params.id as string;
+import type { Credential, Schema } from '~/lib/types/schema';
 
-// Fetch credential
+const RIPPLE_EPOCH = 946684800;
+
+const route = useRoute();
+const credentialId = decodeURIComponent(route.params.id as string);
+
 const {
   data: credentialData,
   pending,
   error,
 } = await useFetch(`/api/credential`, {
-  query: {
-    id: credentialId,
-  },
+  query: { id: credentialId },
 });
 
-const credential = computed(() => credentialData.value?.data?.credential);
-const schema = computed(() => credentialData.value?.data?.schema);
+const credential = computed(() => credentialData.value?.data?.credential as Credential | undefined);
+const schema = computed(() => credentialData.value?.data?.schema as Schema | null | undefined);
 
 const isExpired = computed(() => {
-  if (!credential.value?.expiresAt) return false;
-  return new Date(credential.value.expiresAt) < new Date();
+  if (!credential.value?.expiration) return false;
+  return (credential.value.expiration + RIPPLE_EPOCH) * 1000 < Date.now();
 });
 
-const getStatusColor = () => {
-  if (!credential.value) return 'gray';
-  if (credential.value.revoked) return 'red';
-  if (credential.value.accepted) return 'green';
-  return 'yellow';
-};
-
-const getStatusText = () => {
-  if (!credential.value) return 'Unknown';
-  if (credential.value.revoked) return 'Revoked';
-  if (credential.value.accepted) return 'Accepted';
-  return 'Pending';
-};
-
-const formatDate = (date: Date | string) => {
-  const d = new Date(date);
+const expirationDate = computed(() => {
+  if (!credential.value?.expiration) return '';
+  const d = new Date((credential.value.expiration + RIPPLE_EPOCH) * 1000);
   return new Intl.DateTimeFormat('en', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
   }).format(d);
-};
+});
 
-const formatValue = (value: any) => {
-  if (typeof value === 'object') {
-    return JSON.stringify(value, null, 2);
-  }
-  return String(value);
-};
+const statusColor = computed(() => {
+  if (!credential.value) return 'neutral';
+  if (credential.value.status === 'revoked') return 'error';
+  if (credential.value.status === 'accepted') return 'success';
+  return 'warning';
+});
+
+const statusText = computed(() => {
+  if (!credential.value) return 'Unknown';
+  if (credential.value.status === 'revoked') return 'Revoked';
+  if (credential.value.status === 'accepted') return 'Accepted';
+  return 'Pending';
+});
 
 useHead({
   title: computed(() => `Credential ${credentialId.slice(0, 8)} - XCS`),

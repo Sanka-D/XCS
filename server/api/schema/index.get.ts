@@ -1,68 +1,29 @@
 import { db } from '../../db';
-import { schemas } from '../../db/schema';
-import { eq, or } from 'drizzle-orm';
 import { z } from 'zod';
 
-const getSchemaQuerySchema = z.object({
-  id: z.string().uuid(),
-  includeVersions: z
-    .string()
-    .optional()
-    .transform((val) => val === 'true'),
+const querySchema = z.object({
+  uid: z.string().min(1),
 });
 
 export default defineEventHandler(async (event) => {
   try {
     const query = getQuery(event);
-    console.log(query);
-    const validated = getSchemaQuerySchema.parse(query);
+    const validated = querySchema.parse(query);
 
-    // Get main schema
-    const [schema] = await db
-      .select()
-      .from(schemas)
-      .where(eq(schemas.id, validated.id))
-      .limit(1);
+    const [schema] = await db`
+      SELECT * FROM schemas WHERE uid = ${validated.uid} LIMIT 1
+    `;
 
     if (!schema) {
-      throw createError({
-        statusCode: 404,
-        message: 'Schema not found',
-      });
-    }
-
-    let versions: (typeof schema)[] | undefined;
-
-    // If requesting versions, get all related versions
-    if (validated.includeVersions) {
-      // Find root schema (parent of all versions)
-      const rootSchemaId = schema.parentSchemaId || schema.id;
-
-      // Get all schemas with same root (including root itself)
-      versions = await db
-        .select()
-        .from(schemas)
-        .where(
-          or(
-            eq(schemas.id, rootSchemaId),
-            eq(schemas.parentSchemaId, rootSchemaId)
-          )
-        )
-        .orderBy(schemas.createdAt);
+      throw createError({ statusCode: 404, message: 'Schema not found' });
     }
 
     return {
       success: true,
-      data: {
-        schema,
-        versions,
-      },
+      data: { schema },
     };
-  } catch (error) {
-    if (error.statusCode) {
-      throw error;
-    }
-
+  } catch (error: any) {
+    if (error.statusCode) throw error;
     console.error('Error fetching schema:', error);
     throw createError({
       statusCode: 500,

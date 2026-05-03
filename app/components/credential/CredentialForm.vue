@@ -2,9 +2,9 @@
   <form @submit.prevent="handleSubmit" class="space-y-6">
     <!-- Schema Info -->
     <div class="p-4 bg-blue-50 rounded-lg">
-      <h3 class="font-semibold mb-2">{{ schema.name }}</h3>
-      <p class="text-sm text-gray-600">{{ schema.description }}</p>
-      <span class="text-xs text-gray-500">Version: {{ schema.version }}</span>
+      <h3 class="font-semibold mb-2">{{ schema.schema_json.name }}</h3>
+      <p class="text-sm text-gray-600">{{ schema.schema_json.description }}</p>
+      <span class="text-xs text-gray-500">Version: {{ schema.schema_json.version }}</span>
     </div>
 
     <!-- Subject Address -->
@@ -28,7 +28,7 @@
       <h3 class="text-lg font-semibold">Credential Data</h3>
 
       <div
-        v-for="field in schema.fields.fields"
+        v-for="field in schema.schema_json.fields"
         :key="field.name"
         class="space-y-2"
       >
@@ -174,7 +174,7 @@ const data = ref<Record<string, any>>({});
 
 // Initialize data object with schema fields
 onMounted(() => {
-  props.schema.fields.fields.forEach((field) => {
+  props.schema.schema_json.fields.forEach((field) => {
     if (field.type === 'boolean') {
       data.value[field.name] = false;
     } else if (field.type === 'number') {
@@ -191,7 +191,7 @@ onMounted(() => {
 
 const handleSubmit = () => {
   // Validate required fields
-  const missingFields = props.schema.fields.fields
+  const missingFields = props.schema.schema_json.fields
     .filter((f) => f.required && !data.value[f.name])
     .map((f) => f.name);
 

@@ -6,12 +6,12 @@
     </p>
 
     <div class="space-y-12">
-      <!-- Introduction -->
+      <!-- Architecture Note -->
       <section>
-        <h2 class="text-2xl font-bold mb-4">Introduction</h2>
+        <h2 class="text-2xl font-bold mb-4">Architecture</h2>
         <p class="text-gray-700 mb-4">
-          The XCS API provides RESTful endpoints for managing schemas and
-          credentials on the XRP Ledger. All endpoints accept and return JSON.
+          XCS uses a substreams-based indexer. Write operations submit XRPL transactions;
+          the substreams pipeline indexes them into PostgreSQL. Read operations query that DB directly.
         </p>
         <UCard>
           <pre class="text-sm">Base URL: {{ config.public.baseUrl }}</pre>
@@ -26,9 +26,13 @@
           <!-- Create Schema -->
           <UCard>
             <h3 class="text-lg font-semibold mb-3">Create Schema</h3>
+            <p class="text-sm text-gray-600 mb-3">
+              Submits a Payment tx to XRPL with an <code>xcs:schema_register</code> memo.
+              The schema is indexed by the substreams pipeline after the tx is confirmed.
+            </p>
             <div class="space-y-3">
               <div>
-                <UBadge color="green">POST</UBadge>
+                <UBadge color="success">POST</UBadge>
                 <code class="ml-2 text-sm">/api/schema/create</code>
               </div>
               <div>
@@ -36,16 +40,27 @@
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
   "name": "string",
   "description": "string (optional)",
-  "version": "string (semver)",
+  "version": "string (semver, e.g. 1.0.0)",
   "fields": [
     {
       "name": "string",
-      "type": "string|number|boolean|date|address|object|array",
+      "type": "string | number | boolean | date | address | object | array",
       "required": boolean,
       "description": "string (optional)"
     }
-  ],
-  "isPublic": boolean
+  ]
+}</pre>
+              </div>
+              <div>
+                <h4 class="font-medium mb-2">Response:</h4>
+                <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
+  "success": true,
+  "data": {
+    "uid": "string (SHA-256 hex — deterministic schema identifier)",
+    "txHash": "string (XRPL transaction hash)",
+    "ledgerIndex": number,
+    "status": "pending"
+  }
 }</pre>
               </div>
             </div>
@@ -56,16 +71,26 @@
             <h3 class="text-lg font-semibold mb-3">List Schemas</h3>
             <div class="space-y-3">
               <div>
-                <UBadge color="blue">POST</UBadge>
+                <UBadge color="info">POST</UBadge>
                 <code class="ml-2 text-sm">/api/schema/list</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "search": "string (optional)",
-  "isPublic": boolean (optional),
+  "issuer": "string (XRPL address, optional)",
+  "search": "string (full-text search on schema JSON, optional)",
   "limit": number (default: 50),
   "offset": number (default: 0)
+}</pre>
+              </div>
+              <div>
+                <h4 class="font-medium mb-2">Response:</h4>
+                <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
+  "success": true,
+  "data": {
+    "schemas": [Schema],
+    "total": number
+  }
 }</pre>
               </div>
             </div>
@@ -76,8 +101,24 @@
             <h3 class="text-lg font-semibold mb-3">Get Schema</h3>
             <div class="space-y-3">
               <div>
-                <UBadge color="gray">GET</UBadge>
-                <code class="ml-2 text-sm">/api/schema?id={schemaId}</code>
+                <UBadge color="neutral">GET</UBadge>
+                <code class="ml-2 text-sm">/api/schema?uid={schemaUid}</code>
+              </div>
+              <div>
+                <h4 class="font-medium mb-2">Response:</h4>
+                <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
+  "success": true,
+  "data": {
+    "schema": {
+      "uid": "string",
+      "issuer": "string (XRPL address)",
+      "schema_json": object,
+      "ledger_index": number,
+      "tx_index": number,
+      "tx_hash": "string"
+    }
+  }
+}</pre>
               </div>
             </div>
           </UCard>
@@ -92,22 +133,33 @@
           <!-- Issue Credential -->
           <UCard>
             <h3 class="text-lg font-semibold mb-3">Issue Credential</h3>
+            <p class="text-sm text-gray-600 mb-3">
+              Submits a <code>CredentialCreate</code> tx on XRPL with an
+              <code>xcs:credential_create</code> memo. The schema must already be indexed.
+            </p>
             <div class="space-y-3">
               <div>
-                <UBadge color="green">POST</UBadge>
+                <UBadge color="success">POST</UBadge>
                 <code class="ml-2 text-sm">/api/credential/issue</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "schemaId": "string (UUID)",
-  "subject": "string (XRPL address)",
-  "data": {
-    "field1": "value1",
-    "field2": "value2"
-  },
-  "isPublic": boolean,
+  "credentialType": "string (schema UID hex)",
+  "subject": "string (XRPL address of the credential recipient)",
+  "uri": "string (optional, arbitrary URI stored on-chain)",
   "expiresAt": "string (ISO date, optional)"
+}</pre>
+              </div>
+              <div>
+                <h4 class="font-medium mb-2">Response:</h4>
+                <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
+  "success": true,
+  "data": {
+    "txHash": "string",
+    "ledgerIndex": number,
+    "status": "pending"
+  }
 }</pre>
               </div>
             </div>
@@ -118,19 +170,40 @@
             <h3 class="text-lg font-semibold mb-3">List Credentials</h3>
             <div class="space-y-3">
               <div>
-                <UBadge color="blue">POST</UBadge>
+                <UBadge color="info">POST</UBadge>
                 <code class="ml-2 text-sm">/api/credential/list</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "subject": "string (optional)",
-  "accepted": boolean (optional),
-  "revoked": boolean (optional),
-  "isPublic": boolean (optional),
+  "issuer": "string (XRPL address, optional)",
+  "subject": "string (XRPL address, optional)",
+  "credentialType": "string (schema UID hex, optional)",
+  "status": "created | accepted | revoked (optional)",
   "limit": number (default: 50),
   "offset": number (default: 0)
 }</pre>
+              </div>
+              <div>
+                <h4 class="font-medium mb-2">Response:</h4>
+                <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
+  "success": true,
+  "data": {
+    "credentials": [Credential],
+    "total": number
+  }
+}</pre>
+              </div>
+            </div>
+          </UCard>
+
+          <!-- Get Credential -->
+          <UCard>
+            <h3 class="text-lg font-semibold mb-3">Get Credential</h3>
+            <div class="space-y-3">
+              <div>
+                <UBadge color="neutral">GET</UBadge>
+                <code class="ml-2 text-sm">/api/credential?id={issuer}:{subject}:{credentialType}</code>
               </div>
             </div>
           </UCard>
@@ -138,16 +211,20 @@
           <!-- Accept Credential -->
           <UCard>
             <h3 class="text-lg font-semibold mb-3">Accept Credential</h3>
+            <p class="text-sm text-gray-600 mb-3">
+              Submits a <code>CredentialAccept</code> tx on XRPL signed by the subject's wallet.
+            </p>
             <div class="space-y-3">
               <div>
-                <UBadge color="green">POST</UBadge>
+                <UBadge color="success">POST</UBadge>
                 <code class="ml-2 text-sm">/api/credential/accept</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "credentialId": "string (UUID)",
-  "subjectSeed": "string (XRPL seed)"
+  "issuer": "string (XRPL address)",
+  "credentialType": "string (schema UID hex)",
+  "subjectSeed": "string (subject's XRPL wallet seed)"
 }</pre>
               </div>
             </div>
@@ -156,15 +233,19 @@
           <!-- Revoke Credential -->
           <UCard>
             <h3 class="text-lg font-semibold mb-3">Revoke Credential</h3>
+            <p class="text-sm text-gray-600 mb-3">
+              Submits a <code>CredentialDelete</code> tx signed by the issuer wallet.
+            </p>
             <div class="space-y-3">
               <div>
-                <UBadge color="red">POST</UBadge>
+                <UBadge color="error">POST</UBadge>
                 <code class="ml-2 text-sm">/api/credential/revoke</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "credentialId": "string (UUID)"
+  "subject": "string (XRPL address)",
+  "credentialType": "string (schema UID hex)"
 }</pre>
               </div>
             </div>
@@ -172,18 +253,17 @@
         </div>
       </section>
 
-      <!-- Health Endpoint -->
+      <!-- Health -->
       <section>
         <h2 class="text-2xl font-bold mb-4">Health Check</h2>
         <UCard>
-          <h3 class="text-lg font-semibold mb-3">Health Check</h3>
           <div class="space-y-3">
             <div>
-              <UBadge color="gray">GET</UBadge>
+              <UBadge color="neutral">GET</UBadge>
               <code class="ml-2 text-sm">/api/health</code>
             </div>
             <p class="text-sm text-gray-600">
-              Returns the health status of the API and connected services (database, XRPL, IPFS).
+              Returns health status of the API, PostgreSQL sink DB, and XRPL connection.
             </p>
           </div>
         </UCard>
@@ -197,11 +277,6 @@ const config = useRuntimeConfig();
 
 useHead({
   title: 'API Documentation - XCS',
-  meta: [
-    {
-      name: 'description',
-      content: 'Complete API reference for the XRPL Credential System',
-    },
-  ],
+  meta: [{ name: 'description', content: 'Complete API reference for the XRPL Credential System' }],
 });
 </script>

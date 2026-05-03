@@ -1,65 +1,48 @@
 import { db } from '../../db';
-import { credentials } from '../../db/schema';
 import { listCredentialsSchema } from '../../utils/validation';
-import { eq, and, sql } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     const validated = listCredentialsSchema.parse(body);
 
-    // Build query conditions
-    const conditions = [];
+    const issuer = validated.issuer ?? null;
+    const subject = validated.subject ?? null;
+    const credentialType = validated.credentialType ?? null;
+    const status = validated.status ?? null;
 
-    if (validated.issuer) {
-      conditions.push(eq(credentials.issuer, validated.issuer));
-    }
+    const countRows = await db`
+      SELECT count(*) as count
+      FROM credentials
+      WHERE (${issuer}::text IS NULL OR issuer = ${issuer})
+        AND (${subject}::text IS NULL OR subject = ${subject})
+        AND (${credentialType}::text IS NULL OR credential_type = ${credentialType})
+        AND (${status}::text IS NULL OR status = ${status})
+    `;
+    const total = Number(countRows[0]?.count ?? 0);
 
-    if (validated.subject) {
-      conditions.push(eq(credentials.subject, validated.subject));
-    }
-
-    if (validated.schemaId) {
-      conditions.push(eq(credentials.schemaId, validated.schemaId));
-    }
-
-    if (validated.accepted !== undefined) {
-      conditions.push(eq(credentials.accepted, validated.accepted));
-    }
-
-    if (validated.revoked !== undefined) {
-      conditions.push(eq(credentials.revoked, validated.revoked));
-    }
-
-    if (validated.isPublic !== undefined) {
-      conditions.push(eq(credentials.isPublic, validated.isPublic));
-    }
-
-    // Get total count
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(credentials)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    // Get paginated results
-    const results = await db
-      .select()
-      .from(credentials)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(credentials.createdAt)
-      .limit(validated.limit)
-      .offset(validated.offset);
+    const results = await db`
+      SELECT *
+      FROM credentials
+      WHERE (${issuer}::text IS NULL OR issuer = ${issuer})
+        AND (${subject}::text IS NULL OR subject = ${subject})
+        AND (${credentialType}::text IS NULL OR credential_type = ${credentialType})
+        AND (${status}::text IS NULL OR status = ${status})
+      ORDER BY created_ledger DESC NULLS LAST
+      LIMIT ${validated.limit}
+      OFFSET ${validated.offset}
+    `;
 
     return {
       success: true,
       data: {
         credentials: results,
-        total: Number(count),
+        total,
         limit: validated.limit,
         offset: validated.offset,
       },
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error listing credentials:', error);
     throw createError({
       statusCode: 500,

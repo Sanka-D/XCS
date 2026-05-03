@@ -7,7 +7,7 @@
     <div v-if="versions && versions.length > 0" class="space-y-4">
       <div
         v-for="(version, index) in sortedVersions"
-        :key="version.id"
+        :key="version.uid"
         class="relative"
       >
         <!-- Timeline connector -->
@@ -22,13 +22,13 @@
             <div
               class="w-8 h-8 rounded-full flex items-center justify-center"
               :class="
-                version.id === currentVersionId
+                version.uid === currentUid
                   ? 'bg-primary text-white'
                   : 'bg-gray-200 text-gray-600'
               "
             >
               <span class="text-xs font-semibold">
-                v{{ getMajorVersion(version.version) }}
+                v{{ getMajorVersion(version.schema_json.version) }}
               </span>
             </div>
           </div>
@@ -38,28 +38,20 @@
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-2">
                 <span class="font-semibold text-gray-900">
-                  v{{ version.version }}
+                  v{{ version.schema_json.version }}
                 </span>
                 <UBadge
-                  v-if="version.id === currentVersionId"
+                  v-if="version.uid === currentUid"
                   color="primary"
                   variant="subtle"
                   size="xs"
                 >
                   Current
                 </UBadge>
-                <UBadge
-                  v-if="!version.parentSchemaId"
-                  color="blue"
-                  variant="subtle"
-                  size="xs"
-                >
-                  Initial
-                </UBadge>
               </div>
               <UButton
-                :to="`/schemas/${version.id}`"
-                color="gray"
+                :to="`/schemas/${version.uid}`"
+                color="neutral"
                 variant="ghost"
                 size="xs"
               >
@@ -67,23 +59,16 @@
               </UButton>
             </div>
 
-            <p v-if="version.description" class="text-sm text-gray-600 mb-2">
-              {{ version.description }}
+            <p
+              v-if="version.schema_json.description"
+              class="text-sm text-gray-600 mb-2"
+            >
+              {{ version.schema_json.description }}
             </p>
 
             <div class="flex items-center gap-4 text-xs text-gray-500">
-              <span>{{ version.fields.fields.length }} fields</span>
-              <span>{{ formatDate(version.createdAt) }}</span>
-              <span v-if="version.isPublic && version.ipfsCid">
-                <a
-                  :href="`${ipfsGateway}/ipfs/${version.ipfsCid}`"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary hover:underline"
-                >
-                  IPFS →
-                </a>
-              </span>
+              <span>{{ version.schema_json.fields.length }} fields</span>
+              <span>Ledger {{ version.ledger_index }}</span>
             </div>
           </div>
         </div>
@@ -101,30 +86,15 @@ import type { Schema } from '~/lib/types/schema';
 
 const props = defineProps<{
   versions: Schema[];
-  currentVersionId: string;
+  currentUid: string;
 }>();
 
-const config = useRuntimeConfig();
-const ipfsGateway = config.public.ipfsGateway;
-
-// Sort versions by creation date (newest first)
+// Sort by ledger index ascending (oldest first)
 const sortedVersions = computed(() => {
-  return [...props.versions].sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  return [...props.versions].sort((a, b) => a.ledger_index - b.ledger_index);
 });
 
 const getMajorVersion = (version: string) => {
   return version.split('.')[0];
-};
-
-const formatDate = (date: Date | string) => {
-  const d = new Date(date);
-  return new Intl.DateTimeFormat('en', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
 };
 </script>

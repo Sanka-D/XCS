@@ -1,20 +1,18 @@
 import { db } from '../db';
-import { sql } from 'drizzle-orm';
 
-export default defineEventHandler(async (event) => {
+export default defineEventHandler(async () => {
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),
     services: {
       database: 'unknown',
       xrpl: 'unknown',
-      ipfs: 'unknown',
     },
   };
 
   // Check database connection
   try {
-    await db.execute(sql`SELECT 1`);
+    await db`SELECT 1`;
     health.services.database = 'ok';
   } catch (error) {
     health.status = 'degraded';
@@ -34,9 +32,6 @@ export default defineEventHandler(async (event) => {
     health.services.xrpl = 'error';
     console.error('XRPL health check failed:', error);
   }
-
-  // IPFS doesn't need real-time connection check (checked on use)
-  health.services.ipfs = 'ok';
 
   return health;
 });

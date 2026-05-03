@@ -10,30 +10,22 @@
         </p>
         <p>
           <span class="font-medium">Type:</span>
-          <span class="ml-2">{{ credential.credentialType }}</span>
+          <code class="ml-2 text-xs truncate">{{ credential.credential_type }}</code>
         </p>
-        <p>
-          <span class="font-medium">Issued:</span>
-          <span class="ml-2">{{
-            new Date(credential.createdAt).toLocaleDateString()
-          }}</span>
+        <p v-if="credential.created_ledger">
+          <span class="font-medium">Ledger:</span>
+          <span class="ml-2">{{ credential.created_ledger }}</span>
         </p>
-        <p v-if="credential.expiresAt">
+        <p v-if="expirationDate">
           <span class="font-medium">Expires:</span>
-          <span class="ml-2">{{
-            new Date(credential.expiresAt).toLocaleDateString()
-          }}</span>
+          <span class="ml-2">{{ expirationDate }}</span>
         </p>
-      </div>
-    </div>
-
-    <!-- W3C VC Data Preview -->
-    <div class="mb-6">
-      <h4 class="font-semibold mb-2">Credential Data</h4>
-      <div class="p-4 bg-gray-50 rounded-lg overflow-auto max-h-64">
-        <pre class="text-xs">{{
-          JSON.stringify(credential.vcDocument, null, 2)
-        }}</pre>
+        <p v-if="credential.uri">
+          <span class="font-medium">URI:</span>
+          <a :href="credential.uri" target="_blank" class="ml-2 text-blue-600 hover:underline truncate">
+            {{ credential.uri }}
+          </a>
+        </p>
       </div>
     </div>
 
@@ -89,7 +81,9 @@
 </template>
 
 <script setup lang="ts">
-import type { Credential } from '~/lib/types/credential';
+import type { Credential } from '~/lib/types/schema';
+
+const RIPPLE_EPOCH = 946684800;
 
 const props = defineProps<{
   credential: Credential;
@@ -102,6 +96,16 @@ const emit = defineEmits<{
 const subjectSeed = ref('');
 const showSeedInput = ref(false);
 const isAccepting = ref(false);
+
+const expirationDate = computed(() => {
+  if (!props.credential.expiration) return '';
+  const d = new Date((props.credential.expiration + RIPPLE_EPOCH) * 1000);
+  return new Intl.DateTimeFormat('en', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(d);
+});
 
 const handleAccept = async () => {
   if (!subjectSeed.value) {

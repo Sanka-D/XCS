@@ -1,6 +1,16 @@
 import { z } from 'zod';
 
-export const schemaFieldSchema = z.object({
+export const schemaFieldSchema: z.ZodType<{
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'date' | 'address' | 'object' | 'array';
+  required: boolean;
+  description?: string;
+  pattern?: string;
+  min?: number;
+  max?: number;
+  properties?: any[];
+  items?: any;
+}> = z.object({
   name: z.string().min(1).max(100),
   type: z.enum([
     'string',
@@ -20,6 +30,7 @@ export const schemaFieldSchema = z.object({
   items: z.lazy(() => schemaFieldSchema).optional(),
 });
 
+// Schema registration — builds a Payment tx with xcs:schema_register memo
 export const createSchemaSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().optional(),
@@ -28,26 +39,32 @@ export const createSchemaSchema = z.object({
     .regex(/^\d+\.\d+\.\d+$/)
     .default('1.0.0'),
   fields: z.array(schemaFieldSchema).min(1),
-  isPublic: z.boolean(),
-  parentSchemaId: z.string().uuid().optional(),
 });
 
+// Credential issuance — builds a CredentialCreate tx with xcs:credential_create memo
+// credentialType = schema UID (hex string from the schemas table)
 export const issueCredentialSchema = z.object({
-  schemaId: z.string().uuid(),
+  credentialType: z.string().min(1),
   subject: z.string().regex(/^r[1-9A-HJ-NP-Za-km-z]{25,34}$/),
-  data: z.record(z.string(), z.any()),
-  isPublic: z.boolean(),
+  uri: z.string().optional(),
   expiresAt: z.string().optional(),
 });
 
+// Credential acceptance — builds a CredentialAccept tx
 export const acceptCredentialSchema = z.object({
-  credentialId: z.string().uuid(),
+  issuer: z.string().min(1),
+  credentialType: z.string().min(1),
   subjectSeed: z.string().min(29),
 });
 
+// Credential revocation — builds a CredentialDelete tx (issuer = env seed)
+export const revokeCredentialSchema = z.object({
+  subject: z.string().min(1),
+  credentialType: z.string().min(1),
+});
+
 export const listSchemasSchema = z.object({
-  creator: z.string().optional(),
-  isPublic: z.boolean().optional(),
+  issuer: z.string().optional(),
   search: z.string().optional(),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
@@ -56,10 +73,8 @@ export const listSchemasSchema = z.object({
 export const listCredentialsSchema = z.object({
   issuer: z.string().optional(),
   subject: z.string().optional(),
-  schemaId: z.string().uuid().optional(),
-  accepted: z.boolean().optional(),
-  revoked: z.boolean().optional(),
-  isPublic: z.boolean().optional(),
+  credentialType: z.string().optional(),
+  status: z.enum(['created', 'accepted', 'revoked']).optional(),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
 });

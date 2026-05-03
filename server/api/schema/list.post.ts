@@ -1,58 +1,42 @@
 import { db } from '../../db';
-import { schemas } from '../../db/schema';
 import { listSchemasSchema } from '../../utils/validation';
-import { eq, and, ilike, or, sql } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     const validated = listSchemasSchema.parse(body);
 
-    // Build query conditions
-    const conditions = [];
+    const issuer = validated.issuer ?? null;
+    const search = validated.search ? `%${validated.search}%` : null;
 
-    if (validated.creator) {
-      conditions.push(eq(schemas.creator, validated.creator));
-    }
+    const countRows = await db`
+      SELECT count(*) as count
+      FROM schemas
+      WHERE (${issuer}::text IS NULL OR issuer = ${issuer})
+        AND (${search}::text IS NULL OR schema_json::text ILIKE ${search})
+    `;
+    const total = Number(countRows[0]?.count ?? 0);
 
-    if (validated.isPublic !== undefined) {
-      conditions.push(eq(schemas.isPublic, validated.isPublic));
-    }
-
-    if (validated.search) {
-      conditions.push(
-        or(
-          ilike(schemas.name, `%${validated.search}%`),
-          ilike(schemas.description, `%${validated.search}%`)
-        )
-      );
-    }
-
-    // Get total count
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(schemas)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    // Get paginated results
-    const results = await db
-      .select()
-      .from(schemas)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(schemas.createdAt)
-      .limit(validated.limit)
-      .offset(validated.offset);
+    const results = await db`
+      SELECT *
+      FROM schemas
+      WHERE (${issuer}::text IS NULL OR issuer = ${issuer})
+        AND (${search}::text IS NULL OR schema_json::text ILIKE ${search})
+      ORDER BY ledger_index DESC
+      LIMIT ${validated.limit}
+      OFFSET ${validated.offset}
+    `;
 
     return {
       success: true,
       data: {
         schemas: results,
-        total: Number(count),
+        total,
         limit: validated.limit,
         offset: validated.offset,
       },
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error listing schemas:', error);
     throw createError({
       statusCode: 500,

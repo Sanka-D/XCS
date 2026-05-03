@@ -13,13 +13,10 @@ export default defineNuxtConfig({
     xrplServer:
       process.env.XRPL_SERVER || 'wss://s.altnet.rippletest.net:51233',
     issuerSeed: process.env.ISSUER_SEED || '',
+    // Destination for schema registration Payment txs (must differ from issuer to avoid temREDUNDANT)
+    xrplRegistryAddress: process.env.XRPL_REGISTRY_ADDRESS || 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
 
-    // IPFS config
-    ipfsProvider: process.env.IPFS_PROVIDER || 'pinata',
-    ipfsHost: process.env.IPFS_HOST || '',
-    pinataJwt: process.env.PINATA_JWT || '',
-
-    // Database
+    // Database (read-only via substreams-sink-sql)
     databaseUrl:
       process.env.DATABASE_URL ||
       'postgresql://localhost:5432/xrpl_credentials',
@@ -33,9 +30,4 @@ export default defineNuxtConfig({
     },
   },
 
-  nitro: {
-    experimental: {
-      database: true,
-    },
-  },
 });

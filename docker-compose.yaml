@@ -1,12 +1,113 @@
 version: '3.8'
+
+# Full XCS stack for local testnet development.
+#
+# Services:
+#   postgres        — PostgreSQL (read model, written by sink)
+#   firehose        — firehose-xrpl reader + block merger (polls XRPL RPC)
+#   substreams      — firecore tier1 + tier2 (serves substreams gRPC on :9001)
+#   sink            — substreams-sink-sql (indexes XCS ops into postgres)
+#   app             — Nuxt webapp
+#
+# Required env vars in .env (see .env.example):
+#   ISSUER_SEED               — funded testnet wallet seed
+#   FIREHOSE_START_BLOCK      — ledger index to start indexing from (default: 0)
+#   XRPL_RPC_ENDPOINT         — XRPL JSON-RPC HTTP endpoint (default: testnet)
+#   XRPL_SERVER               — XRPL WebSocket endpoint (default: testnet)
+#   XRPL_REGISTRY_ADDRESS     — address that receives schema-register Payments
+#
+# Usage:
+#   docker compose up --build
+
 services:
-  db:
-    image: postgres:15.3
+  postgres:
+    image: postgres:16
+    container_name: xcs_postgres
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=12345678
-      - POSTGRES_DB=xcs
-    restart: always
-    container_name: db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: '12345678'
+      POSTGRES_DB: xcs
     ports:
       - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U user -d xcs']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  firehose:
+    build:
+      context: ../firehose-xrpl
+      dockerfile: Dockerfile
+    container_name: xcs_firehose
+    entrypoint: ['/bin/sh', '/entrypoint.sh']
+    command: ''
+    environment:
+      FIREHOSE_START_BLOCK: '${FIREHOSE_START_BLOCK:-0}'
+      XRPL_RPC_ENDPOINT: '${XRPL_RPC_ENDPOINT:-https://s.altnet.rippletest.net:51234/}'
+    volumes:
+      - firehose-data:/data
+      - ./substreams/firehose-reader-entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - '8080:8080'
+    restart: unless-stopped
+
+  substreams:
+    build:
+      context: ../firehose-xrpl
+      dockerfile: Dockerfile
+    container_name: xcs_substreams
+    depends_on:
+      - firehose
+    entrypoint: ['/bin/sh', '/entrypoint.sh']
+    command: ''
+    environment:
+      FIREHOSE_START_BLOCK: '${FIREHOSE_START_BLOCK:-0}'
+    volumes:
+      - firehose-data:/data
+      - ./substreams/firehose-substreams-entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - '9001:9001'
+    restart: unless-stopped
+
+  sink-setup:
+    image: ghcr.io/streamingfast/substreams-sink-sql:v4.6.0
+    container_name: xcs_sink_setup
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./substreams/xcs-v0.1.0.spkg:/spkg/xcs.spkg:ro
+    command: >
+      setup
+      postgres://user:12345678@postgres:5432/xcs?sslmode=disable
+      /spkg/xcs.spkg
+    restart: 'no'
+
+  sink:
+    image: ghcr.io/streamingfast/substreams-sink-sql:v4.6.0
+    container_name: xcs_sink
+    depends_on:
+      postgres:
+        condition: service_healthy
+      substreams:
+        condition: service_started
+      sink-setup:
+        condition: service_completed_successfully
+    volumes:
+      - ./substreams/xcs-v0.1.0.spkg:/spkg/xcs.spkg:ro
+    command: >
+      run
+      -e http://substreams:9001
+      --on-module-hash-mismatch=warn
+      postgres://user:12345678@postgres:5432/xcs?sslmode=disable
+      /spkg/xcs.spkg
+    restart: unless-stopped
+
+
+volumes:
+  postgres-data:
+  firehose-data:

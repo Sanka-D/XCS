@@ -19,10 +19,10 @@
             <UButton to="/schemas/create" color="primary" size="xl">
               Create Schema
             </UButton>
-            <UButton to="/credentials/issue" color="white" size="xl">
+            <UButton to="/credentials/issue" color="neutral" size="xl">
               Issue Credential
             </UButton>
-            <UButton to="/docs" color="gray" variant="ghost" size="xl">
+            <UButton to="/docs" color="neutral" variant="ghost" size="xl">
               Documentation
             </UButton>
           </div>
@@ -167,8 +167,8 @@
           Create your first schema or issue a credential in minutes
         </p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-          <UButton to="/schemas" color="white" size="xl"> Browse Schemas </UButton>
-          <UButton to="/credentials" color="white" variant="outline" size="xl">
+          <UButton to="/schemas" color="neutral" size="xl"> Browse Schemas </UButton>
+          <UButton to="/credentials" color="neutral" variant="outline" size="xl">
             View Credentials
           </UButton>
         </div>
