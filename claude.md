@@ -17,6 +17,21 @@ A decentralized credential platform built on XRPL that allows anyone to create s
 
 ## Current Project Status
 
+### ✅ Spec-Discrepancy Remediation (2026-05-03)
+
+Phases 0–9 implemented across 16 commits on `feat/spec-fixes`:
+
+- ✅ **Phase 0**: Vitest test infrastructure (6 test files, 31 passing)
+- ✅ **Phase 1**: W3C VC wrapper (canonical-json + signed/verified roundtrip)
+- ✅ **Phase 2**: Pinata IPFS utility (`pinJSON`, `fetchJSON`, `unpin`, `gatewayUrl`)
+- ✅ **Phase 3**: Public schema publishing (isPublic toggle + IPFS pin + on-chain CID memo)
+- ✅ **Phase 4**: W3C VC hardening & public credential publishing (signed VC + IPFS + URI)
+- ✅ **Phase 5**: Credential verification endpoint (`/api/credential/verify` + `/verify` page)
+- ✅ **Phase 6**: Wallet-signed CredentialAccept (new `/api/credential/accept-signed` endpoint)
+- ✅ **Phase 7**: `useIndexerWait` composable (UX polling for sink latency)
+- ✅ **Phase 8**: Schema versioning (`parent_uid` + history chain + cycle defense)
+- ✅ **Phase 9**: Server-side expiration filter (`excludeExpired`) + `isExpired` decoration
+
 ### ✅ Completed
 
 #### Backend Infrastructure
@@ -70,101 +85,99 @@ A decentralized credential platform built on XRPL that allows anyone to create s
 - ✅ Environment variables template
 - ✅ Package.json with all dependencies
 
-### 🚧 Needs Completion
+### ✅ Backend Infrastructure (Phase Remediation)
 
-#### Priority 1: Backend Tasks
+#### Database Setup
+- ✅ Database tables managed by `substreams-sink-sql` (Phase 9)
+  - `schemas(uid PK, issuer, schema_json, ledger_index, tx_index, tx_hash)`
+  - `credentials(id PK, issuer, subject, credential_type, uri, expiration, created_ledger, status, tx_hash)`
+  - Schema defined in `substreams/schema.sql`
+  - Sink configuration: `substreams-sink-sql setup/run`
 
-1. **Database Setup**
-   - [ ] Generate initial Drizzle migration from schema
-   - [ ] Run migration to create tables
-   - [ ] Add seed data script (optional, for testing)
+#### Server Utilities
+- ✅ W3C VC utilities (`server/utils/w3c-vc.ts`)
+  - Canonical JSON generation (Phase 1)
+  - W3C VC wrapper with signature verification (Phase 1)
+  - Proof generation with ED25519 signatures (Phase 1)
+  - 6 unit tests covering signed/verified roundtrips
+- ✅ IPFS client (`server/utils/ipfs.ts`)
+  - Pinata integration with JWT auth (Phase 2)
+  - `pinJSON()`, `fetchJSON()`, `unpin()`, `gatewayUrl()` (Phase 2)
+  - Configurable IPFS_GATEWAY in runtime config (Phase 4)
+  - Timeout handling + error recovery (Phase 4)
+- ✅ Error handling
+  - Inline `createError()` usage (Nuxt native, no separate errors.ts)
+  - Validation errors via Zod integration
 
-2. **Missing Server Utilities**
-   - [ ] Error handling utilities (`server/utils/errors.ts`)
-     - Custom error classes
-     - Error response formatting
-   - [ ] Complete W3C VC utilities (`server/utils/w3c-vc.ts`)
-     - Ensure `validateDataAgainstSchema` function exists
-     - Ensure `generateW3CVC` function exists
-     - Add proof generation (signature support)
+#### API Endpoints
+- ✅ Schema Management
+  - `POST /api/schema/create` — Public/private toggle + IPFS publish (Phase 3)
+  - `POST /api/schema/list` — Full list/search with filters
+  - `GET /api/schema` — Schema by ID
+  - `POST /api/schema/update-version` — Versioning with parent_uid (Phase 8)
+- ✅ Credential Management
+  - `POST /api/credential/issue` — Signed W3C VC + IPFS publish (Phase 4)
+  - `POST /api/credential/list` — Full list/query with expiration filter (Phase 9)
+  - `GET /api/credential` — Credential by ID with expiration check (Phase 9)
+  - `POST /api/credential/revoke` — Revoke on-chain
+  - `POST /api/credential/accept` — Legacy seed-based (Phase 6)
+  - `POST /api/credential/accept-signed` — Wallet-signed (Phase 6)
+  - `POST /api/credential/verify` — Pure verification endpoint (Phase 5)
+- ✅ Health endpoint (`/api/health.get.ts`)
 
-3. **API Endpoint Fixes**
-   - [ ] Review and fix missing imports (e.g., `eq` from drizzle-orm in some files)
-   - [ ] Add health check endpoint (`/api/health.get.ts`)
-   - [ ] Add proper error middleware (`server/middleware/error-handler.ts`)
+### ✅ Frontend/UI (Phase Remediation)
 
-4. **Database Connection**
-   - [ ] Verify `server/db/index.ts` exports working db instance
-   - [ ] Test connection with PostgreSQL
+#### Pages
+- ✅ `app/pages/index.vue` — Landing page
+- ✅ `app/pages/schemas/index.vue` — Browse schemas
+- ✅ `app/pages/schemas/create.vue` — Create schema with isPublic toggle (Phase 3)
+- ✅ `app/pages/schemas/[id].vue` — Schema detail with version history (Phase 8)
+- ✅ `app/pages/credentials/index.vue` — Browse credentials
+- ✅ `app/pages/credentials/issue.vue` — Issue credential with isPublic toggle (Phase 4)
+- ✅ `app/pages/credentials/[id].vue` — Credential detail
+- ✅ `app/pages/credentials/accept.vue` — Accept credentials with wallet signature (Phase 6)
+- ✅ `app/pages/credentials/verify.vue` — Verify credentials page (Phase 5)
+- ✅ `app/pages/docs/index.vue` — Documentation
 
-#### Priority 2: Frontend/UI Tasks
+#### Components
+- ✅ Schema Components
+  - `SchemaForm.vue` — Full schema creation with dynamic fields
+  - `SchemaCard.vue` — Schema summary
+  - `SchemaList.vue` — List with search/filter
+  - `SchemaVersionHistory.vue` — Version chain + cycle defense (Phase 8)
+- ✅ Credential Components
+  - `CredentialForm.vue` — Credential issuance form
+  - `CredentialCard.vue` — Credential summary
+  - `CredentialList.vue` — List with filters
+  - `CredentialAcceptance.vue` — Subject acceptance view (with wallet signature)
 
-1. **Project Structure Fix**
-   - [ ] Move components from `app/components/pages/` to proper `app/pages/` structure
-   - [ ] Create proper page files:
-     - `app/pages/index.vue` - Landing page
-     - `app/pages/schemas/index.vue` - Browse schemas
-     - `app/pages/schemas/create.vue` - Create schema
-     - `app/pages/schemas/[id].vue` - Schema detail
-     - `app/pages/credentials/index.vue` - Browse credentials
-     - `app/pages/credentials/issue.vue` - Issue credential
-     - `app/pages/credentials/[id].vue` - Credential detail
-     - `app/pages/credentials/accept.vue` - Accept credentials
-     - `app/pages/docs/index.vue` - Documentation
-     - `app/pages/docs/w3c-guide.vue` - W3C VC guide
+#### Layouts & Infrastructure
+- ✅ `app/layouts/default.vue` — Header + footer
+- ✅ `app/app.vue` — NuxtLayout + NuxtPage
+- ✅ `useIndexerWait` composable — Polling for sink latency (Phase 7)
+- ✅ W3C VC Guide integrated into docs
 
-2. **Missing Components**
-   - [ ] Schema Components
-     - `SchemaCard.vue` - Display schema summary
-     - `SchemaList.vue` - List of schemas with search/filter
-     - `SchemaVersionHistory.vue` - Show version history
-   - [ ] Credential Components
-     - `CredentialCard.vue` - Display credential summary
-     - `CredentialList.vue` - List of credentials with filters
-   - [ ] Layout Components
-     - `AppHeader.vue` - Navigation header
-     - `AppFooter.vue` - Footer
-   - [ ] UI Components (if not using Nuxt UI for all)
-     - Verify Nuxt UI provides: Button, Input, Select, Card, Badge, Modal
-     - Create custom components only if needed
+### 🚧 Remaining Work
 
-3. **Layouts**
-   - [ ] Create `app/layouts/default.vue` with header/footer
-   - [ ] Update `app/app.vue` to use NuxtLayout and NuxtPage
+#### Polish & Testing
+1. **Manual Testing**
+   - [ ] Create schema (private and public) → verify IPFS + chain state
+   - [ ] Issue credential (private and public) → verify URI + sink latency
+   - [ ] Accept credential (wallet-signed) → verify on-chain state
+   - [ ] Verify credential → ensure W3C signature checks
+   - [ ] Revoke credential → verify on-chain deletion
+   - [ ] Schema versioning → test parent_uid chain + cycle defense
 
-4. **Page Integrations**
-   - [ ] Wire up components to API endpoints using `useFetch` or `$fetch`
-   - [ ] Add loading states and error handling
-   - [ ] Add success notifications
-   - [ ] Implement pagination for lists
+2. **UX Improvements**
+   - [ ] Loading spinners on all async operations
+   - [ ] Confirmation modals for destructive actions (revoke, delete)
+   - [ ] Form validation feedback (Zod errors → UI)
+   - [ ] Mobile responsiveness polish
 
-#### Priority 3: Bug Fixes & Polish
-
-1. **Code Quality**
-   - [ ] Review all TypeScript errors
-   - [ ] Add missing type imports
-   - [ ] Fix any linting issues
-
-2. **Error Handling**
-   - [ ] Add comprehensive error handling to all API endpoints
-   - [ ] Display user-friendly error messages in UI
-   - [ ] Add validation error display in forms
-
-3. **Testing**
-   - [ ] Manual testing of all flows:
-     - Create schema (private and public)
-     - Issue credential (private and public)
-     - Accept credential
-     - Revoke credential
-     - View schemas and credentials
-   - [ ] Test XRPL integration on testnet
-   - [ ] Test IPFS publishing and retrieval
-
-4. **UX Improvements**
-   - [ ] Add loading spinners
-   - [ ] Add confirmation modals for destructive actions
-   - [ ] Add form validation feedback
-   - [ ] Improve mobile responsiveness
+3. **Code Quality**
+   - [ ] Review remaining TypeScript errors (if any)
+   - [ ] Lint check (`npm run lint`)
+   - [ ] Type safety verification
 
 ### 📝 Future Enhancements (Not MVP)
 
