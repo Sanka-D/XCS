@@ -212,19 +212,18 @@
           <UCard>
             <h3 class="text-lg font-semibold mb-3">Accept Credential</h3>
             <p class="text-sm text-gray-600 mb-3">
-              Submits a <code>CredentialAccept</code> tx on XRPL signed by the subject's wallet.
+              Submits a <code>CredentialAccept</code> tx on XRPL. Subjects sign the transaction client-side using their wallet, then submit the signed blob.
+              The legacy <code>/api/credential/accept</code> endpoint (with <code>subjectSeed</code>) is deprecated and will be removed.
             </p>
             <div class="space-y-3">
               <div>
                 <UBadge color="success">POST</UBadge>
-                <code class="ml-2 text-sm">/api/credential/accept</code>
+                <code class="ml-2 text-sm">/api/credential/accept-signed</code>
               </div>
               <div>
                 <h4 class="font-medium mb-2">Request Body:</h4>
                 <pre class="text-xs bg-gray-50 p-4 rounded overflow-x-auto">{
-  "issuer": "string (XRPL address)",
-  "credentialType": "string (schema UID hex)",
-  "subjectSeed": "string (subject's XRPL wallet seed)"
+  "signedTxBlob": "string (subject-signed CredentialAccept tx, hex-encoded)"
 }</pre>
               </div>
             </div>

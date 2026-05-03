@@ -244,10 +244,11 @@ class XRPLClient {
         response.result.engine_result !== 'terQUEUED') {
       throw new Error(`XRPL submit failed: ${response.result.engine_result}`);
     }
-    return {
-      txHash: (response.result.tx_json as any).hash,
-      engineResult: response.result.engine_result,
-    };
+    const hash = response.result.tx_json.hash;
+    if (!hash) {
+      throw new Error('XRPL submit returned no tx hash');
+    }
+    return { txHash: hash, engineResult: response.result.engine_result };
   }
 
   private dateToRippleTime(date: Date): number {
