@@ -25,6 +25,7 @@ export interface SchemaDoc {
   version: string;
   fields: SchemaField[];
   ipfsCid?: string; // populated when isPublic = true
+  parentUid?: string; // optional parent schema for versioning
 }
 
 // Row from the substreams-sink-sql `schemas` table
@@ -35,6 +36,7 @@ export interface Schema {
   ledger_index: number;
   tx_index: number;
   tx_hash: string;
+  parent_uid?: string;
 }
 
 // Row from the substreams-sink-sql `credentials` table

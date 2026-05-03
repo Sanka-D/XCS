@@ -1,82 +1,68 @@
 <template>
-  <UCard>
+  <UCard v-if="ancestors.length || descendants.length">
     <template #header>
       <h3 class="text-lg font-semibold">Version History</h3>
     </template>
 
-    <div v-if="versions && versions.length > 0" class="space-y-4">
-      <div
-        v-for="(version, index) in sortedVersions"
-        :key="version.uid"
-        class="relative"
+    <div class="space-y-2">
+      <!-- Ancestor versions (oldest first) -->
+      <NuxtLink
+        v-for="ancestor in ancestors"
+        :key="ancestor.uid"
+        :to="`/schemas/${ancestor.uid}`"
+        class="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm"
       >
-        <!-- Timeline connector -->
-        <div
-          v-if="index < sortedVersions.length - 1"
-          class="absolute left-4 top-10 bottom-0 w-0.5 bg-gray-200"
-        ></div>
-
-        <div class="flex gap-4">
-          <!-- Version Badge -->
-          <div class="flex-shrink-0">
-            <div
-              class="w-8 h-8 rounded-full flex items-center justify-center"
-              :class="
-                version.uid === currentUid
-                  ? 'bg-primary text-white'
-                  : 'bg-gray-200 text-gray-600'
-              "
-            >
-              <span class="text-xs font-semibold">
-                v{{ getMajorVersion(version.schema_json.version) }}
-              </span>
-            </div>
+        <div class="flex items-center gap-3">
+          <div class="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+            <span class="text-xs font-semibold text-gray-600">
+              v{{ getMajorVersion(ancestor.schema_json.version) }}
+            </span>
           </div>
-
-          <!-- Version Details -->
-          <div class="flex-1 pb-4">
-            <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2">
-                <span class="font-semibold text-gray-900">
-                  v{{ version.schema_json.version }}
-                </span>
-                <UBadge
-                  v-if="version.uid === currentUid"
-                  color="primary"
-                  variant="subtle"
-                  size="xs"
-                >
-                  Current
-                </UBadge>
-              </div>
-              <UButton
-                :to="`/schemas/${version.uid}`"
-                color="neutral"
-                variant="ghost"
-                size="xs"
-              >
-                View
-              </UButton>
-            </div>
-
-            <p
-              v-if="version.schema_json.description"
-              class="text-sm text-gray-600 mb-2"
-            >
-              {{ version.schema_json.description }}
-            </p>
-
-            <div class="flex items-center gap-4 text-xs text-gray-500">
-              <span>{{ version.schema_json.fields.length }} fields</span>
-              <span>Ledger {{ version.ledger_index }}</span>
-            </div>
+          <div>
+            <span class="font-medium text-gray-700">v{{ ancestor.schema_json.version }}</span>
+            <span class="ml-2 font-mono text-xs text-gray-400">{{ ancestor.uid.slice(0, 16) }}…</span>
           </div>
         </div>
-      </div>
-    </div>
+        <span class="text-xs text-gray-400">Ledger {{ ancestor.ledger_index }}</span>
+      </NuxtLink>
 
-    <div v-else class="text-center py-8 text-gray-500">
-      <p>No version history available</p>
+      <!-- Current version (highlighted) -->
+      <div class="flex items-center justify-between p-3 border-2 border-primary rounded-lg bg-primary/5 text-sm">
+        <div class="flex items-center gap-3">
+          <div class="w-7 h-7 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+            <span class="text-xs font-semibold text-white">
+              v{{ getMajorVersion(current.schema_json.version) }}
+            </span>
+          </div>
+          <div>
+            <span class="font-medium text-primary">v{{ current.schema_json.version }}</span>
+            <UBadge color="primary" variant="subtle" size="xs" class="ml-2">Current</UBadge>
+            <span class="ml-2 font-mono text-xs text-gray-400">{{ current.uid.slice(0, 16) }}…</span>
+          </div>
+        </div>
+        <span class="text-xs text-gray-400">Ledger {{ current.ledger_index }}</span>
+      </div>
+
+      <!-- Descendant versions -->
+      <NuxtLink
+        v-for="descendant in descendants"
+        :key="descendant.uid"
+        :to="`/schemas/${descendant.uid}`"
+        class="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center flex-shrink-0">
+            <span class="text-xs font-semibold text-gray-600">
+              v{{ getMajorVersion(descendant.schema_json.version) }}
+            </span>
+          </div>
+          <div>
+            <span class="font-medium text-gray-700">v{{ descendant.schema_json.version }}</span>
+            <span class="ml-2 font-mono text-xs text-gray-400">{{ descendant.uid.slice(0, 16) }}…</span>
+          </div>
+        </div>
+        <span class="text-xs text-gray-400">Ledger {{ descendant.ledger_index }}</span>
+      </NuxtLink>
     </div>
   </UCard>
 </template>
@@ -84,17 +70,13 @@
 <script setup lang="ts">
 import type { Schema } from '~/lib/types/schema';
 
-const props = defineProps<{
-  versions: Schema[];
-  currentUid: string;
+defineProps<{
+  current: Schema;
+  ancestors: Schema[];
+  descendants: Schema[];
 }>();
 
-// Sort by ledger index ascending (oldest first)
-const sortedVersions = computed(() => {
-  return [...props.versions].sort((a, b) => a.ledger_index - b.ledger_index);
-});
-
 const getMajorVersion = (version: string) => {
-  return version.split('.')[0];
+  return version.split('.')[0] ?? version;
 };
 </script>

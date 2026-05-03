@@ -40,6 +40,7 @@ export const createSchemaSchema = z.object({
     .default('1.0.0'),
   fields: z.array(schemaFieldSchema).min(1),
   isPublic: z.boolean().default(false),
+  parentUid: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 // Credential issuance — builds a CredentialCreate tx with xcs:credential_create memo

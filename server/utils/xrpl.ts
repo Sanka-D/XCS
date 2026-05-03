@@ -87,6 +87,14 @@ class XRPLClient {
               },
             }]
           : []),
+        ...(schemaDoc.parentUid
+          ? [{
+              Memo: {
+                MemoType: convertStringToHex('xcs:parent_uid'),
+                MemoData: convertStringToHex(schemaDoc.parentUid),
+              },
+            }]
+          : []),
       ],
     };
 

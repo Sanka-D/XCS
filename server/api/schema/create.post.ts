@@ -1,11 +1,24 @@
 import { createSchemaSchema } from '../../utils/validation';
 import { useXRPL } from '../../utils/xrpl';
 import { pinJSON, unpin } from '../../utils/ipfs';
+import { db } from '../../db';
 
 export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     const validated = createSchemaSchema.parse(body);
+
+    if (validated.parentUid) {
+      const [parent] = await db<{ uid: string }[]>`
+        SELECT uid FROM schemas WHERE uid = ${validated.parentUid} LIMIT 1
+      `;
+      if (!parent) {
+        throw createError({
+          statusCode: 400,
+          message: 'parentUid does not exist in the registry',
+        });
+      }
+    }
 
     const schemaDoc = {
       name: validated.name,
@@ -22,7 +35,7 @@ export default defineEventHandler(async (event) => {
     const xrpl = useXRPL();
     let result;
     try {
-      result = await xrpl.registerSchema({ ...schemaDoc, ipfsCid });
+      result = await xrpl.registerSchema({ ...schemaDoc, ipfsCid, parentUid: validated.parentUid });
     } catch (err) {
       if (ipfsCid) {
         await unpin(ipfsCid).catch(() => {/* best-effort cleanup */});

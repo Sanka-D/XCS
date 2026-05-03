@@ -132,6 +132,14 @@
           />
         </div>
       </UCard>
+
+      <!-- Version History -->
+      <SchemaVersionHistory
+        v-if="ancestors.length || descendants.length"
+        :current="schema"
+        :ancestors="ancestors"
+        :descendants="descendants"
+      />
     </div>
   </div>
 </template>
@@ -151,6 +159,8 @@ const {
 });
 
 const schema = computed(() => schemaData.value?.data?.schema as Schema | undefined);
+const ancestors = computed(() => (schemaData.value?.data?.ancestors as Schema[]) ?? []);
+const descendants = computed(() => (schemaData.value?.data?.descendants as Schema[]) ?? []);
 
 const truncateAddress = (address: string) => {
   if (address.length <= 12) return address;
