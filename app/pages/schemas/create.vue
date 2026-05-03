@@ -40,7 +40,7 @@
           <p class="text-sm">
             Pinned to IPFS:
             <a
-              :href="`https://gateway.pinata.cloud/ipfs/${result.ipfsCid}`"
+              :href="`${ipfsGateway}/ipfs/${result.ipfsCid}`"
               target="_blank"
               class="underline text-blue-600 hover:text-blue-800 break-all"
             >
@@ -76,6 +76,9 @@
 
 <script setup lang="ts">
 const toast = useToast();
+const ipfsGateway = computed(
+  () => (useRuntimeConfig().public.ipfsGateway as string).replace(/\/$/, '')
+);
 
 const isCreating = ref(false);
 const result = ref<{ txHash: string; uid: string; ledgerIndex: number; ipfsCid: string | null } | null>(null);

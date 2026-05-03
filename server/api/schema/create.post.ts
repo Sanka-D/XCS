@@ -1,6 +1,6 @@
 import { createSchemaSchema } from '../../utils/validation';
 import { useXRPL } from '../../utils/xrpl';
-import { pinJSON } from '../../utils/ipfs';
+import { pinJSON, unpin } from '../../utils/ipfs';
 
 export default defineEventHandler(async (event) => {
   try {
@@ -20,7 +20,15 @@ export default defineEventHandler(async (event) => {
     }
 
     const xrpl = useXRPL();
-    const result = await xrpl.registerSchema({ ...schemaDoc, ipfsCid });
+    let result;
+    try {
+      result = await xrpl.registerSchema({ ...schemaDoc, ipfsCid });
+    } catch (err) {
+      if (ipfsCid) {
+        await unpin(ipfsCid).catch(() => {/* best-effort cleanup */});
+      }
+      throw err;
+    }
 
     return {
       success: true,

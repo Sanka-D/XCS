@@ -80,6 +80,8 @@ const handleSubmit = async (credentialData: {
       body: {
         credentialType: schemaUid.value,
         subject: credentialData.subject,
+        data: credentialData.data,
+        isPublic: credentialData.isPublic,
         expiresAt: credentialData.expiresAt,
       },
     });
@@ -87,7 +89,9 @@ const handleSubmit = async (credentialData: {
     if (response.success) {
       toast.add({
         title: 'Success',
-        description: `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}…`,
+        description: response.data.ipfsCid
+          ? `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}… (pinned: ${response.data.ipfsCid.slice(0, 16)}…)`
+          : `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}…`,
         color: 'success',
       });
 

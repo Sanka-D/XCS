@@ -47,6 +47,8 @@ export const createSchemaSchema = z.object({
 export const issueCredentialSchema = z.object({
   credentialType: z.string().min(1),
   subject: z.string().regex(/^r[1-9A-HJ-NP-Za-km-z]{25,34}$/),
+  data: z.record(z.string(), z.unknown()).default({}),
+  isPublic: z.boolean().default(false),
   uri: z.string().optional(),
   expiresAt: z.string().optional(),
 });
