@@ -10,6 +10,8 @@ export default defineEventHandler(async (event) => {
     const subject = validated.subject ?? null;
     const credentialType = validated.credentialType ?? null;
     const status = validated.status ?? null;
+    const nowRipple = Math.floor(Date.now() / 1000) - 946684800;
+    const excludeExpired = validated.excludeExpired ? 1 : 0;
 
     const countRows = await db`
       SELECT count(*) as count
@@ -18,6 +20,7 @@ export default defineEventHandler(async (event) => {
         AND (${subject}::text IS NULL OR subject = ${subject})
         AND (${credentialType}::text IS NULL OR credential_type = ${credentialType})
         AND (${status}::text IS NULL OR status = ${status})
+        AND (${excludeExpired}::int = 0 OR expiration IS NULL OR expiration = 0 OR expiration > ${nowRipple})
     `;
     const total = Number(countRows[0]?.count ?? 0);
 
@@ -28,15 +31,21 @@ export default defineEventHandler(async (event) => {
         AND (${subject}::text IS NULL OR subject = ${subject})
         AND (${credentialType}::text IS NULL OR credential_type = ${credentialType})
         AND (${status}::text IS NULL OR status = ${status})
+        AND (${excludeExpired}::int = 0 OR expiration IS NULL OR expiration = 0 OR expiration > ${nowRipple})
       ORDER BY created_ledger DESC NULLS LAST
       LIMIT ${validated.limit}
       OFFSET ${validated.offset}
     `;
 
+    const decoratedResults = (results as any[]).map((c) => ({
+      ...c,
+      isExpired: !!c.expiration && c.expiration > 0 && c.expiration <= nowRipple,
+    }));
+
     return {
       success: true,
       data: {
-        credentials: results,
+        credentials: decoratedResults,
         total,
         limit: validated.limit,
         offset: validated.offset,

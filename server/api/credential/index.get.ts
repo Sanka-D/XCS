@@ -23,9 +23,15 @@ export default defineEventHandler(async (event) => {
       SELECT * FROM schemas WHERE uid = ${credential.credential_type} LIMIT 1
     `;
 
+    const nowRipple = Math.floor(Date.now() / 1000) - 946684800;
+    const decorated = {
+      ...credential,
+      isExpired: !!credential.expiration && credential.expiration > 0 && credential.expiration <= nowRipple,
+    };
+
     return {
       success: true,
-      data: { credential, schema: schema ?? null },
+      data: { credential: decorated, schema: schema ?? null },
     };
   } catch (error: any) {
     if (error.statusCode) throw error;

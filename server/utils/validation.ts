@@ -79,6 +79,7 @@ export const listCredentialsSchema = z.object({
   subject: z.string().optional(),
   credentialType: z.string().optional(),
   status: z.enum(['created', 'accepted', 'revoked']).optional(),
+  excludeExpired: z.boolean().default(false),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
 });
