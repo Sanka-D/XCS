@@ -34,6 +34,9 @@ message SchemaRegistration {
   string schema_json = 2;
   // Lowercase hex SHA-256 digest — the canonical schema identifier.
   string uid         = 3;
+  // Optional parent schema UID for versioning. Empty string when the
+  // schema is a root version (no parent).
+  string parent_uid  = 4;
 }
 
 // CredentialCreated is emitted for a CredentialCreate transaction that carries

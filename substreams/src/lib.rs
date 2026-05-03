@@ -17,6 +17,7 @@ use substreams_database_change::tables::Tables;
 // XRPL memo_type is hex-encoded ASCII. We compare the decoded bytes.
 const MEMO_SCHEMA_REGISTER: &[u8] = b"xcs:schema_register";
 const MEMO_CREDENTIAL_CREATE: &[u8] = b"xcs:credential_create";
+const MEMO_PARENT_UID: &[u8] = b"xcs:parent_uid";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,13 @@ fn map_schema_ops(block: Block) -> Result<XcsOperations, substreams::errors::Err
 
         let uid = compute_uid(&schema_json, &tx.account, block.number, tx.index);
 
+        let parent_uid = tx
+            .memos
+            .iter()
+            .find(|m| memo_type_matches(&m.memo_type, MEMO_PARENT_UID))
+            .and_then(|m| decode_memo_data(&m.memo_data))
+            .unwrap_or_default();
+
         ops.push(XcsOperation {
             ledger_index: block.number,
             tx_index: tx.index,
@@ -100,6 +108,7 @@ fn map_schema_ops(block: Block) -> Result<XcsOperations, substreams::errors::Err
                 issuer: tx.account.clone(),
                 schema_json,
                 uid,
+                parent_uid,
             })),
         });
     }
@@ -159,6 +168,14 @@ fn map_xcs_ops(
 
                 if let Some(schema_json) = decode_memo_data(&memo.memo_data) {
                     let uid = compute_uid(&schema_json, &tx.account, block.number, tx.index);
+
+                    let parent_uid = tx
+                        .memos
+                        .iter()
+                        .find(|m| memo_type_matches(&m.memo_type, MEMO_PARENT_UID))
+                        .and_then(|m| decode_memo_data(&m.memo_data))
+                        .unwrap_or_default();
+
                     ops.push(XcsOperation {
                         ledger_index: block.number,
                         tx_index: tx.index,
@@ -167,6 +184,7 @@ fn map_xcs_ops(
                             issuer: tx.account.clone(),
                             schema_json,
                             uid,
+                            parent_uid,
                         })),
                     });
                 }
@@ -340,7 +358,8 @@ fn db_out(ops: XcsOperations) -> Result<DatabaseChanges, substreams::errors::Err
                     .set("schema_json", s.schema_json.as_str())
                     .set("ledger_index", op.ledger_index)
                     .set("tx_index", op.tx_index as u64)
-                    .set("tx_hash", op.tx_hash.as_str());
+                    .set("tx_hash", op.tx_hash.as_str())
+                    .set("parent_uid", s.parent_uid.as_str());
             }
 
             Some(Op::CredCreated(ref c)) => {

@@ -45,6 +45,10 @@ pub struct SchemaRegistration {
     pub schema_json: ::prost::alloc::string::String,
     #[prost(string, tag = "3")]
     pub uid: ::prost::alloc::string::String,
+    /// Optional parent schema UID for versioning. Empty string when the
+    /// schema is a root version (no parent).
+    #[prost(string, tag = "4")]
+    pub parent_uid: ::prost::alloc::string::String,
 }
 
 #[allow(clippy::derive_partial_eq_without_eq)]

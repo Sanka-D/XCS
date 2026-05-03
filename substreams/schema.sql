@@ -7,10 +7,15 @@ CREATE TABLE IF NOT EXISTS schemas (
     schema_json     JSONB       NOT NULL,
     ledger_index    BIGINT      NOT NULL,
     tx_index        INTEGER     NOT NULL,
-    tx_hash         TEXT        NOT NULL
+    tx_hash         TEXT        NOT NULL,
+    parent_uid      TEXT        NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS schemas_issuer_idx ON schemas (issuer);
+-- Migration for existing installs (no-op on fresh databases):
+ALTER TABLE schemas ADD COLUMN IF NOT EXISTS parent_uid TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS schemas_issuer_idx     ON schemas (issuer);
+CREATE INDEX IF NOT EXISTS schemas_parent_uid_idx ON schemas (parent_uid);
 
 -- Credential state is mutable: status transitions created → accepted → revoked.
 -- Primary key is a composite represented as "issuer:subject:credential_type".
