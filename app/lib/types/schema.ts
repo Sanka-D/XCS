@@ -36,7 +36,7 @@ export interface Schema {
   ledger_index: number;
   tx_index: number;
   tx_hash: string;
-  parent_uid?: string;
+  parent_uid: string;
 }
 
 // Row from the substreams-sink-sql `credentials` table

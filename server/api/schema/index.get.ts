@@ -19,16 +19,19 @@ export default defineEventHandler(async (event) => {
     }
 
     // Walk parent chain (oldest ancestor first)
+    const MAX_ANCESTOR_DEPTH = 64;
     const ancestors: any[] = [];
-    let cursor: string = schema.parent_uid ?? '';
-    while (cursor) {
+    let cursor: string = schema.parent_uid;
+    let depth = 0;
+    while (cursor && depth < MAX_ANCESTOR_DEPTH) {
       const [row] = await db<any[]>`
         SELECT uid, parent_uid, schema_json, ledger_index
         FROM schemas WHERE uid = ${cursor} LIMIT 1
       `;
       if (!row) break;
       ancestors.unshift(row);
-      cursor = row.parent_uid ?? '';
+      cursor = row.parent_uid;
+      depth++;
     }
 
     // Fetch direct children
