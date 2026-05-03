@@ -15,6 +15,7 @@ export default defineNuxtConfig({
     issuerSeed: process.env.ISSUER_SEED || '',
     // Destination for schema registration Payment txs (must differ from issuer to avoid temREDUNDANT)
     xrplRegistryAddress: process.env.XRPL_REGISTRY_ADDRESS || 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+    pinataJwt: process.env.PINATA_JWT || '',
 
     // Database (read-only via substreams-sink-sql)
     databaseUrl:
