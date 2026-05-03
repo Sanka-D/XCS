@@ -33,16 +33,21 @@
 
     <!-- Loading Overlay -->
     <div
-      v-if="isIssuing"
+      v-if="isIssuing || indexerWaiting"
       class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
     >
       <div class="bg-white rounded-lg p-8 text-center max-w-md">
         <div
           class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"
         ></div>
-        <p class="text-lg font-semibold mb-2">Issuing credential...</p>
+        <p class="text-lg font-semibold mb-2">
+          {{ indexerWaiting ? 'Waiting for ledger…' : 'Issuing credential...' }}
+        </p>
         <p class="text-sm text-gray-600">
-          Submitting CredentialCreate transaction on XRPL…
+          {{ indexerWaiting
+            ? 'Credential submitted — waiting for the indexer to confirm…'
+            : 'Submitting CredentialCreate transaction on XRPL…'
+          }}
         </p>
       </div>
     </div>
@@ -65,6 +70,7 @@ const { data: schemaData, error: schemaError } = await useFetch(`/api/schema`, {
 const schema = computed(() => schemaData.value?.data?.schema as Schema | undefined);
 
 const isIssuing = ref(false);
+const { waiting: indexerWaiting, wait: waitForIndex } = useIndexerWait();
 
 const handleSubmit = async (credentialData: {
   subject: string;
@@ -94,6 +100,28 @@ const handleSubmit = async (credentialData: {
           : `Credential submitted — TX: ${response.data.txHash.slice(0, 12)}…`,
         color: 'success',
       });
+
+      isIssuing.value = false;
+
+      try {
+        await waitForIndex({
+          fetcher: () => $fetch('/api/credential/list', {
+            method: 'POST',
+            body: {
+              subject: credentialData.subject,
+              credentialType: schemaUid.value,
+              limit: 1,
+            },
+          }),
+          predicate: (r: any) => (r?.data?.credentials?.length ?? 0) > 0,
+        });
+      } catch {
+        toast.add({
+          title: 'Indexer slow',
+          description: 'Credential submitted but not yet visible.',
+          color: 'warning',
+        });
+      }
 
       router.push('/credentials');
     }

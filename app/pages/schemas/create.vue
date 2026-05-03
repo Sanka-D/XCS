@@ -50,9 +50,13 @@
         </div>
       </div>
 
+      <p v-if="indexerWaiting" class="text-sm text-gray-500 mt-2">
+        Waiting for ledger to confirm…
+      </p>
+
       <div class="flex gap-3 pt-2">
-        <UButton color="primary" @click="$router.push('/schemas')">View all schemas</UButton>
-        <UButton color="neutral" variant="outline" @click="result = null">Create another</UButton>
+        <UButton color="primary" :disabled="indexerWaiting" @click="$router.push('/schemas')">View all schemas</UButton>
+        <UButton color="neutral" variant="outline" :disabled="indexerWaiting" @click="result = null">Create another</UButton>
       </div>
     </div>
 
@@ -84,6 +88,8 @@ const isCreating = ref(false);
 const result = ref<{ txHash: string; uid: string; ledgerIndex: number; ipfsCid: string | null } | null>(null);
 const copied = ref(false);
 
+const { waiting: indexerWaiting, wait: waitForIndex } = useIndexerWait();
+
 const copy = (text: string) => {
   navigator.clipboard.writeText(text);
   copied.value = true;
@@ -101,6 +107,20 @@ const handleSubmit = async (schemaData: any) => {
 
     if (response.success) {
       result.value = response.data;
+
+      try {
+        await waitForIndex({
+          fetcher: () => $fetch(`/api/schema?id=${result.value!.uid}`),
+          predicate: (r: any) => !!r?.data?.schema?.uid,
+        });
+      } catch {
+        // Timeout is non-fatal — surface a soft warning but don't block the user.
+        toast.add({
+          title: 'Indexer slow',
+          description: 'Schema submitted but not yet visible in the registry.',
+          color: 'warning',
+        });
+      }
     }
   } catch (error: any) {
     toast.add({
