@@ -39,6 +39,7 @@ export const createSchemaSchema = z.object({
     .regex(/^\d+\.\d+\.\d+$/)
     .default('1.0.0'),
   fields: z.array(schemaFieldSchema).min(1),
+  isPublic: z.boolean().default(false),
 });
 
 // Credential issuance — builds a CredentialCreate tx with xcs:credential_create memo

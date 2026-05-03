@@ -34,6 +34,20 @@
           <p class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Schema UID (computed)</p>
           <code class="block bg-gray-100 px-3 py-2 rounded text-sm break-all">{{ result.uid }}</code>
         </div>
+
+        <div v-if="result.ipfsCid">
+          <p class="text-xs text-gray-500 mb-1 uppercase tracking-wide">IPFS CID</p>
+          <p class="text-sm">
+            Pinned to IPFS:
+            <a
+              :href="`https://gateway.pinata.cloud/ipfs/${result.ipfsCid}`"
+              target="_blank"
+              class="underline text-blue-600 hover:text-blue-800 break-all"
+            >
+              {{ result.ipfsCid }}
+            </a>
+          </p>
+        </div>
       </div>
 
       <div class="flex gap-3 pt-2">
@@ -64,7 +78,7 @@
 const toast = useToast();
 
 const isCreating = ref(false);
-const result = ref<{ txHash: string; uid: string; ledgerIndex: number } | null>(null);
+const result = ref<{ txHash: string; uid: string; ledgerIndex: number; ipfsCid: string | null } | null>(null);
 const copied = ref(false);
 
 const copy = (text: string) => {

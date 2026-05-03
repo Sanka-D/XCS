@@ -90,6 +90,14 @@ class XRPLClient {
             MemoData: convertStringToHex(schemaJson),
           },
         },
+        ...(schemaDoc.ipfsCid
+          ? [{
+              Memo: {
+                MemoType: convertStringToHex('xcs:ipfs_cid'),
+                MemoData: convertStringToHex(schemaDoc.ipfsCid),
+              },
+            }]
+          : []),
       ],
     };
 

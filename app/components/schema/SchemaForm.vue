@@ -190,7 +190,7 @@ const emit = defineEmits<{
 const name = ref('');
 const description = ref('');
 const version = ref('1.0.0');
-const isPublic = ref(true);
+const isPublic = ref(false);
 const fields = ref<SchemaField[]>([]);
 
 const fieldTypes = [

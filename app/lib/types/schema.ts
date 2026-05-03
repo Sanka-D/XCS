@@ -24,6 +24,7 @@ export interface SchemaDoc {
   description?: string;
   version: string;
   fields: SchemaField[];
+  ipfsCid?: string; // populated when isPublic = true
 }
 
 // Row from the substreams-sink-sql `schemas` table

@@ -1,12 +1,11 @@
 import { createSchemaSchema } from '../../utils/validation';
 import { useXRPL } from '../../utils/xrpl';
+import { pinJSON } from '../../utils/ipfs';
 
 export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     const validated = createSchemaSchema.parse(body);
-
-    const xrpl = useXRPL();
 
     const schemaDoc = {
       name: validated.name,
@@ -15,7 +14,13 @@ export default defineEventHandler(async (event) => {
       fields: validated.fields,
     };
 
-    const result = await xrpl.registerSchema(schemaDoc);
+    let ipfsCid: string | undefined;
+    if (validated.isPublic) {
+      ipfsCid = await pinJSON(schemaDoc);
+    }
+
+    const xrpl = useXRPL();
+    const result = await xrpl.registerSchema({ ...schemaDoc, ipfsCid });
 
     return {
       success: true,
@@ -23,6 +28,7 @@ export default defineEventHandler(async (event) => {
         uid: result.uid,
         txHash: result.txHash,
         ledgerIndex: result.ledgerIndex,
+        ipfsCid: ipfsCid ?? null,
         status: 'pending',
       },
     };
