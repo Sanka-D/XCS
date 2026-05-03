@@ -237,6 +237,19 @@ class XRPLClient {
     };
   }
 
+  async submitSigned(signedTxBlob: string) {
+    await this.connect();
+    const response = await this.client.submit(signedTxBlob, { failHard: true });
+    if (response.result.engine_result !== 'tesSUCCESS' &&
+        response.result.engine_result !== 'terQUEUED') {
+      throw new Error(`XRPL submit failed: ${response.result.engine_result}`);
+    }
+    return {
+      txHash: (response.result.tx_json as any).hash,
+      engineResult: response.result.engine_result,
+    };
+  }
+
   private dateToRippleTime(date: Date): number {
     return Math.floor(date.getTime() / 1000) - 946684800;
   }

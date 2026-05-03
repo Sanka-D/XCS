@@ -30,52 +30,13 @@
     </div>
 
     <!-- Accept Button -->
-    <div v-if="!showSeedInput">
+    <div>
       <button
-        @click="showSeedInput = true"
+        @click="$emit('accept')"
         class="w-full px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-semibold"
       >
         Accept Credential
       </button>
-    </div>
-
-    <!-- Seed Input Form -->
-    <div v-else class="space-y-4">
-      <div>
-        <label for="seed" class="block text-sm font-medium mb-2">
-          Subject Seed (Private Key) *
-        </label>
-        <input
-          id="seed"
-          v-model="subjectSeed"
-          type="password"
-          required
-          class="w-full px-4 py-2 border rounded-lg font-mono"
-          placeholder="sXXXXXXXXXX..."
-          :disabled="isAccepting"
-        />
-        <p class="text-xs text-gray-600 mt-1">
-          Your seed is required to sign the acceptance transaction on XRPL. It
-          is never stored or transmitted anywhere except directly to XRPL.
-        </p>
-      </div>
-
-      <div class="flex gap-3">
-        <button
-          @click="handleAccept"
-          :disabled="isAccepting"
-          class="flex-1 px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold disabled:opacity-50"
-        >
-          {{ isAccepting ? 'Accepting...' : 'Confirm Accept' }}
-        </button>
-        <button
-          @click="showSeedInput = false"
-          :disabled="isAccepting"
-          class="px-6 py-3 border rounded-lg hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-      </div>
     </div>
   </div>
 </template>
@@ -90,12 +51,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  accept: [subjectSeed: string];
+  accept: [];
 }>();
-
-const subjectSeed = ref('');
-const showSeedInput = ref(false);
-const isAccepting = ref(false);
 
 const expirationDate = computed(() => {
   if (!props.credential.expiration) return '';
@@ -106,20 +63,4 @@ const expirationDate = computed(() => {
     day: 'numeric',
   }).format(d);
 });
-
-const handleAccept = async () => {
-  if (!subjectSeed.value) {
-    alert('Please enter your subject seed');
-    return;
-  }
-
-  isAccepting.value = true;
-  try {
-    emit('accept', subjectSeed.value);
-  } finally {
-    isAccepting.value = false;
-    subjectSeed.value = '';
-    showSeedInput.value = false;
-  }
-};
 </script>
