@@ -21,6 +21,7 @@ export async function pinJSON(content: unknown): Promise<string> {
       pinataContent: content,
       pinataOptions: { cidVersion: 1 },
     }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!res.ok) {
@@ -33,9 +34,9 @@ export async function pinJSON(content: unknown): Promise<string> {
 
 export async function fetchJSON<T = unknown>(cid: string): Promise<T> {
   const url = gatewayUrl(cid);
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
-    throw new Error(`IPFS fetch failed: ${res.status} for ${cid}`);
+    throw new Error(`IPFS fetch failed: ${res.status} ${await res.text()} for ${cid}`);
   }
   return (await res.json()) as T;
 }
@@ -47,7 +48,11 @@ export async function unpin(cid: string): Promise<boolean> {
   const res = await fetch(`${PINATA_UNPIN_URL}/${cid}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${config.pinataJwt}` },
+    signal: AbortSignal.timeout(15_000),
   });
+  if (!res.ok) {
+    console.warn(`IPFS unpin failed: ${res.status} ${await res.text()} for ${cid}`);
+  }
   return res.ok;
 }
 

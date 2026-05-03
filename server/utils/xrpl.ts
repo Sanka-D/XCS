@@ -58,23 +58,12 @@ class XRPLClient {
     await this.connect();
 
     const config = useRuntimeConfig();
-    // JSON must use a consistent key ordering for reproducible UID computation.
-    // Key insertion order matches SchemaDoc interface: name, description, version, fields.
-    const schemaTx: Record<string, unknown> = {
-      name: schemaDoc.name,
-      version: schemaDoc.version,
-      fields: schemaDoc.fields,
-    };
-    if (schemaDoc.description) {
-      // Insert after name to maintain consistent ordering
-      schemaTx.description = schemaDoc.description;
-    }
 
     // Always produce the same key order: name, description (optional), version, fields
-    const orderedDoc: Record<string, unknown> = { name: schemaTx.name };
-    if (schemaTx.description) orderedDoc.description = schemaTx.description;
-    orderedDoc.version = schemaTx.version;
-    orderedDoc.fields = schemaTx.fields;
+    const orderedDoc: Record<string, unknown> = { name: schemaDoc.name };
+    if (schemaDoc.description) orderedDoc.description = schemaDoc.description;
+    orderedDoc.version = schemaDoc.version;
+    orderedDoc.fields = schemaDoc.fields;
 
     const schemaJson = JSON.stringify(orderedDoc);
 

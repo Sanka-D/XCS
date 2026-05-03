@@ -1,6 +1,6 @@
 import { Wallet } from 'xrpl';
 import { sign as keypairSign, verify as keypairVerify } from 'ripple-keypairs';
-import { canonicalize } from './canonical-json';
+import { canonicalize, type JSONValue } from './canonical-json';
 
 export interface VCInput {
   issuerAddress: string;
@@ -8,7 +8,7 @@ export interface VCInput {
   subjectAddress: string;
   schemaUid: string;
   schemaName: string;
-  data: Record<string, unknown>;
+  data: Record<string, JSONValue>;
   issuanceDate?: string;
   expirationDate?: string;
 }
@@ -19,7 +19,7 @@ export interface UnsignedVC {
   issuer: string;
   issuanceDate: string;
   expirationDate?: string;
-  credentialSubject: { id: string } & Record<string, unknown>;
+  credentialSubject: { id: string } & Record<string, JSONValue>;
   credentialSchema: { id: string; type: string };
   proof?: never;
 }
@@ -59,6 +59,7 @@ export function buildVC(input: VCInput): UnsignedVC {
 }
 
 export function signVC(vc: UnsignedVC, wallet: Wallet): SignedVC {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- UnsignedVC has `proof?: never` for type discrimination; cast needed to pass to canonicalize
   const canonical = canonicalize(vc as any);
   const messageHex = Buffer.from(canonical, 'utf8').toString('hex').toUpperCase();
   const signature = keypairSign(messageHex, wallet.privateKey);
@@ -80,6 +81,7 @@ export function verifyVC(signed: SignedVC): boolean {
   const { proof, ...unsigned } = signed;
   if (!proof || proof.type !== 'XrplKey2026') return false;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- unsigned has `proof?: never` stripped; cast needed to pass to canonicalize
   const canonical = canonicalize(unsigned as any);
   const messageHex = Buffer.from(canonical, 'utf8').toString('hex').toUpperCase();
 

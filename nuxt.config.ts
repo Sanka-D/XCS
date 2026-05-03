@@ -25,7 +25,7 @@ export default defineNuxtConfig({
     // Public
     public: {
       baseUrl: process.env.BASE_URL || 'http://localhost:3000',
-      ipfsGateway: process.env.IPFS_GATEWAY || 'https://ipfs.io',
+      ipfsGateway: process.env.IPFS_GATEWAY || 'https://gateway.pinata.cloud',
       walletConnectProjectId:
         process.env.NUXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '',
     },

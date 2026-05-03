@@ -1,4 +1,4 @@
-type JSONValue =
+export type JSONValue =
   | string
   | number
   | boolean
@@ -7,6 +7,9 @@ type JSONValue =
   | { [k: string]: JSONValue };
 
 export function canonicalize(value: JSONValue): string {
+  if (value === undefined) {
+    throw new Error('canonicalize: undefined values are not allowed');
+  }
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') {

@@ -27,4 +27,8 @@ describe('canonicalize', () => {
   it('escapes special characters in strings', () => {
     expect(canonicalize({ a: 'he said "hi"\n' })).toBe('{"a":"he said \\"hi\\"\\n"}');
   });
+
+  it('rejects undefined values', () => {
+    expect(() => canonicalize({ a: undefined as any })).toThrow(/undefined/);
+  });
 });

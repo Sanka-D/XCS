@@ -56,4 +56,49 @@ describe('ipfs', () => {
   it('gatewayUrl builds the public URL', () => {
     expect(gatewayUrl('bafyTest')).toBe('https://gateway.pinata.cloud/ipfs/bafyTest');
   });
+
+  it('pinJSON throws when pinataJwt is missing', async () => {
+    const orig = (globalThis as any).useRuntimeConfig;
+    (globalThis as any).useRuntimeConfig = () => ({
+      pinataJwt: '',
+      public: { ipfsGateway: 'https://gateway.pinata.cloud' },
+    });
+    try {
+      await expect(pinJSON({ x: 1 })).rejects.toThrow(/PINATA_JWT not configured/);
+    } finally {
+      (globalThis as any).useRuntimeConfig = orig;
+    }
+  });
+
+  it('unpin throws when pinataJwt is missing', async () => {
+    const orig = (globalThis as any).useRuntimeConfig;
+    (globalThis as any).useRuntimeConfig = () => ({
+      pinataJwt: '',
+      public: { ipfsGateway: 'https://gateway.pinata.cloud' },
+    });
+    try {
+      await expect(unpin('bafyTest')).rejects.toThrow(/PINATA_JWT not configured/);
+    } finally {
+      (globalThis as any).useRuntimeConfig = orig;
+    }
+  });
+
+  it('fetchJSON throws on non-2xx', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('gateway down', { status: 503 }))
+    );
+    await expect(fetchJSON('bafyTest')).rejects.toThrow(/IPFS fetch failed/);
+  });
+
+  it('unpin returns false on non-2xx and warns', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not found', { status: 404 }))
+    );
+    expect(await unpin('bafyTest')).toBe(false);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
