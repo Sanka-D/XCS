@@ -1,0 +1,11 @@
+{
+  "xcsVersion": "0.1",
+  "name": "XRPL Developer Course Completion",
+  "description": "Attests successful completion of one XRPL Commons developer course.",
+  "fields": {
+    "programId": { "type": "string" },
+    "programName": { "type": "string" },
+    "completedAt": { "type": "string" },
+    "achievement": { "type": "string", "optional": true }
+  }
+}

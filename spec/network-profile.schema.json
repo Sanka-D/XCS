@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xcs.dev/schema/network-profile-v0.1.json",
+  "title": "XCS v0.1 Network Profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profileId",
+    "xcsVersion",
+    "networkId",
+    "requiredAmendment",
+    "registryAddress",
+    "registrationAmountDrops",
+    "activationLedgerIndex",
+    "activationLedgerHash"
+  ],
+  "properties": {
+    "profileId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "xcsVersion": { "const": "0.1" },
+    "networkId": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "requiredAmendment": { "type": "string", "pattern": "^[0-9A-Fa-f]{64}$" },
+    "registryAddress": { "type": "string", "pattern": "^r[1-9A-HJ-NP-Za-km-z]{24,34}$" },
+    "registrationAmountDrops": { "const": "1" },
+    "activationLedgerIndex": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "activationLedgerHash": { "type": "string", "pattern": "^[0-9A-Fa-f]{64}$" }
+  }
+}

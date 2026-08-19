@@ -1,0 +1,27 @@
+FROM node:24-alpine AS build
+
+RUN corepack enable
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY packages ./packages
+COPY apps ./apps
+COPY config ./config
+
+RUN pnpm install --frozen-lockfile
+
+ARG XCS_PACKAGE
+RUN test -n "$XCS_PACKAGE" && pnpm --filter "$XCS_PACKAGE..." build
+
+FROM node:24-alpine AS runtime
+
+RUN corepack enable
+WORKDIR /workspace
+ENV NODE_ENV=production
+
+COPY --from=build /workspace /workspace
+
+ARG XCS_PACKAGE
+ENV XCS_PACKAGE=$XCS_PACKAGE
+
+CMD ["sh", "-c", "pnpm --filter \"$XCS_PACKAGE\" start"]

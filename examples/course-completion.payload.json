@@ -1,0 +1,12 @@
+{
+  "xcsVersion": "0.1",
+  "issuer": "rExampleIssuerAddressMustBeReplaced",
+  "subject": "rExampleSubjectAddressMustBeReplaced",
+  "schema": "0000000000000000000000000000000000000000000000000000000000000000",
+  "claims": {
+    "programId": "xrpl-developer-fundamentals-2026",
+    "programName": "XRPL Developer Fundamentals",
+    "completedAt": "2026-08-19T12:00:00Z",
+    "achievement": "completed"
+  }
+}

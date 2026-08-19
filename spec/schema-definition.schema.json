@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xcs.dev/schema/schema-definition-v0.1.json",
+  "title": "XCS v0.1 Schema Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["xcsVersion", "name", "description", "fields"],
+  "properties": {
+    "xcsVersion": { "const": "0.1" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "extends": { "$ref": "#/$defs/uid" },
+    "supersedes": { "$ref": "#/$defs/uid" },
+    "fields": { "$ref": "#/$defs/fields" }
+  },
+  "$defs": {
+    "uid": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fields": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/descriptor" }
+    },
+    "optional": { "type": "boolean", "default": false },
+    "descriptor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["string", "bool", "uint", "int", "bytes", "address"] },
+            "optional": { "$ref": "#/$defs/optional" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "array" },
+            "optional": { "$ref": "#/$defs/optional" },
+            "items": { "$ref": "#/$defs/descriptor" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fields"],
+          "properties": {
+            "type": { "const": "object" },
+            "optional": { "$ref": "#/$defs/optional" },
+            "fields": { "$ref": "#/$defs/fields" }
+          }
+        }
+      ]
+    }
+  }
+}

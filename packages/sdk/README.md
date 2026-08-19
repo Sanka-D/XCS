@@ -1,0 +1,29 @@
+# `@xcs-protocol/sdk`
+
+Signer-agnostic builders and reliable-submission helpers for XCS v0.1.
+
+The SDK intentionally exposes no API that accepts an XRPL seed or private key. Wallets implement the
+small `Signer` interface and receive an autofilled, unsigned transaction containing a bounded
+`LastLedgerSequence`. A signed blob can also be submitted directly when it was produced out of
+process.
+
+Use `prepareSignAndSubmit` for a headless flow. A UI that previews the final autofilled transaction
+must call `autofillXcsTransaction`, display the returned transaction, then pass that exact object to
+`signPreparedAndSubmit`; the latter does not autofill a second time and rejects wallet mutations.
+
+The operation journal never contains the signed blob, full transaction, private material, or
+credential payload. Persist it in the host application to reconcile a transaction hash after an
+ambiguous network failure.
+
+Because the journal intentionally excludes the signed blob, browser and service hosts must persist
+that blob before the signer returns control to a submission helper. The Nuxt reference application
+does this in IndexedDB, erases the blob for terminal operations after reconciliation, and retains
+only sanitized status metadata.
+
+The XRPL protocol permits a 256-byte Credential URI, and the builders preserve that limit. The
+locked `xrpl.js` 5.0.0 validator mistakenly applies its 256-character limit to the hexadecimal JSON
+field, so SDK submission helpers currently reject URIs above 128 bytes with `XCS_SDK_INVALID_URI`.
+Use an IPFS raw CID or a shorter HTTPS base URL until the upstream validator is corrected.
+
+Schema UIDs cannot be predicted before inclusion. `deriveSchemaUid` requires a validated ledger
+hash, ledger index, transaction index, publisher, network ID, and a `tesSUCCESS` result.

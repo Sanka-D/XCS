@@ -1,0 +1,130 @@
+{
+  "nav": {
+    "main": "Main navigation",
+    "schemas": "Schemas",
+    "issue": "Issue",
+    "accept": "Accept",
+    "verify": "Verify",
+    "operations": "Operations",
+    "learn": "Learn",
+    "language": "Language"
+  },
+  "common": {
+    "testnetWarning": "Testnet alpha — do not use personal data or real funds.",
+    "close": "Close",
+    "loading": "Loading…",
+    "working": "Working…",
+    "retry": "Retry",
+    "apiUnavailable": "The XCS API is unavailable."
+  },
+  "wallet": {
+    "connect": "Connect wallet",
+    "choose": "Choose a compatible wallet",
+    "none": "No supported wallet is available in this browser."
+  },
+  "transaction": {
+    "preview": "Review before signing",
+    "confirmWarning": "Check the network, account, destination, fee and every field in your wallet.",
+    "sign": "Sign and submit"
+  },
+  "home": {
+    "eyebrow": "Interoperable XRPL credentials",
+    "title": "One shared schema. Independent issuers. Verifiable evidence.",
+    "description": "XCS connects native XRPL Credentials to public schemas and integrity-protected off-ledger data.",
+    "register": "Register a schema",
+    "verify": "Verify a credential",
+    "flow": {
+      "schema": "Publish a compact schema",
+      "issue": "Issue from the entity wallet",
+      "accept": "Have the subject accept it",
+      "verify": "Verify four separate dimensions"
+    },
+    "pillars": {
+      "keys": { "title": "No custody", "copy": "Keys remain in each entity’s wallet or HSM." },
+      "data": {
+        "title": "Off-ledger claims",
+        "copy": "The ledger stores a cryptographically bound URI, not the credential data."
+      },
+      "trust": {
+        "title": "Explicit trust",
+        "copy": "An active, intact credential is trustworthy only when your application recognizes its issuer."
+      }
+    }
+  },
+  "learn": {
+    "title": "Understand XCS step by step",
+    "intro": "XCS is a deterministic convention on top of native XRPL Credentials, not a new blockchain or central authority.",
+    "actorsTitle": "Actors",
+    "publisher": "Account that registers a schema definition with the registry.",
+    "issuer": "Entity asserting a fact by creating the Credential with its own wallet.",
+    "subject": "Affected account that accepts the Credential before it becomes active.",
+    "verifier": "Application checking the ledger, schema, payload and its own trust policy.",
+    "indexer": "Service reading every validated ledger and reconstructing queryable state.",
+    "registry": "Blackholed account serving as the neutral destination for schema registrations.",
+    "verificationTitle": "No magic “valid” button",
+    "verification": "XCS reports on-ledger state, schema validity, content integrity and issuer trust separately."
+  },
+  "schemas": {
+    "title": "Public schemas",
+    "description": "Every valid schema is reusable. Publication does not endorse its publisher or future issuers.",
+    "register": "New schema",
+    "empty": "No schema has been indexed on this profile yet.",
+    "notFound": "Schema not found.",
+    "definition": "Canonical definition",
+    "use": "Use this schema"
+  },
+  "register": {
+    "title": "Register a schema",
+    "description": "JSON is validated and canonicalized before the complete definition is placed in a Payment memo.",
+    "schema": "Schema definition",
+    "irreversible": "A validated registration is public and irreversible. Corrections require a new schema.",
+    "prepare": "Validate and prepare",
+    "canonical": "Canonical registered bytes",
+    "submitted": "Transaction validated",
+    "uidLater": "The final UID depends on validated ledger context and will be displayed by the indexer."
+  },
+  "issue": {
+    "title": "Issue a credential",
+    "description": "Prepare the off-ledger payload, publish its exact canonical bytes, then sign CredentialCreate.",
+    "noPii": "Testnet and IPFS are public: never enter personal data.",
+    "storage": "Storage mode",
+    "expiration": "Optional expiration",
+    "prepare": "Validate and prepare",
+    "payload": "Canonical payload to publish",
+    "download": "Download JSON",
+    "published": "I confirm that these exact payload bytes are published at the displayed URI.",
+    "submitted": "Validated CredentialCreate: "
+  },
+  "accept": {
+    "title": "Accept or remove a credential",
+    "description": "Only the subject can accept. The subject or issuer can later delete the object according to XRPL rules.",
+    "notTruth": "Acceptance means retaining the Credential on your account; it does not certify that its claims are true.",
+    "action": "Action",
+    "prepare": "Prepare transaction"
+  },
+  "verify": {
+    "title": "Verify a credential",
+    "description": "Lookup requires the exact network, issuer, subject and schema UID.",
+    "fetch": "Resolve and check the public payload",
+    "run": "Verify",
+    "onChain": "On-ledger state",
+    "schema": "Schema",
+    "payload": "Payload",
+    "trust": "Issuer trust",
+    "trustNote": "Trust remains an application decision; XCS does not turn an unknown issuer into a recognized authority."
+  },
+  "operations": {
+    "title": "Wallet operations",
+    "description": "Review submissions saved in this browser and resume those whose validation has not been confirmed yet.",
+    "localOnly": "The journal and recoverable signed blobs remain in IndexedDB on this device. No seed or private key is stored.",
+    "empty": "No wallet operation is stored in this browser.",
+    "refresh": "Refresh",
+    "retry": "Resume",
+    "hash": "Transaction hash",
+    "profile": "Network profile",
+    "updated": "Last updated",
+    "lastLedger": "Last allowed ledger",
+    "result": "XRPL result"
+  },
+  "footer": { "summary": "XCS v0.1 — open standard and MIT reference implementation." }
+}

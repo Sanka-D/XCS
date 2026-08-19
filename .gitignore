@@ -1,24 +1,18 @@
-# Nuxt dev/build outputs
-.output
-.data
-.nuxt
-.nitro
-.cache
-dist
-
-# Node dependencies
-node_modules
-
-# Logs
-logs
-*.log
-
-# Misc
-.DS_Store
-.fleet
-.idea
-
-# Local env files
+node_modules/
+dist/
+coverage/
+.turbo/
+.nuxt/
+.output/
+.data/
 .env
 .env.*
 !.env.example
+*.log
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+playwright-report/
+test-results/

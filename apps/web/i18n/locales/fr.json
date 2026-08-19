@@ -1,0 +1,133 @@
+{
+  "nav": {
+    "main": "Navigation principale",
+    "schemas": "Schémas",
+    "issue": "Émettre",
+    "accept": "Accepter",
+    "verify": "Vérifier",
+    "operations": "Opérations",
+    "learn": "Comprendre",
+    "language": "Langue"
+  },
+  "common": {
+    "testnetWarning": "Alpha Testnet — n’utilisez aucune donnée personnelle ni fonds réels.",
+    "close": "Fermer",
+    "loading": "Chargement…",
+    "working": "Traitement…",
+    "retry": "Réessayer",
+    "apiUnavailable": "L’API XCS est indisponible."
+  },
+  "wallet": {
+    "connect": "Connecter un wallet",
+    "choose": "Choisissez un wallet compatible",
+    "none": "Aucun wallet pris en charge n’est disponible dans ce navigateur."
+  },
+  "transaction": {
+    "preview": "Vérification avant signature",
+    "confirmWarning": "Contrôlez le réseau, le compte, la destination, les frais et chaque champ dans votre wallet.",
+    "sign": "Signer et soumettre"
+  },
+  "home": {
+    "eyebrow": "Des credentials XRPL interopérables",
+    "title": "Un schéma commun. Des émetteurs indépendants. Une preuve vérifiable.",
+    "description": "XCS relie les Credentials natives XRPL à des schémas publics et à des données hors chaîne dont l’intégrité est vérifiable.",
+    "register": "Enregistrer un schéma",
+    "verify": "Vérifier un credential",
+    "flow": {
+      "schema": "Publier un schéma compact",
+      "issue": "Émettre depuis le wallet de l’entité",
+      "accept": "Faire accepter par le sujet",
+      "verify": "Vérifier quatre dimensions séparées"
+    },
+    "pillars": {
+      "keys": {
+        "title": "Aucune custody",
+        "copy": "Les clés restent dans le wallet ou le HSM de chaque entité."
+      },
+      "data": {
+        "title": "Claims hors chaîne",
+        "copy": "Le ledger contient une URI liée cryptographiquement, pas les données du credential."
+      },
+      "trust": {
+        "title": "Confiance explicite",
+        "copy": "Un credential actif et intact n’est fiable que si votre application reconnaît son émetteur."
+      }
+    }
+  },
+  "learn": {
+    "title": "Comprendre XCS étape par étape",
+    "intro": "XCS est une convention déterministe au-dessus des Credentials XRPL natives, pas une nouvelle blockchain ni une autorité centrale.",
+    "actorsTitle": "Les acteurs",
+    "publisher": "Compte qui enregistre une définition de schéma sur le registre.",
+    "issuer": "Entité qui affirme un fait en créant le Credential avec son propre wallet.",
+    "subject": "Compte concerné qui doit accepter le Credential avant son activation.",
+    "verifier": "Application qui contrôle le ledger, le schéma, le payload et sa propre politique de confiance.",
+    "indexer": "Service qui relit chaque ledger validé et reconstruit les états consultables.",
+    "registry": "Compte blackholé qui sert de destination neutre aux enregistrements de schéma.",
+    "verificationTitle": "Pas de bouton magique « valide »",
+    "verification": "XCS montre séparément l’état on-chain, la validité du schéma, l’intégrité du contenu et la confiance dans l’émetteur."
+  },
+  "schemas": {
+    "title": "Schémas publics",
+    "description": "Tous les schémas valides sont réutilisables. Leur publication ne garantit ni le publisher ni les futurs émetteurs.",
+    "register": "Nouveau schéma",
+    "empty": "Aucun schéma n’a encore été indexé sur ce profil.",
+    "notFound": "Schéma introuvable.",
+    "definition": "Définition canonique",
+    "use": "Utiliser ce schéma"
+  },
+  "register": {
+    "title": "Enregistrer un schéma",
+    "description": "Le JSON est validé puis canonicalisé avant d’être placé entièrement dans un memo Payment.",
+    "schema": "Définition du schéma",
+    "irreversible": "Une registration validée est publique et irréversible. Les corrections nécessitent un nouveau schéma.",
+    "prepare": "Valider et préparer",
+    "canonical": "Octets canoniques enregistrés",
+    "submitted": "Transaction validée",
+    "uidLater": "L’UID final dépend du ledger validé et sera affiché par l’indexeur."
+  },
+  "issue": {
+    "title": "Émettre un credential",
+    "description": "Préparez le payload hors chaîne, publiez exactement ses octets canoniques, puis signez CredentialCreate.",
+    "noPii": "Testnet et IPFS sont publics : n’insérez aucune donnée personnelle.",
+    "storage": "Mode de stockage",
+    "expiration": "Expiration facultative",
+    "prepare": "Valider et préparer",
+    "payload": "Payload canonique à publier",
+    "download": "Télécharger le JSON",
+    "published": "Je confirme avoir publié exactement ce payload à l’URI affichée.",
+    "submitted": "CredentialCreate validé : "
+  },
+  "accept": {
+    "title": "Accepter ou retirer un credential",
+    "description": "Seul le sujet peut accepter. Le sujet ou l’émetteur peut ensuite supprimer l’objet selon les règles XRPL.",
+    "notTruth": "Accepter signifie conserver le Credential sur votre compte ; cela ne certifie pas que ses claims sont vrais.",
+    "action": "Action",
+    "prepare": "Préparer la transaction"
+  },
+  "verify": {
+    "title": "Vérifier un credential",
+    "description": "La recherche exige le réseau, l’émetteur, le sujet et le schema UID exacts.",
+    "fetch": "Résoudre et contrôler le payload public",
+    "run": "Vérifier",
+    "onChain": "État on-chain",
+    "schema": "Schéma",
+    "payload": "Payload",
+    "trust": "Confiance issuer",
+    "trustNote": "La confiance reste une décision de votre application ; XCS ne transforme pas un issuer inconnu en autorité reconnue."
+  },
+  "operations": {
+    "title": "Opérations wallet",
+    "description": "Consultez les soumissions conservées dans ce navigateur et reprenez celles dont la validation n’a pas encore été confirmée.",
+    "localOnly": "Le journal et les blobs encore récupérables restent dans IndexedDB sur cet appareil. Aucune seed ni clé privée n’est enregistrée.",
+    "empty": "Aucune opération wallet n’est enregistrée dans ce navigateur.",
+    "refresh": "Actualiser",
+    "retry": "Reprendre",
+    "hash": "Hash de transaction",
+    "profile": "Profil réseau",
+    "updated": "Dernière mise à jour",
+    "lastLedger": "Dernier ledger autorisé",
+    "result": "Résultat XRPL"
+  },
+  "footer": { "summary": "XCS v0.1 — standard ouvert et implémentation de référence MIT." }
+}
