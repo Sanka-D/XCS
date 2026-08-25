@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { loadIndexerConfig } from '../src/config.js'
+import { loadIndexerConfig, loadIndexerRuntimeConfig, loadLedgerRpcConfig } from '../src/config.js'
 
 const paths: string[] = []
 
@@ -64,6 +64,39 @@ describe('indexer configuration', () => {
     )
 
     expect(config.databaseUrl).toBe('postgres://xcs_indexer@localhost/xcs')
+  })
+
+  it('loads capture RPC configuration without any database credential or profile parsing', async () => {
+    const source = loadLedgerRpcConfig(
+      await environment({
+        XCS_DATABASE_URL: undefined,
+        DATABASE_URL: undefined,
+        XCS_INDEXER_DATABASE_URL: undefined,
+      }),
+    )
+
+    expect(source).toMatchObject({
+      xrplRpcUrlPrimary: 'wss://primary.example.test/',
+      xrplRpcUrlSecondary: 'wss://secondary.example.test/',
+    })
+  })
+
+  it('loads offline replay runtime configuration without either RPC endpoint', async () => {
+    const runtime = await loadIndexerRuntimeConfig(
+      await environment({
+        XCS_RPC_URL_PRIMARY: undefined,
+        XCS_RPC_URL_SECONDARY: undefined,
+        XCS_RPC_URL: undefined,
+        XRPL_RPC_URL: undefined,
+      }),
+    )
+
+    expect(runtime).toMatchObject({
+      databaseUrl: 'postgres://localhost/xcs',
+      profile: { profileId: 'testnet' },
+      batchSize: 20,
+    })
+    expect(runtime).not.toHaveProperty('xrplRpcUrlPrimary')
   })
 
   it('uses the legacy RPC URL only as the primary source', async () => {

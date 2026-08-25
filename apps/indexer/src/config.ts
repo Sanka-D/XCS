@@ -2,16 +2,24 @@ import { readFile } from 'node:fs/promises'
 
 import { validateNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
 
-export interface IndexerConfig {
+export interface IndexerRuntimeConfig {
   databaseUrl: string
-  /** @deprecated Use xrplRpcUrlPrimary. */
-  xrplRpcUrl: string
-  xrplRpcUrlPrimary: string
-  xrplRpcUrlSecondary: string
   pollIntervalMs: number
   leaseDurationMs: number
   batchSize: number
   profile: NetworkProfile
+}
+
+export interface IndexerConfig extends IndexerRuntimeConfig {
+  /** @deprecated Use xrplRpcUrlPrimary. */
+  xrplRpcUrl: string
+  xrplRpcUrlPrimary: string
+  xrplRpcUrlSecondary: string
+}
+
+export interface LedgerRpcConfig {
+  xrplRpcUrlPrimary: string
+  xrplRpcUrlSecondary: string
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -58,9 +66,35 @@ function rpcUrl(value: string, name: string): string {
   return parsed.toString()
 }
 
+export function loadLedgerRpcConfig(environment: NodeJS.ProcessEnv = process.env): LedgerRpcConfig {
+  const primary = rpcUrl(
+    environment.XCS_RPC_URL_PRIMARY ??
+      compatibleRequired(environment, 'XCS_RPC_URL', 'XRPL_RPC_URL'),
+    'XCS_RPC_URL_PRIMARY',
+  )
+  const secondary = rpcUrl(required(environment, 'XCS_RPC_URL_SECONDARY'), 'XCS_RPC_URL_SECONDARY')
+  if (primary === secondary) {
+    throw new Error('XCS_RPC_URL_PRIMARY and XCS_RPC_URL_SECONDARY must be distinct')
+  }
+  return { xrplRpcUrlPrimary: primary, xrplRpcUrlSecondary: secondary }
+}
+
 export async function loadIndexerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<IndexerConfig> {
+  const runtime = await loadIndexerRuntimeConfig(environment)
+  const source = loadLedgerRpcConfig(environment)
+  return {
+    ...runtime,
+    xrplRpcUrl: source.xrplRpcUrlPrimary,
+    xrplRpcUrlPrimary: source.xrplRpcUrlPrimary,
+    xrplRpcUrlSecondary: source.xrplRpcUrlSecondary,
+  }
+}
+
+export async function loadIndexerRuntimeConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<IndexerRuntimeConfig> {
   const profilePath = required(environment, 'XCS_NETWORK_PROFILE')
   const profileJson: unknown = JSON.parse(await readFile(profilePath, 'utf8'))
   const pollIntervalMs = Number(
@@ -81,23 +115,10 @@ export async function loadIndexerConfig(
     throw new Error('XCS_INDEXER_BATCH_SIZE must be between 1 and 100')
   }
 
-  const primary = rpcUrl(
-    environment.XCS_RPC_URL_PRIMARY ??
-      compatibleRequired(environment, 'XCS_RPC_URL', 'XRPL_RPC_URL'),
-    'XCS_RPC_URL_PRIMARY',
-  )
-  const secondary = rpcUrl(required(environment, 'XCS_RPC_URL_SECONDARY'), 'XCS_RPC_URL_SECONDARY')
-  if (primary === secondary) {
-    throw new Error('XCS_RPC_URL_PRIMARY and XCS_RPC_URL_SECONDARY must be distinct')
-  }
-
   return {
     databaseUrl:
       environment.XCS_INDEXER_DATABASE_URL ??
       compatibleRequired(environment, 'XCS_DATABASE_URL', 'DATABASE_URL'),
-    xrplRpcUrl: primary,
-    xrplRpcUrlPrimary: primary,
-    xrplRpcUrlSecondary: secondary,
     pollIntervalMs,
     leaseDurationMs,
     batchSize,

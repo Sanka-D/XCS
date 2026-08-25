@@ -34,7 +34,10 @@ function hex(value: string): string {
   return Buffer.from(value, 'utf8').toString('hex').toUpperCase()
 }
 
-function payment(overrides: Record<string, unknown> = {}): LedgerTransaction {
+function payment(
+  overrides: Record<string, unknown> = {},
+  memoJson: JsonValue = schema as unknown as JsonValue,
+): LedgerTransaction {
   return {
     hash: 'c'.repeat(64),
     transactionIndex: 0,
@@ -48,7 +51,7 @@ function payment(overrides: Record<string, unknown> = {}): LedgerTransaction {
           Memo: {
             MemoType: hex('xcs:schema_register'),
             MemoFormat: hex('application/json'),
-            MemoData: hex(canonicalize(schema as unknown as JsonValue)),
+            MemoData: hex(canonicalize(memoJson)),
           },
         },
       ],
@@ -71,6 +74,33 @@ describe('interpretSchemaRegistration', () => {
       status: 'accepted',
       publisher: PUBLISHER,
       schemaUid: expect.stringMatching(/^[0-9a-f]{64}$/),
+    })
+  })
+
+  it('keeps the exact canonical memo while normalizing optional false for the schema UID', () => {
+    const memoJson = {
+      ...schema,
+      fields: {
+        programId: { type: 'string', optional: false },
+        completedAt: { type: 'string' },
+      },
+    } as unknown as JsonValue
+    const result = interpretSchemaRegistration(
+      payment({}, memoJson),
+      { ledgerHash: HASH, ledgerIndex: 100 },
+      profile,
+      new Map(),
+    )
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      memoJson,
+      definition: {
+        fields: {
+          programId: { type: 'string' },
+          completedAt: { type: 'string' },
+        },
+      },
     })
   })
 

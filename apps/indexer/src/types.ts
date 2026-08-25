@@ -1,4 +1,5 @@
 import type {
+  JsonValue,
   NetworkProfile,
   RegisteredSchema,
   ResolvedSchema,
@@ -55,6 +56,8 @@ export type SchemaRegistrationResult =
       transactionIndex: number
       publisher: string
       schemaUid: string
+      /** Exact parsed JCS memo committed by the XRPL transaction. */
+      memoJson: JsonValue
       definition: SchemaDefinition
       resolved: ResolvedSchema
     }

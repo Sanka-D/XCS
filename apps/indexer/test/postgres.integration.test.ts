@@ -13,6 +13,7 @@ import {
   updateIndexerStatus,
   type DatabaseClient,
 } from '@xcs-protocol/db'
+import type { JsonValue } from '@xcs-protocol/core'
 import { and, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -293,6 +294,13 @@ const schemaDefinition: SchemaDefinition = {
     participatedAt: { type: 'string' },
   },
 }
+const schemaMemoJson = {
+  ...schemaDefinition,
+  fields: {
+    raceId: { type: 'string', optional: false },
+    participatedAt: { type: 'string' },
+  },
+} as unknown as JsonValue
 
 function replayProjections(): [LedgerProjection, LedgerProjection] {
   const registrationLedger = ledger(ACTIVATION_LEDGER_INDEX, [SCHEMA_TRANSACTION_HASH])
@@ -308,6 +316,7 @@ function replayProjections(): [LedgerProjection, LedgerProjection] {
           transactionIndex: 0,
           publisher: ISSUER,
           schemaUid: SCHEMA_UID,
+          memoJson: schemaMemoJson,
           definition: schemaDefinition,
           resolved: {
             definition: schemaDefinition,
@@ -957,8 +966,14 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       computeProjectionDigest(firstDatabase.client.db, replayProfile.profileId),
       computeProjectionDigest(secondDatabase.client.db, replayProfile.profileId),
     ])
+    const [storedRegistration] = await firstDatabase.client.db
+      .select({ memoJson: schemaEvents.memoJson })
+      .from(schemaEvents)
+      .where(eq(schemaEvents.profileId, replayProfile.profileId))
+      .limit(1)
 
     expect(secondDigest).toEqual(firstDigest)
+    expect(storedRegistration?.memoJson).toEqual(schemaMemoJson)
     expect(firstDigest.rowCounts).toEqual({
       ledgerCheckpoints: 2,
       schemaEvents: 1,

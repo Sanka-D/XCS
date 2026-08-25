@@ -119,7 +119,7 @@ export function interpretSchemaRegistration(
     }
   }
 
-  let parsed: unknown
+  let parsed: JsonValue | undefined
   try {
     parsed = parseJsonStrict(extracted.envelope.jsonText)
     if (canonicalize(parsed as JsonValue) !== extracted.envelope.jsonText) {
@@ -156,6 +156,7 @@ export function interpretSchemaRegistration(
       transactionIndex: transaction.transactionIndex,
       publisher: extracted.envelope.publisher,
       schemaUid,
+      memoJson: parsed,
       definition,
       resolved,
     }

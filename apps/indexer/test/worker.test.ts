@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { LedgerFixtureBundleError } from '../src/fixture-bundle.js'
+import { QuorumLedgerSource } from '../src/quorum-ledger-source.js'
+import { XrplSourceError } from '../src/source-errors.js'
 import { IndexerWorker } from '../src/worker.js'
 import type {
   AcquiredIndexerLease,
@@ -165,6 +168,49 @@ class MemorySource implements LedgerSource {
   }
 }
 
+type QuorumFailureMode = 'valid' | 'transaction_omitted' | 'malformed' | 'metadata_diverged'
+
+class QuorumTestSource extends MemorySource {
+  constructor(private readonly mode: QuorumFailureMode) {
+    super(100)
+  }
+
+  override async getLedger(ledgerIndex: number): Promise<ValidatedLedger> {
+    this.requestedLedgers.push(ledgerIndex)
+    if (this.mode === 'malformed') {
+      throw new XrplSourceError('SOURCE_RESPONSE_INVALID', 'ledger response is malformed')
+    }
+
+    const value = ledger(ledgerIndex)
+    value.transactions = [
+      {
+        hash: 'e'.repeat(64),
+        transactionIndex: 0,
+        transaction: { TransactionType: 'Payment', Sequence: 1 },
+        metadata: { TransactionIndex: 0, TransactionResult: 'tesSUCCESS' },
+      },
+    ]
+    if (this.mode === 'transaction_omitted') value.transactions = []
+    if (this.mode === 'metadata_diverged') {
+      value.transactions[0]!.metadata.TransactionResult = 'tecFAILED'
+    }
+    return value
+  }
+}
+
+class CorruptFixtureSource extends MemorySource {
+  constructor() {
+    super(100)
+  }
+
+  override async getLedger(): Promise<ValidatedLedger> {
+    throw new LedgerFixtureBundleError(
+      'FIXTURE_BUNDLE_INTEGRITY_FAILED',
+      'fixture ledger digest mismatch',
+    )
+  }
+}
+
 describe('IndexerWorker', () => {
   it('processes at most the configured batch and atomically marks the tip ready', async () => {
     const repository = new MemoryRepository()
@@ -215,6 +261,54 @@ describe('IndexerWorker', () => {
     expect(repository.released).toBe(true)
     expect(repository.halted).toEqual([])
     expect(source.connected).toBe(false)
+  })
+
+  it.each([
+    ['a source omits a transaction', 'transaction_omitted', 'SOURCE_DIVERGENCE'],
+    ['a source returns malformed ledger data', 'malformed', 'SOURCE_RESPONSE_INVALID'],
+    ['the normalized metadata diverges', 'metadata_diverged', 'SOURCE_DIVERGENCE'],
+  ] as const)(
+    'halts before ledger persistence when %s',
+    async (_name, failureMode, expectedErrorCode) => {
+      const repository = new MemoryRepository()
+      const source = new QuorumLedgerSource(
+        new QuorumTestSource('valid'),
+        new QuorumTestSource(failureMode),
+      )
+      const worker = new IndexerWorker({
+        profile,
+        repository,
+        source,
+        pollIntervalMs: 250,
+        writerId: token.writerId,
+      })
+
+      await expect(worker.start(new AbortController().signal)).rejects.toMatchObject({
+        code: expectedErrorCode,
+      })
+      expect(repository.persisted).toEqual([])
+      expect(repository.checkpoint).toBeUndefined()
+      expect(repository.halted).toEqual([expect.objectContaining({ errorCode: expectedErrorCode })])
+    },
+  )
+
+  it('preserves a lazy fixture integrity code when the worker halts', async () => {
+    const repository = new MemoryRepository()
+    const worker = new IndexerWorker({
+      profile,
+      repository,
+      source: new CorruptFixtureSource(),
+      pollIntervalMs: 250,
+      writerId: token.writerId,
+    })
+
+    await expect(worker.start(new AbortController().signal)).rejects.toMatchObject({
+      code: 'FIXTURE_BUNDLE_INTEGRITY_FAILED',
+    })
+    expect(repository.persisted).toEqual([])
+    expect(repository.halted).toEqual([
+      expect.objectContaining({ errorCode: 'FIXTURE_BUNDLE_INTEGRITY_FAILED' }),
+    ])
   })
 
   it('quorum-verifies a replay bound and stops there even when the tip advances', async () => {

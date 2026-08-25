@@ -288,7 +288,7 @@ export class PostgresIndexerRepository implements IndexerRepository {
             ...(registration.status === 'accepted'
               ? {
                   schemaUid: registration.schemaUid,
-                  memoJson: registration.definition,
+                  memoJson: registration.memoJson,
                 }
               : {
                   reasonCode: registration.reasonCode,

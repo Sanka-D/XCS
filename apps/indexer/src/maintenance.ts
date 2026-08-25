@@ -12,14 +12,22 @@ import {
 } from '@xcs-protocol/db'
 import { count, eq } from 'drizzle-orm'
 
-import { loadIndexerConfig, type IndexerConfig } from './config.js'
+import {
+  loadIndexerConfig,
+  loadIndexerRuntimeConfig,
+  type IndexerConfig,
+  type IndexerRuntimeConfig,
+} from './config.js'
+import { LedgerFixtureBundleError } from './fixture-bundle.js'
+import { prepareFixtureReplay } from './fixture-replay.js'
 import { computeProjectionDigest } from './projection-digest.js'
 import { QuorumLedgerSource } from './quorum-ledger-source.js'
-import { loadReplayTarget } from './replay-target.js'
+import { loadReplayTarget, type ReplayTarget } from './replay-target.js'
 import { PostgresIndexerRepository } from './repository.js'
 import { sourceErrorCode } from './source-errors.js'
 import { IndexerWorker } from './worker.js'
 import { XrplLedgerSource } from './xrpl-source.js'
+import type { LedgerSource } from './types.js'
 
 type MaintenanceCommand = 'preflight' | 'replay' | 'projection-digest'
 
@@ -119,11 +127,43 @@ async function assertProjectionEmpty(database: XcsDatabase, profileId: string): 
   }
 }
 
+async function loadReplayExecution(): Promise<{
+  config: IndexerRuntimeConfig
+  source: LedgerSource
+  replayTarget: ReplayTarget
+  evidence: 'live-quorum' | 'fixture-bundle'
+}> {
+  const fixtureDirectory = process.env.XCS_REPLAY_FIXTURE_BUNDLE
+  if (fixtureDirectory === undefined || fixtureDirectory.trim().length === 0) {
+    const config = await loadIndexerConfig()
+    return {
+      config,
+      source: quorumSource(config),
+      replayTarget: loadReplayTarget(),
+      evidence: 'live-quorum',
+    }
+  }
+
+  const config = await loadIndexerRuntimeConfig()
+  const profileFileBytes = await readFile(requiredEnvironment('XCS_NETWORK_PROFILE'))
+  const explicitTarget =
+    process.env.XCS_REPLAY_TARGET_LEDGER_INDEX !== undefined ||
+    process.env.XCS_REPLAY_TARGET_LEDGER_HASH !== undefined
+      ? loadReplayTarget()
+      : undefined
+  const { source, replayTarget } = await prepareFixtureReplay({
+    directory: fixtureDirectory,
+    bundleDigest: requiredEnvironment('XCS_REPLAY_FIXTURE_BUNDLE_SHA256'),
+    profile: config.profile,
+    profileFileBytes,
+    ...(explicitTarget === undefined ? {} : { explicitTarget }),
+  })
+  return { config, source, replayTarget, evidence: 'fixture-bundle' }
+}
+
 async function runReplay(): Promise<void> {
-  const config = await loadIndexerConfig()
-  const replayTarget = loadReplayTarget()
+  const { config, source, replayTarget, evidence } = await loadReplayExecution()
   const database = createDatabaseClient(config.databaseUrl)
-  const source = quorumSource(config)
   const controller = new AbortController()
   let caughtUpLedger: number | undefined
 
@@ -152,7 +192,7 @@ async function runReplay(): Promise<void> {
     }
     const digest = await computeProjectionDigest(database.db, config.profile.profileId)
     process.stdout.write(
-      `${JSON.stringify({ ok: true, replayTarget, caughtUpLedger, projectionDigest: digest })}\n`,
+      `${JSON.stringify({ ok: true, evidence, replayTarget, caughtUpLedger, projectionDigest: digest })}\n`,
     )
   } finally {
     await database.close()
@@ -184,7 +224,10 @@ try {
   if (command === 'replay') await runReplay()
   if (command === 'projection-digest') await runProjectionDigest()
 } catch (error) {
-  const code = error instanceof MaintenanceError ? error.code : sourceErrorCode(error)
+  const code =
+    error instanceof MaintenanceError || error instanceof LedgerFixtureBundleError
+      ? error.code
+      : sourceErrorCode(error)
   process.stderr.write(`${JSON.stringify({ ok: false, code })}\n`)
   process.exitCode = 1
 }

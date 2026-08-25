@@ -1,5 +1,7 @@
 export * from './continuity.js'
 export * from './credential-mutations.js'
+export * from './fixture-bundle.js'
+export * from './fixture-replay.js'
 export * from './project-ledger.js'
 export * from './profile-preflight.js'
 export * from './projection-digest.js'
