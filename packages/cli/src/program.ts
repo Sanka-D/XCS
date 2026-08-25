@@ -1,4 +1,15 @@
-import { canonicalize, parseJsonStrict, validateSchema, type JsonValue } from '@xcs-protocol/core'
+import {
+  canonicalize,
+  computePayloadSha256Hex,
+  createHttpsPayloadUri,
+  createIpfsRawPayloadUri,
+  parseCredentialPayload,
+  parseJsonStrict,
+  validateCredentialPayload,
+  validateSchema,
+  verifyPayloadIntegrity,
+  type JsonValue,
+} from '@xcs-protocol/core'
 import {
   buildCredentialAccept,
   buildCredentialCreate,
@@ -19,6 +30,9 @@ import { Client } from 'xrpl'
 import { CliError } from './errors.js'
 import { readJsonFile, writeJson, type CliIo } from './io.js'
 import { CompositeOperationJournal, JsonLinesOperationJournal } from './journal.js'
+
+const VERIFICATION_REQUEST_TIMEOUT_MS = 10_000
+const MAX_VERIFICATION_RESPONSE_BYTES = 1024 * 1024
 
 export interface CliDependencies {
   readonly io: CliIo
@@ -71,6 +85,23 @@ interface CredentialVerifyOptions {
   readonly schema: string
   readonly payload?: string | undefined
   readonly resolvePayload?: boolean | undefined
+}
+
+interface PayloadContextOptions {
+  readonly issuer: string
+  readonly subject: string
+  readonly schema: string
+  readonly schemaFile: string
+}
+
+interface PayloadBuildOptions extends PayloadContextOptions {
+  readonly httpsUrl?: string | undefined
+  readonly ipfs?: boolean | undefined
+  readonly output?: string | undefined
+}
+
+interface PayloadCheckOptions extends PayloadContextOptions {
+  readonly uri: string
 }
 
 interface TxSubmitOptions extends CommonProfileOptions {
@@ -171,6 +202,100 @@ export function createProgram(dependencies: CliDependencies): Command {
         publisher: options.publisher,
       })
       writeJson(io, { schemaUid: uid })
+    })
+
+  const payload = program
+    .command('payload')
+    .description('Build and verify canonical XCS credential payloads')
+  payload
+    .command('build')
+    .description('Build canonical payload bytes and their integrity-bound URI')
+    .argument('<claims-file>', 'JSON object containing the public claims')
+    .requiredOption('--schema-file <file>', 'registered XCS schema definition JSON')
+    .requiredOption('--issuer <address>', 'issuer classic address')
+    .requiredOption('--subject <address>', 'subject classic address')
+    .requiredOption('--schema <uid>', '64-character XCS schema UID')
+    .option('--https-url <url>', 'public HTTPS URL without an integrity fragment')
+    .option('--ipfs', 'derive a raw CIDv1 IPFS URI instead of an HTTPS URI', false)
+    .option('--output <file>', 'write exact canonical payload bytes without a trailing newline')
+    .action(async (claimsFile: string, options: PayloadBuildOptions) => {
+      assertOnePayloadLocation(options)
+      const [claims, schemaInput] = await Promise.all([
+        readJsonFile(io, claimsFile),
+        readJsonFile(io, options.schemaFile),
+      ])
+      const schemaDefinition = validateStandalonePayloadSchema(schemaInput)
+      const credentialPayload = validateCredentialPayload(
+        {
+          xcsVersion: '0.1',
+          issuer: options.issuer,
+          subject: options.subject,
+          schema: options.schema.toLowerCase(),
+          claims,
+        },
+        {
+          issuer: options.issuer,
+          subject: options.subject,
+          schemaUid: options.schema.toLowerCase(),
+          schema: schemaDefinition.fields,
+        },
+      )
+      const canonical = canonicalize(credentialPayload as JsonValue)
+      const uri =
+        options.httpsUrl === undefined
+          ? createIpfsRawPayloadUri(canonical)
+          : createHttpsPayloadUri(options.httpsUrl, canonical)
+      if (options.output !== undefined) {
+        await writeExactPayloadFile(io, options.output, canonical)
+      }
+      writeJson(io, {
+        payload: credentialPayload,
+        canonical,
+        byteLength: new TextEncoder().encode(canonical).byteLength,
+        sha256: computePayloadSha256Hex(canonical),
+        uri,
+        ...(options.output !== undefined ? { output: options.output } : {}),
+      })
+    })
+
+  payload
+    .command('check')
+    .description('Validate canonical payload bytes and compare them with an integrity-bound URI')
+    .argument('<payload-file>', 'canonical XCS credential payload file')
+    .requiredOption('--schema-file <file>', 'registered XCS schema definition JSON')
+    .requiredOption('--issuer <address>', 'issuer classic address')
+    .requiredOption('--subject <address>', 'subject classic address')
+    .requiredOption('--schema <uid>', '64-character XCS schema UID')
+    .requiredOption('--uri <uri>', 'integrity-bound ipfs:// or https:// payload URI')
+    .action(async (payloadFile: string, options: PayloadCheckOptions) => {
+      const [content, schemaInput] = await Promise.all([
+        readTextFile(io, payloadFile),
+        readJsonFile(io, options.schemaFile),
+      ])
+      const schemaDefinition = validateStandalonePayloadSchema(schemaInput)
+      const parsed = parseCredentialPayload(content, {
+        issuer: options.issuer,
+        subject: options.subject,
+        schemaUid: options.schema.toLowerCase(),
+        schema: schemaDefinition.fields,
+      })
+      const integrity = verifyPayloadIntegrity(content, options.uri)
+      if (integrity.status !== 'valid') {
+        throw new CliError(
+          'XCS_CLI_PAYLOAD_INTEGRITY',
+          `Payload integrity check returned ${integrity.status}.`,
+          5,
+          { integrity },
+        )
+      }
+      writeJson(io, {
+        valid: true,
+        payload: parsed,
+        byteLength: new TextEncoder().encode(content).byteLength,
+        sha256: computePayloadSha256Hex(content),
+        uri: options.uri,
+        integrity,
+      })
     })
 
   const credential = program.command('credential').description('Manage native XRPL Credentials')
@@ -363,6 +488,49 @@ async function readSignedBlob(io: CliIo, path?: string): Promise<string> {
   return trimmed
 }
 
+async function readTextFile(io: CliIo, path: string): Promise<string> {
+  try {
+    return await io.readTextFile(path)
+  } catch (error) {
+    throw new CliError('XCS_CLI_FILE_READ', `Cannot read ${path}.`, 2, {
+      cause: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+async function writeExactPayloadFile(io: CliIo, path: string, content: string): Promise<void> {
+  try {
+    await io.writeTextFile(path, content)
+  } catch (error) {
+    throw new CliError('XCS_CLI_FILE_WRITE', `Cannot write ${path}.`, 2, {
+      cause: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+function validateStandalonePayloadSchema(input: JsonValue) {
+  const schema = validateSchema(input)
+  if (schema.extends !== undefined) {
+    throw new CliError(
+      'XCS_CLI_SCHEMA_CATALOG_REQUIRED',
+      'Payload commands require a fully standalone schema; inherited schemas need a resolved catalog.',
+      2,
+      { extends: schema.extends },
+    )
+  }
+  return schema
+}
+
+function assertOnePayloadLocation(options: PayloadBuildOptions): void {
+  if ((options.httpsUrl === undefined) === (options.ipfs !== true)) {
+    throw new CliError(
+      'XCS_CLI_PAYLOAD_LOCATION',
+      'Choose exactly one payload location: --https-url or --ipfs.',
+      2,
+    )
+  }
+}
+
 async function requestVerification(
   dependencies: CliDependencies,
   options: CredentialVerifyOptions,
@@ -385,11 +553,20 @@ async function requestVerification(
       2,
     )
   }
+  const controller = new AbortController()
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, VERIFICATION_REQUEST_TIMEOUT_MS)
   let response: Response
+  let text: string
   try {
     response = await dependencies.fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
+      redirect: 'error',
+      signal: controller.signal,
       body: JSON.stringify({
         network: options.network,
         issuer: options.issuer,
@@ -399,13 +576,23 @@ async function requestVerification(
         ...(options.resolvePayload === true ? { resolvePayload: true } : {}),
       }),
     })
+    text = await readBoundedVerificationResponse(response)
   } catch (error) {
-    throw new CliError('XCS_CLI_NETWORK', 'Cannot reach the XCS verification API.', 3, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
+    if (error instanceof CliError) throw error
+    throw new CliError(
+      'XCS_CLI_NETWORK',
+      timedOut
+        ? 'The XCS verification API request timed out.'
+        : 'Cannot reach the XCS verification API.',
+      3,
+      {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    )
+  } finally {
+    clearTimeout(timeout)
   }
 
-  const text = await response.text()
   let body: unknown
   try {
     body = parseJsonStrict(text)
@@ -423,10 +610,16 @@ async function requestVerification(
       typeof (body as { error?: unknown }).error === 'string'
         ? (body as { error: string }).error
         : undefined
-    if (
-      response.status === 503 &&
-      (apiErrorCode === 'INDEXER_STALE' || apiErrorCode === 'INDEXER_NOT_INITIALIZED')
-    ) {
+    const indexerUnavailableCodes = new Set([
+      'INDEXER_STALE',
+      'INDEXER_NOT_INITIALIZED',
+      'INDEXER_STATUS_UNAVAILABLE',
+      'INDEXER_NOT_READY',
+      'INDEXER_HALTED',
+      'INDEXER_LEASE_EXPIRED',
+      'INDEXER_EVIDENCE_INVALID',
+    ])
+    if (response.status === 503 && apiErrorCode && indexerUnavailableCodes.has(apiErrorCode)) {
       throw new CliError(
         'XCS_CLI_INDEXER_UNAVAILABLE',
         'The XCS API cannot provide a fresh indexed proof.',
@@ -439,6 +632,52 @@ async function requestVerification(
     })
   }
   return body
+}
+
+async function readBoundedVerificationResponse(response: Response): Promise<string> {
+  const contentLength = response.headers.get('content-length')
+  if (contentLength !== null) {
+    if (!/^[0-9]+$/u.test(contentLength)) {
+      throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API returned an invalid Content-Length.', 3)
+    }
+    if (Number(contentLength) > MAX_VERIFICATION_RESPONSE_BYTES) {
+      throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response exceeds the 1 MiB limit.', 3)
+    }
+  }
+
+  if (response.body === null) {
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_VERIFICATION_RESPONSE_BYTES) {
+      throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response exceeds the 1 MiB limit.', 3)
+    }
+    return new TextDecoder().decode(bytes)
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      byteLength += next.value.byteLength
+      if (byteLength > MAX_VERIFICATION_RESPONSE_BYTES) {
+        await reader.cancel('XCS_CLI_API_RESPONSE_TOO_LARGE').catch(() => undefined)
+        throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response exceeds the 1 MiB limit.', 3)
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
 }
 
 function isAcceptableVerification(input: unknown): boolean {

@@ -14,11 +14,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   applyJournalEntry,
   canRetryOperation,
+  serializeOperationReceipts,
+  toSanitizedOperationReceipt,
   type StoredOperation,
 } from '../app/utils/operationJournal'
 import {
   assertValidatedTesSuccess,
-  createPersistingWalletSigner,
+  createWalletSigner,
   normalizeWalletSignature,
 } from '../app/utils/walletSubmission'
 
@@ -127,37 +129,44 @@ describe('wallet sign-only normalization', () => {
     }
   })
 
-  it('awaits durable persistence before returning the normalized signature', async () => {
+  it('normalizes a wallet signature without persisting unverified output', async () => {
     const { transaction, signed } = signedPayment()
-    const events: string[] = []
-    const persist = vi.fn(async () => {
-      events.push('persisted')
+    const signer = createWalletSigner({
+      sign: async () => ({ hash: '', tx_blob: signed.tx_blob }),
     })
-    const signer = createPersistingWalletSigner(
-      {
-        sign: async () => {
-          events.push('signed')
-          return { hash: '', tx_blob: signed.tx_blob }
-        },
-      },
-      persist,
-    )
 
     await expect(signer.sign(transaction)).resolves.toMatchObject({ hash: signed.hash })
-    expect(events).toEqual(['signed', 'persisted'])
-    expect(persist).toHaveBeenCalledOnce()
   })
 
-  it('does not release a signature when durable persistence fails', async () => {
-    const { transaction, signed } = signedPayment()
-    const signer = createPersistingWalletSigner(
-      { sign: async () => ({ hash: '', tx_blob: signed.tx_blob }) },
-      async () => {
-        throw new Error('INDEXED_DB_WRITE_FAILED')
-      },
-    )
+  it('never persists or submits a wallet blob that differs from the reviewed transaction', async () => {
+    const { transaction } = signedPayment()
+    const attacker = Wallet.generate()
+    const changed = attacker.sign({
+      ...transaction,
+      Account: attacker.address,
+    })
+    const persist = vi.fn()
+    const submit = vi.fn()
+    const entries: SubmissionJournalEntry[] = []
+    const client = { isConnected: () => true, submit } as unknown as Client
 
-    await expect(signer.sign(transaction)).rejects.toThrow('INDEXED_DB_WRITE_FAILED')
+    await expect(
+      signPreparedAndSubmit(
+        client,
+        transaction,
+        createWalletSigner({ sign: async () => ({ hash: '', tx_blob: changed.tx_blob }) }),
+        {
+          journal: { append: async (entry) => void entries.push(entry) },
+          onValidatedSignature: persist,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNER_RESULT' })
+    expect(persist).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    const failed = entries.reduce(applyJournalEntry, storedOperation())
+    expect(entries.map((entry) => entry.stage)).toEqual(['prepared', 'failed'])
+    expect(failed.txBlob).toBeUndefined()
+    expect(canRetryOperation(failed)).toBe(false)
   })
 
   it('persists the blob before the SDK makes its first submit call', async () => {
@@ -168,17 +177,12 @@ describe('wallet sign-only normalization', () => {
         events.push(`journal:${entry.stage}`)
       },
     }
-    const signer = createPersistingWalletSigner(
-      {
-        sign: async () => {
-          events.push('wallet:sign')
-          return { hash: '', tx_blob: signed.tx_blob }
-        },
+    const signer = createWalletSigner({
+      sign: async () => {
+        events.push('wallet:sign')
+        return { hash: '', tx_blob: signed.tx_blob }
       },
-      async () => {
-        events.push('indexeddb:persisted')
-      },
-    )
+    })
     const client = {
       isConnected: () => true,
       submit: async () => {
@@ -200,6 +204,9 @@ describe('wallet sign-only normalization', () => {
         operationId: 'operation-1',
         pollIntervalMs: 1,
         timeoutMs: 10,
+        onValidatedSignature: async () => {
+          events.push('indexeddb:persisted')
+        },
       }),
     ).resolves.toMatchObject({ status: 'validated', transactionResult: 'tesSUCCESS' })
     expect(events.indexOf('indexeddb:persisted')).toBeLessThan(events.indexOf('network:submit'))
@@ -261,6 +268,29 @@ describe('operation journal state', () => {
     expect(canRetryOperation(updated)).toBe(true)
   })
 
+  it('offers tuple-only retries only with an exact generation context', () => {
+    const base = storedOperation({
+      transactionType: 'CredentialAccept',
+      stage: 'pending',
+      txBlob: 'ABCD',
+      txHash: 'A'.repeat(64),
+      lastLedgerSequence: 100,
+    })
+    expect(canRetryOperation(base)).toBe(false)
+    expect(
+      canRetryOperation({
+        ...base,
+        business: {
+          action: 'credential-accept',
+          issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+          subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+          schemaUid: '12'.repeat(32),
+          generationId: '34'.repeat(32),
+        },
+      }),
+    ).toBe(true)
+  })
+
   it('never offers retry for a validated transaction', () => {
     const operation = storedOperation({
       stage: 'pending',
@@ -277,5 +307,106 @@ describe('operation journal state', () => {
 
     expect(validated.txBlob).toBeUndefined()
     expect(canRetryOperation(validated)).toBe(false)
+  })
+
+  it('does not regress a terminal operation when a stale journal append arrives', () => {
+    const operation = storedOperation({
+      stage: 'validated',
+      txHash: 'A'.repeat(64),
+      engineResult: 'tesSUCCESS',
+      updatedAt: '2026-08-19T12:02:00.000Z',
+    })
+    const unchanged = applyJournalEntry(operation, {
+      operationId: operation.operationId,
+      at: '2026-08-19T12:03:00.000Z',
+      stage: 'pending',
+    })
+
+    expect(unchanged).toBe(operation)
+  })
+
+  it.each(['validated', 'expired', 'failed'] as const)(
+    'removes the signed blob from a %s terminal operation',
+    (stage) => {
+      const operation = storedOperation({ stage: 'pending', txBlob: 'SECRET_SIGNED_BLOB' })
+      const terminal = applyJournalEntry(operation, {
+        operationId: operation.operationId,
+        at: '2026-08-19T12:02:00.000Z',
+        stage,
+      })
+
+      expect(terminal.txBlob).toBeUndefined()
+      expect(canRetryOperation(terminal)).toBe(false)
+    },
+  )
+
+  it('runtime-sanitizes portable receipts and never exports blobs, claims or messages', () => {
+    const operation = storedOperation({
+      stage: 'validated',
+      txBlob: 'SECRET_SIGNED_BLOB',
+      message: 'PRIVATE_FAILURE_MESSAGE',
+      txHash: 'A'.repeat(64),
+      engineResult: 'tesSUCCESS',
+      ledgerIndex: 123,
+      businessConfirmation: 'mismatch',
+      business: {
+        action: 'credential-accept',
+        issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+        schemaUid: 'AB'.repeat(32),
+        generationId: 'EF'.repeat(32),
+        payloadDigestHex: 'CD'.repeat(32),
+        claims: { privateValue: 'DO_NOT_EXPORT' },
+        payload: 'DO_NOT_EXPORT',
+      } as never,
+    })
+
+    const receipt = toSanitizedOperationReceipt(operation)
+    expect(receipt.business).toEqual({
+      action: 'credential-accept',
+      issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+      subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+      schemaUid: 'ab'.repeat(32),
+      generationId: 'ef'.repeat(32),
+      payloadDigestHex: 'cd'.repeat(32),
+    })
+    expect(receipt.businessConfirmation).toBe('mismatch')
+    const exported = serializeOperationReceipts([operation], '2026-08-19T13:00:00.000Z')
+    expect(exported).not.toContain('SECRET_SIGNED_BLOB')
+    expect(exported).not.toContain('PRIVATE_FAILURE_MESSAGE')
+    expect(exported).not.toContain('DO_NOT_EXPORT')
+    expect(exported).not.toContain('claims')
+    expect(exported).not.toContain('"businessConfirmation": "confirmed"')
+    expect(JSON.parse(exported)).toMatchObject({
+      receiptExportVersion: '0.1',
+      exportedAt: '2026-08-19T13:00:00.000Z',
+      receipts: [{ ledgerIndex: 123, engineResult: 'tesSUCCESS' }],
+    })
+  })
+
+  it('never upgrades a generation-bound receipt to confirmed without event evidence', () => {
+    const operation = storedOperation({
+      transactionType: 'CredentialAccept',
+      stage: 'validated',
+      business: {
+        action: 'credential-accept',
+        issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+        schemaUid: '12'.repeat(32),
+        generationId: '34'.repeat(32),
+      },
+    })
+
+    expect(toSanitizedOperationReceipt(operation)).toMatchObject({
+      stage: 'validated',
+      businessConfirmation: 'pending',
+    })
+    expect(
+      toSanitizedOperationReceipt({
+        ...operation,
+        stage: 'prepared',
+        businessConfirmation: 'confirmed',
+      }),
+    ).toMatchObject({ stage: 'prepared', businessConfirmation: 'pending' })
   })
 })

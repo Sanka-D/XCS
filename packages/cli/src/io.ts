@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 
 import { parseJsonStrict, type JsonValue } from '@xcs-protocol/core'
 
@@ -8,6 +8,7 @@ export interface CliIo {
   readonly stdinIsTerminal: boolean
   readStdin(): Promise<string>
   readTextFile(path: string): Promise<string>
+  writeTextFile(path: string, value: string): Promise<void>
   writeStdout(value: string): void
   writeStderr(value: string): void
 }
@@ -22,6 +23,7 @@ export const processIo: CliIo = {
     return Buffer.concat(chunks).toString('utf8')
   },
   readTextFile: (path) => readFile(path, 'utf8'),
+  writeTextFile: (path, value) => writeFile(path, value, 'utf8'),
   writeStdout: (value) => process.stdout.write(value),
   writeStderr: (value) => process.stderr.write(value),
 }

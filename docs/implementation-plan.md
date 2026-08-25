@@ -19,6 +19,20 @@ An organization must be able to complete this flow:
 The reference service remains non-custodial and reproducible. A self-hosted indexer processing the
 same validated ledgers must reach the same protocol result as the shared service.
 
+## Current implementation evidence
+
+The repository now contains the strict dual-`rippled` preflight/quorum, a fenced PostgreSQL writer,
+transaction-root checkpoints, fail-closed repeatable-read API guards, quorum-verified bounded
+empty-database replay, least-privilege database roles, and a timestamp-free projection digest. The
+browser submission RPC is configured separately from the two private indexer sources.
+Unit/conformance suites cover the deterministic protocol, source normalization, worker, API, CLI
+and browser flow; CI contains a PostgreSQL 18 job for the eight migration, role-permission, fencing,
+and replay scenarios.
+
+This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
+the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
+captured ledger fixtures, and two-entity pilot evidence remain external gates.
+
 ## Scope boundaries for v0.1
 
 The following are deliberately not v0.1 promises:
@@ -29,6 +43,8 @@ The following are deliberately not v0.1 promises:
 - no Mainnet launch before the Testnet, interoperability, operations, and security gates below;
 - no in-place migration from the historical Nuxt MVP database;
 - no account-wide public Credential enumeration endpoint.
+- no HSM integration, batch issuance, private claims, multi-tenant administration, or Mainnet
+  activation in the first controlled pilot.
 
 ## Milestone 0 — adopt the reference baseline
 
@@ -72,8 +88,14 @@ Work:
   from activation;
 - add a profile smoke check that validates the registry account flags, activation hash, amendment,
   network ID, and source history before indexing starts;
-- configure a second ledger provider for comparison and documented failover, without silently
-  skipping any ledger.
+- require two independently operated ledger providers and compare every normalized ledger header,
+  transaction root, transaction, and metadata object before projection;
+- reject missing transaction arrays, metadata, hashes, duplicate transaction hashes, discontinuous
+  transaction indexes, and provider disagreement instead of treating incomplete input as empty;
+- persist an indexer state (`starting`, `catching_up`, `ready`, or `halted`) and make authoritative API
+  reads return `503` immediately while the indexer is halted or lacks quorum;
+- apply the additive integrity migration to a fresh XCS database, then prove transaction rollback,
+  restart, idempotency, and deterministic replay against real PostgreSQL.
 
 Exit criteria:
 
@@ -81,6 +103,9 @@ Exit criteria:
 - the indexer starts at the activation boundary, reaches the Testnet tip, and remains ready;
 - a clean rebuild produces identical schema UIDs, events, projections, and checkpoint hashes;
 - changing any immutable profile field causes startup to fail closed.
+- omitting or changing any ledger transaction or metadata field on either provider halts ingestion
+  before the checkpoint advances;
+- two fresh databases replayed from activation produce the same timestamp-free projection digest.
 
 Rollback: discard the new projection database and profile deployment. A faulty or reset Testnet
 profile is replaced by a new profile ID and activation boundary, never edited in place.
@@ -155,7 +180,8 @@ Work:
 - sign release tags and container artifacts and record build provenance;
 - deploy browser security headers and a strict Content Security Policy compatible with the selected
   wallets;
-- arrange an independent defensive security review and close its release-blocking findings;
+- perform an internal threat-model and defensive design review, and close release-blocking findings
+  before exposing the pilot; this review does not replace the final post-freeze audit in milestone 6;
 - document data retention, public-payload constraints, abuse handling, and incident contacts.
 
 Exit criteria:
@@ -176,15 +202,19 @@ Work:
 
 - add a schema-authoring workflow that validates locally, previews canonical bytes and memo size, and
   records the resulting registration operation;
-- build a non-custodial issuer tool on the SDK `Signer` boundary: browser wallet for low volume and an
-  injected offline/HSM integration for managed environments;
+- build the controlled pilot on the SDK `Signer` boundary using the explicitly tested Crossmark and
+  GemWallet browser adapters for low-volume, unit issuance;
 - add deterministic payload generation, organization-hosted HTTPS publication, optional public IPFS
   publication, and a mandatory proof that the published bytes match the URI before issuance;
-- support batch preparation and idempotent resumption without batch key custody in the shared API;
+- support idempotent resumption and sanitized local receipts for each unit operation;
 - add organization-local audit exports containing schema, operation, ledger, hash, actor, and outcome
   metadata, but never seeds or private claim data by default;
 - add subject acceptance links and clear pending/active/expired/deleted lifecycle guidance;
 - run pilots with at least two entities using different signer and payload-hosting setups.
+
+Offline/HSM signing, batch issuance, multi-operator administration, and multi-tenant hosting are
+post-pilot work. Adding any of these changes the signing or authorization surface and requires a new
+threat-model review before release.
 
 Exit criteria:
 
@@ -194,7 +224,7 @@ Exit criteria:
 - signing keys remain within the issuer-controlled wallet, offline signer, or HSM boundary;
 - pilot feedback is resolved or explicitly deferred before a stable release.
 
-## Milestone 6 — Mainnet go/no-go
+## Milestone 6 — final audit and Mainnet go/no-go
 
 **Goal:** decide whether a separately activated Mainnet profile is justified.
 
@@ -202,7 +232,10 @@ Required gates:
 
 - the v0.1 candidate is frozen and independently implemented;
 - real-wallet Testnet matrices and issuer pilots are complete;
-- security review findings are closed and operational recovery drills pass;
+- an independent defensive security audit covers the exact frozen commit, container digests, signer
+  adapters, indexer quorum, payload resolver, and authorization surfaces shipped after milestone 5;
+- security review findings are closed and operational recovery drills pass; any material code or
+  configuration change after the audit triggers a documented delta review or re-audit;
 - privacy, legal, support, abuse, and issuer-trust presentation have organization approval;
 - dependency and wallet versions supporting native Credentials are pinned and monitored;
 - a separate Mainnet registry ceremony, profile, database, and activation plan have two-person review;
@@ -232,8 +265,9 @@ baseline adopted
   → immutable Testnet profile
   → real wallet and ledger journey
   → interoperable v0.1 candidate
-  → operational and security readiness
+  → operational readiness and pre-pilot review
   → issuer pilots
+  → final frozen-artifact audit
   → Mainnet go/no-go
 ```
 

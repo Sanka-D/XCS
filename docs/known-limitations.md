@@ -11,10 +11,19 @@ intentional and must remain visible to integrators.
   `schemas` and `credentials` tables are incompatible with this indexer's projection. Preserve a
   backup and deploy this alpha against a fresh database; legacy off-chain data needs a separately
   designed export/transform/import process.
-- The indexer requires complete validated-ledger history from that activation boundary. A public RPC
-  endpoint that has pruned the range is insufficient.
+- The indexer requires two independently operated WSS `rippled` sources with complete validated-ledger
+  history from activation. Clio is not supported by the current preflight response contract, a pruned
+  source is insufficient, and distinct URLs do not by themselves prove operator independence.
+- `XCS_PUBLIC_RPC_URL` is deliberately exposed to every browser and must contain no secret. It is a
+  transaction-submission convenience, not a third quorum source and not authoritative verification
+  evidence; the two indexer source variables remain private server configuration. The web runtime
+  rejects embedded username/password values and non-TLS public endpoints (`ws://` is loopback-only),
+  but operators must also keep opaque credentials out of the URL path and query string.
 - PostgreSQL, Kubo, Docker, and real Testnet services are separate integration tiers; pure unit tests
   do not prove those deployments.
+- PostgreSQL is a self-hostable, rebuildable reference projection, not a Commons authority and not a
+  protocol requirement for third-party implementations. A MongoDB adapter would need to reproduce
+  atomic checkpoints, single-writer fencing, snapshots, constraints, and deterministic replay.
 
 ## Wallets
 
@@ -40,3 +49,7 @@ short HTTPS base URL until the upstream validator is fixed.
 The optional pinning API is disabled by default, limited to configured Testnet profiles, and not a
 private storage service. Its PII field-name filter is only a guardrail, not a classifier. There is no
 promise that public IPFS content disappears after the local 90-day pin expires.
+
+The browser acceptance pilot reads issuer-hosted HTTPS payloads directly only after consent. This
+reveals IP address and timing to that host; local/IP-literal hostnames are rejected, but DNS rebinding
+remains a browser-boundary risk. Private or sensitive claims are outside this pilot.

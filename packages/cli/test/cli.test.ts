@@ -1,4 +1,4 @@
-import { createHttpsPayloadUri } from '@xcs-protocol/core'
+import { canonicalize, createHttpsPayloadUri, type JsonValue } from '@xcs-protocol/core'
 import { encode, type Client } from 'xrpl'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -29,12 +29,15 @@ function memoryIo(files: Record<string, string> = {}): {
   io: CliIo
   stdout: string[]
   stderr: string[]
+  writtenFiles: Record<string, string>
 } {
   const stdout: string[] = []
   const stderr: string[] = []
+  const writtenFiles: Record<string, string> = {}
   return {
     stdout,
     stderr,
+    writtenFiles,
     io: {
       stdinIsTerminal: true,
       readStdin: async () => '',
@@ -42,6 +45,9 @@ function memoryIo(files: Record<string, string> = {}): {
         const contents = files[path]
         if (contents === undefined) throw new Error('not found')
         return contents
+      },
+      writeTextFile: async (path, value) => {
+        writtenFiles[path] = value
       },
       writeStdout: (value) => stdout.push(value),
       writeStderr: (value) => stderr.push(value),
@@ -67,6 +73,7 @@ describe('xcs CLI', () => {
     )
     expect(commands).toEqual({
       schema: ['validate', 'register', 'uid'],
+      payload: ['build', 'check'],
       credential: ['issue', 'accept', 'delete', 'verify'],
       tx: ['submit', 'status'],
     })
@@ -165,6 +172,180 @@ describe('xcs CLI', () => {
     })
   })
 
+  it('builds reproducible canonical payload bytes and an HTTPS integrity URI', async () => {
+    const files = {
+      'claims.json': JSON.stringify({ programId: 'course-1' }),
+      'schema.json': JSON.stringify(schema),
+    }
+    const { io, stdout } = memoryIo(files)
+
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'payload',
+        'build',
+        'claims.json',
+        '--schema-file',
+        'schema.json',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID.toUpperCase(),
+        '--https-url',
+        'https://issuer.example/credentials/one.json',
+      ],
+      { io },
+    )
+
+    expect(code).toBe(0)
+    const result = JSON.parse(stdout[0] ?? '{}')
+    expect(result.payload).toEqual({
+      xcsVersion: '0.1',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schema: UID,
+      claims: { programId: 'course-1' },
+    })
+    expect(result.canonical).toBe(canonicalize(result.payload as JsonValue))
+    expect(result.uri).toMatch(
+      /^https:\/\/issuer\.example\/credentials\/one\.json#xcs-sha256=[0-9a-f]{64}$/u,
+    )
+    expect(result.sha256).toMatch(/^[0-9a-f]{64}$/u)
+  })
+
+  it('writes exact canonical payload bytes to --output without a trailing newline', async () => {
+    const files = {
+      'claims.json': JSON.stringify({ programId: 'course-1' }),
+      'schema.json': JSON.stringify(schema),
+    }
+    const captured = memoryIo(files)
+
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'payload',
+        'build',
+        'claims.json',
+        '--schema-file',
+        'schema.json',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID,
+        '--https-url',
+        'https://issuer.example/credentials/one.json',
+        '--output',
+        'credential.json',
+      ],
+      { io: captured.io },
+    )
+
+    expect(code).toBe(0)
+    const metadata = JSON.parse(captured.stdout[0] ?? '{}')
+    expect(captured.writtenFiles['credential.json']).toBe(metadata.canonical)
+    expect(captured.writtenFiles['credential.json']).not.toMatch(/\n$/u)
+    expect(metadata.output).toBe('credential.json')
+  })
+
+  it('checks the exact canonical payload bytes against schema and URI', async () => {
+    const payload = {
+      xcsVersion: '0.1',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schema: UID,
+      claims: { programId: 'course-1' },
+    }
+    const canonical = canonicalize(payload as JsonValue)
+    const uri = createHttpsPayloadUri('https://issuer.example/credentials/one.json', canonical)
+    const files = {
+      'payload.json': canonical,
+      'schema.json': JSON.stringify(schema),
+    }
+    const { io, stdout } = memoryIo(files)
+
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'payload',
+        'check',
+        'payload.json',
+        '--schema-file',
+        'schema.json',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID,
+        '--uri',
+        uri,
+      ],
+      { io },
+    )
+
+    expect(code).toBe(0)
+    expect(JSON.parse(stdout[0] ?? '{}')).toMatchObject({
+      valid: true,
+      payload,
+      uri,
+      integrity: { status: 'valid' },
+    })
+  })
+
+  it('rejects payload bytes that do not match the URI digest', async () => {
+    const payload = {
+      xcsVersion: '0.1',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schema: UID,
+      claims: { programId: 'course-1' },
+    }
+    const canonical = canonicalize(payload as JsonValue)
+    const uri = createHttpsPayloadUri('https://issuer.example/credentials/one.json', canonical)
+    const files = {
+      'payload.json': canonical.replace('course-1', 'course-2'),
+      'schema.json': JSON.stringify(schema),
+    }
+    const { io, stdout, stderr } = memoryIo(files)
+
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'payload',
+        'check',
+        'payload.json',
+        '--schema-file',
+        'schema.json',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID,
+        '--uri',
+        uri,
+      ],
+      { io },
+    )
+
+    expect(code).toBe(5)
+    expect(stdout).toEqual([])
+    expect(JSON.parse(stderr.at(-1) ?? '{}')).toMatchObject({
+      error: {
+        code: 'XCS_CLI_PAYLOAD_INTEGRITY',
+        details: { integrity: { status: 'tampered' } },
+      },
+    })
+  })
+
   it('keeps structured errors on stderr and returns code 2 for invalid input', async () => {
     const { io, stdout, stderr } = memoryIo()
     const code = await runCli(
@@ -231,6 +412,9 @@ describe('xcs CLI', () => {
       error: { code: 'XCS_CLI_VERIFICATION_NOT_VALID' },
     })
     const [, request] = fetchMock.mock.calls[0] ?? []
+    expect(request).toEqual(
+      expect.objectContaining({ redirect: 'error', signal: expect.any(AbortSignal) }),
+    )
     expect(JSON.parse(String(request?.body))).toEqual({
       network: 'xrpl-testnet-xcs-v0.1',
       issuer: ISSUER,
@@ -289,23 +473,69 @@ describe('xcs CLI', () => {
     })
   })
 
-  it.each(['INDEXER_STALE', 'INDEXER_NOT_INITIALIZED'])(
-    'never succeeds when the API reports %s',
-    async (apiError) => {
-      const { io, stdout, stderr } = memoryIo()
-      const fetchMock = vi.fn(async () =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              error: apiError,
-              message: 'The XCS API cannot provide a fresh indexed proof.',
-            }),
-            { status: 503, headers: { 'content-type': 'application/json' } },
-          ),
+  it.each([
+    'INDEXER_STALE',
+    'INDEXER_NOT_INITIALIZED',
+    'INDEXER_STATUS_UNAVAILABLE',
+    'INDEXER_NOT_READY',
+    'INDEXER_HALTED',
+    'INDEXER_LEASE_EXPIRED',
+    'INDEXER_EVIDENCE_INVALID',
+  ])('never succeeds when the API reports %s', async (apiError) => {
+    const { io, stdout, stderr } = memoryIo()
+    const fetchMock = vi.fn(async () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            error: apiError,
+            message: 'The XCS API cannot provide a fresh indexed proof.',
+          }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
         ),
-      )
+      ),
+    )
 
-      const code = await runCli(
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'credential',
+        'verify',
+        '--api',
+        'https://xcs.example',
+        '--network',
+        'xrpl-testnet-xcs-v0.1',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID,
+      ],
+      { io, fetch: fetchMock },
+    )
+
+    expect(code).toBe(3)
+    expect(stdout).toEqual([])
+    expect(JSON.parse(stderr.at(-1) ?? '{}')).toMatchObject({
+      error: {
+        code: 'XCS_CLI_INDEXER_UNAVAILABLE',
+        details: { response: { error: apiError } },
+      },
+    })
+  })
+
+  it('aborts a stalled verification POST after the bounded timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const { io, stderr } = memoryIo()
+      const fetchMock = vi.fn(
+        async (_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+          }),
+      )
+      const execution = runCli(
         [
           'node',
           'xcs',
@@ -325,16 +555,63 @@ describe('xcs CLI', () => {
         { io, fetch: fetchMock },
       )
 
-      expect(code).toBe(3)
-      expect(stdout).toEqual([])
+      await vi.advanceTimersByTimeAsync(10_000)
+      await expect(execution).resolves.toBe(3)
       expect(JSON.parse(stderr.at(-1) ?? '{}')).toMatchObject({
-        error: {
-          code: 'XCS_CLI_INDEXER_UNAVAILABLE',
-          details: { response: { error: apiError } },
-        },
+        error: { code: 'XCS_CLI_NETWORK', message: expect.stringContaining('timed out') },
       })
-    },
-  )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    [
+      'declared',
+      () =>
+        new Response('{}', {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(1024 * 1024 + 1),
+          },
+        }),
+    ],
+    [
+      'streamed',
+      () =>
+        new Response(new Uint8Array(1024 * 1024 + 1), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ],
+  ])('rejects an oversized %s verification response', async (_kind, response) => {
+    const { io, stderr } = memoryIo()
+    const code = await runCli(
+      [
+        'node',
+        'xcs',
+        'credential',
+        'verify',
+        '--api',
+        'https://xcs.example',
+        '--network',
+        'xrpl-testnet-xcs-v0.1',
+        '--issuer',
+        ISSUER,
+        '--subject',
+        SUBJECT,
+        '--schema',
+        UID,
+      ],
+      { io, fetch: async () => response() },
+    )
+
+    expect(code).toBe(3)
+    expect(JSON.parse(stderr.at(-1) ?? '{}')).toMatchObject({
+      error: { code: 'XCS_CLI_API_RESPONSE', message: expect.stringContaining('1 MiB') },
+    })
+  })
 
   it('never exposes an inline signed-blob option', async () => {
     const { io, stdout } = memoryIo()

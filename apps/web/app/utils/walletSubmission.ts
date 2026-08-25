@@ -1,18 +1,10 @@
 import type { ReliableSubmissionResult, Signer, SignerResult } from '@xcs-protocol/sdk'
-import { hashes, type SubmittableTransaction } from 'xrpl'
+import { hashes } from 'xrpl'
 import type { SignedTransaction, Transaction } from 'xrpl-connect'
 
 interface WalletSignOnly {
   sign(transaction: Transaction): Promise<SignedTransaction>
 }
-
-export interface SignedOperationInput {
-  readonly transaction: Readonly<SubmittableTransaction>
-  readonly txBlob: string
-  readonly txHash: string
-}
-
-export type PersistSignedOperation = (input: SignedOperationInput) => Promise<void>
 
 const HASH_PATTERN = /^[0-9A-F]{64}$/u
 
@@ -41,24 +33,12 @@ export function normalizeWalletSignature(signed: SignedTransaction): SignerResul
   return { hash: derivedHash, txBlob }
 }
 
-/**
- * Persistence is awaited inside the signer, before the SDK is allowed to make
- * its first submit call. A storage failure therefore prevents network effects.
- */
-export function createPersistingWalletSigner(
-  wallet: WalletSignOnly,
-  persist: PersistSignedOperation,
-): Signer {
+/** Adapts a sign-only browser wallet without persisting unverified output. */
+export function createWalletSigner(wallet: WalletSignOnly): Signer {
   return {
     async sign(transaction) {
       const signed = await wallet.sign(transaction as Transaction)
-      const normalized = normalizeWalletSignature(signed)
-      await persist({
-        transaction,
-        txBlob: normalized.txBlob,
-        txHash: normalized.hash,
-      })
-      return normalized
+      return normalizeWalletSignature(signed)
     },
   }
 }

@@ -4,6 +4,7 @@
     "schemas": "Schémas",
     "issue": "Émettre",
     "accept": "Accepter",
+    "revoke": "Révoquer",
     "verify": "Vérifier",
     "operations": "Opérations",
     "learn": "Comprendre",
@@ -89,13 +90,15 @@
   "issue": {
     "title": "Émettre un credential",
     "description": "Préparez le payload hors chaîne, publiez exactement ses octets canoniques, puis signez CredentialCreate.",
-    "noPii": "Testnet et IPFS sont publics : n’insérez aucune donnée personnelle.",
+    "noPii": "Le Testnet et le payload HTTPS sont publics : n’insérez aucune donnée personnelle.",
     "storage": "Mode de stockage",
     "expiration": "Expiration facultative",
     "prepare": "Valider et préparer",
     "payload": "Payload canonique à publier",
     "download": "Télécharger le JSON",
-    "published": "Je confirme avoir publié exactement ce payload à l’URI affichée.",
+    "httpsProof": "Le pilote exige une URL HTTPS publique avec CORS. Juste avant signature, le navigateur retélécharge le JSON canonique exact, sans cache ni redirection (1 Mio maximum).",
+    "checking": "Vérification des octets HTTPS publiés juste avant signature…",
+    "checked": "Payload publié vérifié ({bytes} octets) : ",
     "submitted": "CredentialCreate validé : "
   },
   "accept": {
@@ -103,7 +106,33 @@
     "description": "Seul le sujet peut accepter. Le sujet ou l’émetteur peut ensuite supprimer l’objet selon les règles XRPL.",
     "notTruth": "Accepter signifie conserver le Credential sur votre compte ; cela ne certifie pas que ses claims sont vrais.",
     "action": "Action",
-    "prepare": "Préparer la transaction"
+    "prepare": "Préparer la transaction",
+    "review": "Charger, relire et préparer",
+    "fetchAndPrepare": "Charger le payload et préparer",
+    "acceptAction": "Accepter le credential pending",
+    "rejectAction": "Rejeter le credential pending",
+    "exactCredential": "Relecture du credential exact",
+    "expiration": "Expiration",
+    "noExpiration": "Sans expiration",
+    "generation": "Identifiant de génération",
+    "publicClaims": "Claims publics",
+    "payloadConsentIntro": "L’étape suivante contacte {host} directement depuis ce navigateur. Cet hôte peut observer votre adresse IP et l’heure de la requête.",
+    "payloadConsent": "Je consens explicitement au chargement de ce payload public depuis l’hôte affiché.",
+    "payloadUnavailable": "Le payload ne peut pas être relu de façon sûre. L’acceptation est bloquée, mais un credential pending peut toujours être rejeté.",
+    "rejectSafety": "Le rejet supprime cet objet pending sans approuver son émetteur ni ses claims.",
+    "submitted": "Action sujet validée : "
+  },
+  "revoke": {
+    "title": "Révoquer un credential émis",
+    "description": "L’émetteur connecté sélectionne le sujet et le schéma exacts avant de préparer CredentialDelete.",
+    "warning": "La suppression est irréversible pour cette génération. Contrôlez le sujet et le schéma exacts dans votre wallet.",
+    "review": "Charger et préparer la révocation",
+    "exactCredential": "Credential exact à révoquer",
+    "state": "État on-chain",
+    "expiration": "Expiration",
+    "noExpiration": "Sans expiration",
+    "generation": "Identifiant de génération",
+    "submitted": "Révocation issuer validée : "
   },
   "verify": {
     "title": "Vérifier un credential",
@@ -122,12 +151,17 @@
     "localOnly": "Le journal et les blobs encore récupérables restent dans IndexedDB sur cet appareil. Aucune seed ni clé privée n’est enregistrée.",
     "empty": "Aucune opération wallet n’est enregistrée dans ce navigateur.",
     "refresh": "Actualiser",
+    "export": "Exporter les reçus minimisés",
     "retry": "Reprendre",
+    "reconfirm": "Revérifier l’événement indexé",
     "hash": "Hash de transaction",
     "profile": "Profil réseau",
     "updated": "Dernière mise à jour",
     "lastLedger": "Dernier ledger autorisé",
-    "result": "Résultat XRPL"
+    "result": "Résultat XRPL",
+    "action": "Action métier",
+    "payloadHash": "Digest du payload",
+    "ledger": "Ledger validé"
   },
   "footer": { "summary": "XCS v0.1 — standard ouvert et implémentation de référence MIT." }
 }

@@ -6,7 +6,10 @@ This repository contains the XCS v0.1 specification and its reference implementa
 
 ## Status
 
-XCS v0.1 is alpha software intended for XRPL Testnet. Do not use the example network profile on Mainnet. The example registry address and activation ledger are deliberately invalid placeholders.
+XCS v0.1 is alpha software intended for XRPL Testnet. The protocol, SDK, dual-source indexer,
+read API, CLI, and issuer/subject playground are implemented, but the repository deliberately ships
+without a live network profile. Do not use the example profile on Mainnet: its registry address and
+activation ledger are invalid placeholders.
 
 The implementation never needs an XRPL seed. Applications construct transactions, then delegate signing to a wallet or an injected signer controlled by the issuer or subject.
 
@@ -15,7 +18,8 @@ The implementation never needs an XRPL seed. Applications construct transactions
 - `packages/core`: deterministic parsing, canonicalization, schemas, UIDs and payload verification.
 - `packages/sdk`: XRPL transaction builders and reliable submission primitives.
 - `packages/cli`: local, non-custodial command-line workflows.
-- `packages/db`: PostgreSQL schema and migrations.
+- `packages/db`: PostgreSQL schema, migrations and least-privilege role provisioning for a
+  rebuildable local projection.
 - `apps/indexer`: validated-ledger ingestion and XCS projections.
 - `apps/api`: read-only schema, credential and verification API.
 - `apps/web`: Nuxt 4 Testnet playground.
@@ -30,17 +34,29 @@ The implementation never needs an XRPL seed. Applications construct transactions
 - PostgreSQL 18 for API/indexer integration
 - Docker Compose for the self-hosted stack
 
-## Quick start
+## Developer validation
 
 ```bash
 pnpm install
-pnpm build
-pnpm test
-cp .env.example .env
-pnpm dev
+pnpm verify
+(cd verifier-go && go test ./...)
 ```
 
-The API defaults to `http://localhost:3001` and the Nuxt application to `http://localhost:3000`. A real Testnet network profile must replace `config/networks/testnet.example.json` before transaction construction or indexing is enabled. The full Compose startup and optional demo-pinning procedure is in [`docs/runbooks/deployment.md`](./docs/runbooks/deployment.md).
+These commands validate the source tree; they do not start a usable indexer. A real Testnet network
+profile, PostgreSQL 18, and two independently operated, complete-history `rippled` WSS endpoints
+must be configured before the services can run. The API defaults to `http://localhost:3001` and the
+Nuxt application to `http://localhost:3000`. The full Compose startup and optional demo-pinning
+procedure is in [`docs/runbooks/deployment.md`](./docs/runbooks/deployment.md).
+
+The reference deployment uses `xcs_admin` only for migrations and idempotent role provisioning,
+`xcs_indexer` for projection DML, and `xcs_api` for projection reads plus optional pinning CRUD.
+`XCS_PUBLIC_RPC_URL` is a separate browser-visible submission endpoint; never put either private
+indexer quorum endpoint or its credentials in that variable.
+
+PostgreSQL is not a credential authority and does not make Commons the custodian of issuer data. It
+is the reference implementation's local query cache: any organization can self-host the stack,
+replay the same validated ledgers, and compare a deterministic projection digest. Public payloads
+remain on issuer-selected HTTPS/IPFS infrastructure; signing keys remain in issuer/subject wallets.
 
 For the database and indexer workflow, see [`docs/runbooks/indexer.md`](./docs/runbooks/indexer.md). For commands and test tiers, see [`docs/TESTING.md`](./docs/TESTING.md).
 

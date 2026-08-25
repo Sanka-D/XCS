@@ -1,5 +1,6 @@
 import type { NetworkProfile, ResolvedSchema, SchemaDefinition } from '@xcs-protocol/core'
-import { exactCredentialPath } from '~/utils/transactions'
+import type { VerificationDimensions } from '~/utils/credentialReview'
+import { exactCredentialEventPath, exactCredentialPath } from '~/utils/transactions'
 
 export interface ApiSchemaSummary {
   uid: string
@@ -23,14 +24,7 @@ interface SchemaRow {
   resolvedDefinition: ResolvedSchema
 }
 
-export interface VerificationResponse {
-  onChain: 'pending' | 'active' | 'expired' | 'deleted' | 'not_found'
-  schema: 'valid' | 'invalid' | 'unknown'
-  payload: 'valid' | 'unavailable' | 'tampered' | 'invalid' | 'not_checked'
-  issuerTrust: 'trusted' | 'untrusted' | 'unknown'
-  generationId?: string
-  [key: string]: unknown
-}
+export type VerificationResponse = VerificationDimensions
 
 export function useXcsApi() {
   const config = useRuntimeConfig()
@@ -120,10 +114,24 @@ export function useXcsApi() {
     network?: string,
   ) {
     const profileId = await resolveNetworkId(network)
-    return $fetch<Record<string, unknown>>(
-      exactCredentialPath(profileId, issuer, subject, schemaUid),
+    return $fetch<unknown>(exactCredentialPath(profileId, issuer, subject, schemaUid), {
+      baseURL,
+    })
+  }
+
+  async function getCredentialEventByTransaction(
+    issuer: string,
+    subject: string,
+    schemaUid: string,
+    transactionHash: string,
+    network?: string,
+  ) {
+    const profileId = await resolveNetworkId(network)
+    return $fetch<unknown>(
+      exactCredentialEventPath(profileId, issuer, subject, schemaUid, transactionHash),
       {
         baseURL,
+        timeout: 5_000,
       },
     )
   }
@@ -134,6 +142,7 @@ export function useXcsApi() {
     listSchemas,
     getSchema,
     getCredential,
+    getCredentialEventByTransaction,
     verify,
   }
 }

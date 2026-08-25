@@ -47,12 +47,29 @@ export interface PreparedTransaction<T extends SubmittableTransaction = Submitta
   readonly lastLedgerSequence: number
 }
 
+export interface ValidatedSignature {
+  /** Host-generated identifier shared with the operation journal. */
+  readonly operationId: string
+  /** The exact prepared transaction whose fields were compared with the signed blob. */
+  readonly transaction: Readonly<SubmittableTransaction>
+  readonly txBlob: string
+  readonly txHash: string
+  readonly lastLedgerSequence: number
+}
+
 export interface ReliableSubmissionOptions {
   readonly journal: OperationJournal
   readonly operationId?: string | undefined
   readonly failHard?: boolean | undefined
   readonly pollIntervalMs?: number | undefined
   readonly timeoutMs?: number | undefined
+  /**
+   * Runs after the signer hash/blob and exact transaction fields have been
+   * validated, but before the first submission side effect. Hosts can use this
+   * boundary to durably persist recovery material and repeat business guards.
+   */
+  readonly onValidatedSignature?:
+    ((signature: ValidatedSignature) => void | Promise<void>) | undefined
 }
 
 export interface TransactionStatus {
@@ -173,12 +190,19 @@ export async function signPreparedAndSubmit<T extends SubmittableTransaction>(
       )
     }
     assertSignedTransactionMatches(transaction, signed.txBlob)
+    await options.onValidatedSignature?.({
+      operationId,
+      transaction,
+      txBlob: signed.txBlob,
+      txHash: derivedHash,
+      lastLedgerSequence,
+    })
   } catch (error) {
     await append(options.journal, {
       operationId,
       stage: 'failed',
       lastLedgerSequence,
-      message: 'Wallet signing failed.',
+      message: 'Wallet signing or pre-submission validation failed.',
     })
     throw error
   }

@@ -131,6 +131,46 @@ describe('reliable submission', () => {
     expect(autofill).not.toHaveBeenCalled()
   })
 
+  it('runs the validated-signature hook after exact comparison and before submit', async () => {
+    const calls: string[] = []
+    const blob = signedBlob()
+    const client = mockClient({
+      submit: vi.fn(async () => {
+        calls.push('submit')
+        return { result: { engine_result: 'tesSUCCESS' } }
+      }),
+    })
+
+    await signPreparedAndSubmit(
+      client,
+      {
+        TransactionType: 'Payment',
+        Account: ACCOUNT,
+        Destination: DESTINATION,
+        Amount: '1',
+        Fee: '12',
+        Sequence: 1,
+        LastLedgerSequence: 50,
+      },
+      { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
+      {
+        journal: new MemoryOperationJournal(),
+        pollIntervalMs: 1,
+        timeoutMs: 10,
+        onValidatedSignature: async (signature) => {
+          calls.push('persist')
+          expect(signature).toMatchObject({
+            txBlob: blob,
+            txHash: hashes.hashSignedTx(blob),
+            lastLedgerSequence: 50,
+          })
+        },
+      },
+    )
+
+    expect(calls).toEqual(['persist', 'submit'])
+  })
+
   it('still reconciles after an ambiguous submit acknowledgement failure', async () => {
     const journal = new MemoryOperationJournal()
     const client = mockClient({
@@ -219,9 +259,11 @@ describe('reliable submission', () => {
       Flags: 0,
       SigningPubKey: '',
     })
+    const onValidatedSignature = vi.fn()
+    const submit = vi.fn()
     await expect(
       prepareSignAndSubmit(
-        mockClient(),
+        mockClient({ submit }),
         {
           TransactionType: 'Payment',
           Account: ACCOUNT,
@@ -234,8 +276,10 @@ describe('reliable submission', () => {
             hash: hashes.hashSignedTx(changedBlob),
           }),
         },
-        { journal: new MemoryOperationJournal() },
+        { journal: new MemoryOperationJournal(), onValidatedSignature },
       ),
     ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNER_RESULT' })
+    expect(onValidatedSignature).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
   })
 })

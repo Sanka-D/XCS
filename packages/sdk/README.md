@@ -15,9 +15,11 @@ The operation journal never contains the signed blob, full transaction, private 
 credential payload. Persist it in the host application to reconcile a transaction hash after an
 ambiguous network failure.
 
-Because the journal intentionally excludes the signed blob, browser and service hosts must persist
-that blob before the signer returns control to a submission helper. The Nuxt reference application
-does this in IndexedDB, erases the blob for terminal operations after reconciliation, and retains
+Because the journal intentionally excludes the signed blob, browser and service hosts can persist
+recovery material with `onValidatedSignature`. This hook runs only after the SDK has verified the
+wallet-reported hash, decoded the signed blob, and proved that all reviewed transaction fields are
+unchanged; it still runs before submission. The Nuxt reference application uses this boundary to
+write the blob to IndexedDB, erases it for terminal operations after reconciliation, and retains
 only sanitized status metadata.
 
 The XRPL protocol permits a 256-byte Credential URI, and the builders preserve that limit. The

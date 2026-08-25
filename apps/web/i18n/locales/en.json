@@ -4,6 +4,7 @@
     "schemas": "Schemas",
     "issue": "Issue",
     "accept": "Accept",
+    "revoke": "Revoke",
     "verify": "Verify",
     "operations": "Operations",
     "learn": "Learn",
@@ -86,13 +87,15 @@
   "issue": {
     "title": "Issue a credential",
     "description": "Prepare the off-ledger payload, publish its exact canonical bytes, then sign CredentialCreate.",
-    "noPii": "Testnet and IPFS are public: never enter personal data.",
+    "noPii": "The Testnet and HTTPS payload are public: never enter personal data.",
     "storage": "Storage mode",
     "expiration": "Optional expiration",
     "prepare": "Validate and prepare",
     "payload": "Canonical payload to publish",
     "download": "Download JSON",
-    "published": "I confirm that these exact payload bytes are published at the displayed URI.",
+    "httpsProof": "Pilot mode requires a public HTTPS URL with CORS. Before signing, the browser re-downloads the exact canonical JSON without cache or redirects (maximum 1 MiB).",
+    "checking": "Checking the published HTTPS bytes immediately before signing…",
+    "checked": "Published payload verified ({bytes} bytes): ",
     "submitted": "Validated CredentialCreate: "
   },
   "accept": {
@@ -100,7 +103,33 @@
     "description": "Only the subject can accept. The subject or issuer can later delete the object according to XRPL rules.",
     "notTruth": "Acceptance means retaining the Credential on your account; it does not certify that its claims are true.",
     "action": "Action",
-    "prepare": "Prepare transaction"
+    "prepare": "Prepare transaction",
+    "review": "Load, review and prepare",
+    "fetchAndPrepare": "Fetch payload and prepare",
+    "acceptAction": "Accept the pending credential",
+    "rejectAction": "Reject the pending credential",
+    "exactCredential": "Exact credential review",
+    "expiration": "Expiration",
+    "noExpiration": "No expiration",
+    "generation": "Generation ID",
+    "publicClaims": "Public claims",
+    "payloadConsentIntro": "The next step contacts {host} directly from this browser. That host can observe your IP address and request time.",
+    "payloadConsent": "I explicitly consent to fetching this public payload from the displayed host.",
+    "payloadUnavailable": "The payload cannot be safely reviewed. Acceptance is blocked, but a pending credential may still be rejected.",
+    "rejectSafety": "Rejecting deletes this pending object without endorsing its issuer or claims.",
+    "submitted": "Validated subject action: "
+  },
+  "revoke": {
+    "title": "Revoke an issued credential",
+    "description": "The connected issuer selects the exact subject and schema before preparing CredentialDelete.",
+    "warning": "Deletion is irreversible for this credential generation. Confirm the exact subject and schema in your wallet.",
+    "review": "Load and prepare revocation",
+    "exactCredential": "Exact credential to revoke",
+    "state": "On-ledger state",
+    "expiration": "Expiration",
+    "noExpiration": "No expiration",
+    "generation": "Generation ID",
+    "submitted": "Validated issuer revocation: "
   },
   "verify": {
     "title": "Verify a credential",
@@ -119,12 +148,17 @@
     "localOnly": "The journal and recoverable signed blobs remain in IndexedDB on this device. No seed or private key is stored.",
     "empty": "No wallet operation is stored in this browser.",
     "refresh": "Refresh",
+    "export": "Export sanitized receipts",
     "retry": "Resume",
+    "reconfirm": "Re-check indexed event",
     "hash": "Transaction hash",
     "profile": "Network profile",
     "updated": "Last updated",
     "lastLedger": "Last allowed ledger",
-    "result": "XRPL result"
+    "result": "XRPL result",
+    "action": "Business action",
+    "payloadHash": "Payload digest",
+    "ledger": "Validated ledger"
   },
   "footer": { "summary": "XCS v0.1 — open standard and MIT reference implementation." }
 }

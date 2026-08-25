@@ -18,6 +18,7 @@ const availableLocales = computed(() =>
         <NuxtLinkLocale to="/schemas">{{ $t('nav.schemas') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/issue">{{ $t('nav.issue') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/accept">{{ $t('nav.accept') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/revoke">{{ $t('nav.revoke') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/verify">{{ $t('nav.verify') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/operations">{{ $t('nav.operations') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/learn">{{ $t('nav.learn') }}</NuxtLinkLocale>

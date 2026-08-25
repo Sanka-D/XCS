@@ -2,14 +2,16 @@
 import {
   canonicalize,
   createHttpsPayloadUri,
-  createIpfsRawPayloadUri,
   parseJsonStrict,
   validateCredentialPayload,
   type CredentialPayload,
 } from '@xcs-protocol/core'
 import { buildCredentialCreate } from '@xcs-protocol/sdk'
 import type { CredentialCreate } from 'xrpl'
-import { payloadPublicationMatches, type PayloadPublicationProof } from '~/utils/payloadPublication'
+import {
+  verifyHttpsPayloadPublication,
+  type PayloadPublicationProof,
+} from '~/utils/payloadPublication'
 
 const route = useRoute()
 const { account, busy, prepare, signAndSubmit } = useWallet()
@@ -23,36 +25,28 @@ const claimsText = ref(`{
   "completedAt": "2026-08-19T12:00:00Z",
   "achievement": "completed"
 }`)
-const uriMode = ref<'https' | 'ipfs'>('https')
 const httpsUrl = ref('https://issuer.example/credentials/replace-me.json')
 const expiration = ref('')
 const publicationProof = ref<PayloadPublicationProof | null>(null)
+const publicationCheckBusy = ref(false)
 const canonicalPayload = ref('')
 const credentialUri = ref('')
 const transaction = shallowRef<CredentialCreate | null>(null)
 const formError = ref('')
 const successHash = ref('')
-const payloadPublished = computed({
-  get: () =>
-    payloadPublicationMatches(publicationProof.value, canonicalPayload.value, credentialUri.value),
-  set: (published: boolean) => {
-    publicationProof.value = published
-      ? {
-          canonicalPayload: canonicalPayload.value,
-          credentialUri: credentialUri.value,
-        }
-      : null
-  },
-})
+const submissionBusy = computed(() => busy.value || publicationCheckBusy.value)
+let previewRevision = 0
 
 function invalidatePreview() {
+  previewRevision += 1
   publicationProof.value = null
   canonicalPayload.value = ''
   credentialUri.value = ''
   transaction.value = null
 }
 
-watch([schemaUid, subject, claimsText, uriMode, httpsUrl, expiration], invalidatePreview)
+watch([schemaUid, subject, claimsText, httpsUrl, expiration], invalidatePreview)
+watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
 
 function downloadPayload() {
   const blob = new Blob([canonicalPayload.value], { type: 'application/json' })
@@ -69,39 +63,45 @@ async function buildPreview() {
   formError.value = ''
   successHash.value = ''
   if (!account.value) return void (formError.value = 'WALLET_NOT_CONNECTED')
+  const revision = previewRevision
+  const issuerAddress = account.value.address
+  const normalizedSchemaUid = schemaUid.value.toLowerCase()
+  const subjectAddress = subject.value
+  const claimsInput = claimsText.value
+  const payloadUrl = httpsUrl.value
+  const expirationInput = expiration.value
   try {
-    const normalizedSchemaUid = schemaUid.value.toLowerCase()
     const profile = await getActiveNetworkProfile()
     const schema = await getSchema(normalizedSchemaUid, profile.profileId)
-    const claims = parseJsonStrict(claimsText.value)
+    if (revision !== previewRevision) throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_BUILD')
+    const claims = parseJsonStrict(claimsInput)
     const payload = validateCredentialPayload(
       {
         xcsVersion: '0.1',
-        issuer: account.value.address,
-        subject: subject.value,
+        issuer: issuerAddress,
+        subject: subjectAddress,
         schema: normalizedSchemaUid,
         claims,
       },
       {
-        issuer: account.value.address,
-        subject: subject.value,
+        issuer: issuerAddress,
+        subject: subjectAddress,
         schemaUid: normalizedSchemaUid,
         schema: schema.resolved,
       },
     )
     canonicalPayload.value = canonicalize(payload as CredentialPayload)
-    credentialUri.value =
-      uriMode.value === 'ipfs'
-        ? createIpfsRawPayloadUri(canonicalPayload.value)
-        : createHttpsPayloadUri(httpsUrl.value, canonicalPayload.value)
+    credentialUri.value = createHttpsPayloadUri(payloadUrl, canonicalPayload.value)
     const raw = buildCredentialCreate({
-      issuer: account.value.address,
-      subject: subject.value,
+      issuer: issuerAddress,
+      subject: subjectAddress,
       schemaUid: normalizedSchemaUid,
       uri: credentialUri.value,
-      ...(expiration.value ? { expiration: new Date(expiration.value).toISOString() } : {}),
+      ...(expirationInput ? { expiration: new Date(expirationInput).toISOString() } : {}),
     })
-    transaction.value = (await prepare(raw, profile)) as CredentialCreate
+    const prepared = (await prepare(raw, profile)) as CredentialCreate
+    if (revision !== previewRevision) throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_BUILD')
+    transaction.value = prepared
   } catch (error) {
     transaction.value = null
     formError.value = error instanceof Error ? error.message : String(error)
@@ -109,16 +109,64 @@ async function buildPreview() {
 }
 
 async function submit() {
-  if (!transaction.value || !payloadPublished.value) {
-    formError.value = 'PAYLOAD_MUST_BE_PUBLISHED_BEFORE_ISSUANCE'
+  const preparedTransaction = transaction.value
+  const expectedPayload = canonicalPayload.value
+  const expectedUri = credentialUri.value
+  const expectedIssuer = account.value?.address
+  const expectedSubject = subject.value
+  const expectedSchemaUid = schemaUid.value.toLowerCase()
+  const expectedClaims = claimsText.value
+  const expectedHttpsUrl = httpsUrl.value
+  const expectedExpiration = expiration.value
+  const expectedRevision = previewRevision
+  if (!preparedTransaction || !expectedPayload || !expectedUri || !expectedIssuer) {
+    formError.value = 'TRANSACTION_PREVIEW_REQUIRED'
     return
   }
+
+  publicationCheckBusy.value = true
+  publicationProof.value = null
+  formError.value = ''
   try {
-    const response = await signAndSubmit(transaction.value)
+    const assertCurrent = () => {
+      if (
+        previewRevision !== expectedRevision ||
+        transaction.value !== preparedTransaction ||
+        canonicalPayload.value !== expectedPayload ||
+        credentialUri.value !== expectedUri ||
+        account.value?.address !== expectedIssuer ||
+        subject.value !== expectedSubject ||
+        schemaUid.value.toLowerCase() !== expectedSchemaUid ||
+        claimsText.value !== expectedClaims ||
+        httpsUrl.value !== expectedHttpsUrl ||
+        expiration.value !== expectedExpiration
+      ) {
+        throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_PUBLICATION_CHECK')
+      }
+    }
+    const proof = await verifyHttpsPayloadPublication({
+      canonicalPayload: expectedPayload,
+      credentialUri: expectedUri,
+    })
+    assertCurrent()
+    publicationProof.value = proof
+    const response = await signAndSubmit(
+      preparedTransaction,
+      {
+        action: 'credential-issue',
+        issuer: expectedIssuer,
+        subject: expectedSubject,
+        schemaUid: expectedSchemaUid,
+        payloadDigestHex: proof.digestHex,
+      },
+      assertCurrent,
+    )
     successHash.value = response.txHash
     transaction.value = null
   } catch (error) {
     formError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    publicationCheckBusy.value = false
   }
 }
 </script>
@@ -132,23 +180,40 @@ async function submit() {
 
     <div class="form-card form-grid">
       <label for="schema-uid">Schema UID</label>
-      <input id="schema-uid" v-model.trim="schemaUid" required pattern="[0-9a-fA-F]{64}" />
+      <input
+        id="schema-uid"
+        v-model.trim="schemaUid"
+        required
+        pattern="[0-9a-fA-F]{64}"
+        :disabled="submissionBusy"
+      />
       <label for="subject">Subject</label>
-      <input id="subject" v-model.trim="subject" required placeholder="r…" />
+      <input
+        id="subject"
+        v-model.trim="subject"
+        required
+        placeholder="r…"
+        :disabled="submissionBusy"
+      />
       <label for="claims">Claims JSON</label>
-      <textarea id="claims" v-model="claimsText" rows="12" spellcheck="false" />
-      <label for="uri-mode">{{ $t('issue.storage') }}</label>
-      <select id="uri-mode" v-model="uriMode">
-        <option value="https">HTTPS + SHA-256</option>
-        <option value="ipfs">IPFS raw CID</option>
-      </select>
-      <template v-if="uriMode === 'https'">
-        <label for="https-url">HTTPS URL</label>
-        <input id="https-url" v-model.trim="httpsUrl" type="url" />
-      </template>
+      <textarea
+        id="claims"
+        v-model="claimsText"
+        rows="12"
+        spellcheck="false"
+        :disabled="submissionBusy"
+      />
+      <label for="https-url">HTTPS URL</label>
+      <input id="https-url" v-model.trim="httpsUrl" type="url" :disabled="submissionBusy" />
+      <p class="form-hint">{{ $t('issue.httpsProof') }}</p>
       <label for="expiration">{{ $t('issue.expiration') }}</label>
-      <input id="expiration" v-model="expiration" type="datetime-local" />
-      <button class="button" type="button" :disabled="busy" @click="buildPreview">
+      <input
+        id="expiration"
+        v-model="expiration"
+        type="datetime-local"
+        :disabled="submissionBusy"
+      />
+      <button class="button" type="button" :disabled="submissionBusy" @click="buildPreview">
         {{ $t('issue.prepare') }}
       </button>
     </div>
@@ -163,11 +228,13 @@ async function submit() {
       <button class="button secondary" type="button" @click="downloadPayload">
         {{ $t('issue.download') }}
       </button>
-      <label class="check-row"
-        ><input v-model="payloadPublished" type="checkbox" />{{ $t('issue.published') }}</label
-      >
+      <div v-if="publicationCheckBusy" class="notice-box">{{ $t('issue.checking') }}</div>
+      <div v-else-if="publicationProof" class="success-box">
+        {{ $t('issue.checked', { bytes: publicationProof.byteLength }) }}
+        <code>{{ publicationProof.digestHex }}</code>
+      </div>
     </div>
-    <TransactionPreview :transaction="transaction" :busy="busy" @confirm="submit" />
+    <TransactionPreview :transaction="transaction" :busy="submissionBusy" @confirm="submit" />
     <div v-if="successHash" class="success-box">
       <strong>{{ $t('issue.submitted') }}</strong
       ><code>{{ successHash }}</code>
