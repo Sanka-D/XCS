@@ -6,6 +6,7 @@ import type {
   LedgerCheckpointRow,
   NetworkProfileRow,
   PinChallengeRow,
+  SchemaEventRow,
   SchemaRow,
 } from '@xcs-protocol/db'
 
@@ -20,6 +21,11 @@ export interface SchemaPage {
   nextCursor?: string
 }
 
+export interface SchemaProjectionEvidence {
+  schema: SchemaRow
+  registration: SchemaEventRow
+}
+
 export interface ApiRepository {
   withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T>
   getDatabaseTime(): Promise<Date>
@@ -29,6 +35,14 @@ export interface ApiRepository {
   getIndexerStatus(profileId: string): Promise<IndexerStatusRow | undefined>
   getLatestCheckpoint(profileId: string): Promise<LedgerCheckpointRow | undefined>
   getSchema(profileId: string, schemaUid: string): Promise<SchemaRow | undefined>
+  getSchemaProjectionEvidence(input: {
+    profileId: string
+    schemaUids: readonly string[]
+  }): Promise<SchemaProjectionEvidence[]>
+  getSchemaRegistrationByTransaction(input: {
+    profileId: string
+    transactionHash: string
+  }): Promise<SchemaEventRow | undefined>
   listSchemas(input: {
     profileId: string
     publisher?: string

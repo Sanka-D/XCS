@@ -3,7 +3,6 @@ import {
   decodeUtf8Hex,
   parseCredentialPayload,
   validateCredentialPayload,
-  validateSchema,
   verifyPayloadIntegrity,
   XcsError,
   type JsonValue,
@@ -15,6 +14,7 @@ import type { CredentialGenerationRow, SchemaRow } from '@xcs-protocol/db'
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
 import { assertAuthoritativeLedgerEvidence, assertIndexerReady } from './indexer-status.js'
 import { PayloadUnavailableError } from './payload-resolver.js'
+import { authoritativeResolvedSchema, schemaProjectionEvidenceUids } from './schema-projection.js'
 import type { ApiRepository, PayloadResolver, TrustPolicy } from './types.js'
 
 export interface VerifyRequest {
@@ -50,25 +50,6 @@ function onChainStatus(
     return 'expired'
   }
   return generation.accepted ? 'active' : 'pending'
-}
-
-function resolvedSchema(row: SchemaRow): ResolvedSchema {
-  validateSchema(row.definition)
-  const value: unknown = row.resolvedDefinition
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Resolved schema projection is invalid')
-  }
-  const candidate = value as Partial<ResolvedSchema>
-  if (
-    typeof candidate.definition !== 'object' ||
-    candidate.definition === null ||
-    typeof candidate.fields !== 'object' ||
-    candidate.fields === null ||
-    !Array.isArray(candidate.lineage)
-  ) {
-    throw new Error('Resolved schema projection is invalid')
-  }
-  return candidate as ResolvedSchema
 }
 
 function decodeCredentialUri(generation: CredentialGenerationRow): string | undefined {
@@ -129,8 +110,8 @@ export async function verifyCredential(
     now?: () => Date
   },
 ): Promise<VerificationReport> {
-  const { generation, schemaRow, checkpoint } =
-    await dependencies.repository.withConsistentSnapshot(async (repository) => {
+  const { generation, schema, checkpoint } = await dependencies.repository.withConsistentSnapshot(
+    async (repository) => {
       const network = await repository.getNetwork(request.network)
       if (network === undefined) throw new VerificationNetworkNotFoundError()
 
@@ -147,6 +128,13 @@ export async function verifyCredential(
         }),
         repository.getSchema(request.network, request.schemaUid),
       ])
+      const schemaEvidence =
+        schemaRow === undefined
+          ? []
+          : await repository.getSchemaProjectionEvidence({
+              profileId: request.network,
+              schemaUids: schemaProjectionEvidenceUids([schemaRow], request.network),
+            })
       const checkpoint = await repository.getLatestCheckpoint(request.network)
       const evidence = {
         expectedProfileId: request.network,
@@ -154,25 +142,29 @@ export async function verifyCredential(
         checkpoint,
         now,
         maxLedgerAgeSeconds: dependencies.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+        minimumLedgerIndex: network.activationLedgerIndex,
         projectionLedgerIndexes: [
-          ...(generation === undefined ? [] : [generation.lastLedgerIndex]),
-          ...(schemaRow === undefined ? [] : [schemaRow.ledgerIndex]),
+          ...(generation === undefined
+            ? []
+            : [generation.createdLedgerIndex, generation.lastLedgerIndex]),
+          ...schemaEvidence.map((item) => item.schema.ledgerIndex),
         ],
       }
       assertAuthoritativeLedgerEvidence(evidence)
-      return { generation, schemaRow, checkpoint: evidence.checkpoint }
-    })
+      const schema =
+        schemaRow === undefined
+          ? undefined
+          : authoritativeResolvedSchema(schemaRow, schemaEvidence, {
+              profileId: request.network,
+              schemaUid: request.schemaUid,
+              networkId: network.networkId,
+              activationLedgerIndex: network.activationLedgerIndex,
+            })
+      return { generation, schema, checkpoint: evidence.checkpoint }
+    },
+  )
 
-  let schema: ResolvedSchema | undefined
-  let schemaStatus: VerificationReport['schema'] = 'unknown'
-  if (schemaRow !== undefined) {
-    try {
-      schema = resolvedSchema(schemaRow)
-      schemaStatus = 'valid'
-    } catch {
-      schemaStatus = 'invalid'
-    }
-  }
+  const schemaStatus: VerificationReport['schema'] = schema === undefined ? 'unknown' : 'valid'
 
   const report: VerificationReport = {
     onChain: onChainStatus(generation, checkpoint.closeTime),

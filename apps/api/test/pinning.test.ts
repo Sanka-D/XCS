@@ -1,5 +1,6 @@
 import {
   canonicalize,
+  computeSchemaUid,
   type CredentialPayload,
   type JsonValue,
   type ResolvedSchema,
@@ -12,17 +13,23 @@ import type {
   LedgerCheckpointRow,
   NetworkProfileRow,
   PinChallengeRow,
+  SchemaEventRow,
   SchemaRow,
 } from '@xcs-protocol/db'
 import { describe, expect, it } from 'vitest'
 
 import { DemoPinningService, PinningError } from '../src/pinning.js'
-import type { ApiRepository, ContentPinStore, PinningRepository } from '../src/types.js'
+import type {
+  ApiRepository,
+  ContentPinStore,
+  PinningRepository,
+  SchemaProjectionEvidence,
+} from '../src/types.js'
 
 const NOW = new Date('2026-08-19T00:00:00.000Z')
+const NOW_RIPPLE = Math.floor(NOW.getTime() / 1_000) - 946_684_800
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv'
-const UID = 'a'.repeat(64)
 const PUBLIC_KEY = `ED${'0'.repeat(64)}`
 const SIGNATURE = '0'.repeat(128)
 
@@ -36,6 +43,15 @@ const resolved: ResolvedSchema = {
   fields: { programId: { type: 'string' } },
   lineage: [],
 }
+const SCHEMA_LEDGER_HASH = 'e'.repeat(64)
+const UID = computeSchemaUid({
+  schema: resolved.definition,
+  networkId: 1,
+  ledgerHash: SCHEMA_LEDGER_HASH,
+  ledgerIndex: 1,
+  transactionIndex: 0,
+  publisher: ISSUER,
+})
 const schema: SchemaRow = {
   profileId: 'testnet',
   schemaUid: UID,
@@ -51,6 +67,22 @@ const schema: SchemaRow = {
   transactionIndex: 0,
   registeredAt: NOW,
 }
+const baseEvidence: SchemaProjectionEvidence = {
+  schema,
+  registration: {
+    profileId: 'testnet',
+    transactionHash: schema.registrationTransactionHash,
+    ledgerIndex: schema.ledgerIndex,
+    ledgerHash: SCHEMA_LEDGER_HASH,
+    transactionIndex: schema.transactionIndex,
+    publisher: ISSUER,
+    status: 'accepted',
+    reasonCode: null,
+    schemaUid: UID,
+    memoJson: resolved.definition,
+    recordedAt: NOW,
+  },
+}
 const network: NetworkProfileRow = {
   profileId: 'testnet',
   xcsVersion: '0.1',
@@ -63,15 +95,51 @@ const network: NetworkProfileRow = {
   enabled: true,
   createdAt: NOW,
 }
+const checkpoint: LedgerCheckpointRow = {
+  profileId: 'testnet',
+  ledgerIndex: 10,
+  ledgerHash: 'f'.repeat(64),
+  parentHash: '1'.repeat(64),
+  closeTime: NOW_RIPPLE - 10,
+  transactionCount: 0,
+  transactionRoot: '2'.repeat(64),
+  processedAt: NOW,
+}
+const readyStatus: IndexerStatusRow = {
+  profileId: 'testnet',
+  state: 'ready',
+  primarySourceTip: checkpoint.ledgerIndex,
+  secondarySourceTip: checkpoint.ledgerIndex,
+  lastAgreedLedgerIndex: checkpoint.ledgerIndex,
+  lastAgreedLedgerHash: checkpoint.ledgerHash,
+  errorCode: null,
+  writerId: 'writer-1',
+  writerEpoch: 1,
+  leaseExpiresAt: new Date(NOW.getTime() + 60_000),
+  updatedAt: NOW,
+}
 
 class FakeApiRepository implements ApiRepository {
-  constructor(private readonly configuredNetwork: NetworkProfileRow = network) {}
+  snapshotCalls = 0
+
+  constructor(
+    private readonly configuredNetwork: NetworkProfileRow = network,
+    private readonly configuredSchema: SchemaRow | null = schema,
+    private readonly configuredEvidence: readonly SchemaProjectionEvidence[] = configuredSchema ===
+    null
+      ? []
+      : [{ ...baseEvidence, schema: configuredSchema }],
+    private readonly configuredStatus: IndexerStatusRow | null = readyStatus,
+    private readonly configuredCheckpoint: LedgerCheckpointRow | null = checkpoint,
+    private readonly databaseNow: Date = NOW,
+  ) {}
 
   async withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T> {
+    this.snapshotCalls += 1
     return callback(this)
   }
   async getDatabaseTime() {
-    return NOW
+    return this.databaseNow
   }
   async ping() {}
   async listNetworks() {
@@ -81,13 +149,29 @@ class FakeApiRepository implements ApiRepository {
     return profileId === 'testnet' ? this.configuredNetwork : undefined
   }
   async getIndexerStatus(): Promise<IndexerStatusRow | undefined> {
-    return undefined
+    return this.configuredStatus ?? undefined
   }
   async getLatestCheckpoint(): Promise<LedgerCheckpointRow | undefined> {
-    return undefined
+    return this.configuredCheckpoint ?? undefined
   }
   async getSchema(_profileId: string, uid: string) {
-    return uid === UID ? schema : undefined
+    return this.configuredSchema !== null && uid === this.configuredSchema.schemaUid
+      ? this.configuredSchema
+      : undefined
+  }
+  async getSchemaProjectionEvidence(
+    input: Parameters<ApiRepository['getSchemaProjectionEvidence']>[0],
+  ): Promise<SchemaProjectionEvidence[]> {
+    return this.configuredEvidence.filter(
+      (item) =>
+        item.schema.profileId === input.profileId &&
+        input.schemaUids.includes(item.schema.schemaUid),
+    )
+  }
+  async getSchemaRegistrationByTransaction(
+    _input: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0],
+  ): Promise<SchemaEventRow | undefined> {
+    return undefined
   }
   async listSchemas(): Promise<SchemaRow[]> {
     return []
@@ -180,15 +264,33 @@ class FakeStore implements ContentPinStore {
   async unpin() {}
 }
 
-function service(options: { storeFails?: boolean; networkId?: number } = {}) {
+function service(
+  options: {
+    storeFails?: boolean
+    networkId?: number
+    schemaRow?: SchemaRow | null
+    status?: IndexerStatusRow | null
+    checkpoint?: LedgerCheckpointRow | null
+    databaseNow?: Date
+  } = {},
+) {
   const repository = new FakePinningRepository()
   const store = new FakeStore(options.storeFails)
+  const apiRepository = new FakeApiRepository(
+    { ...network, networkId: options.networkId ?? 1 },
+    options.schemaRow === undefined ? schema : options.schemaRow,
+    undefined,
+    options.status === undefined ? readyStatus : options.status,
+    options.checkpoint === undefined ? checkpoint : options.checkpoint,
+    options.databaseNow,
+  )
   return {
     repository,
     store,
+    apiRepository,
     service: new DemoPinningService({
       repository,
-      apiRepository: new FakeApiRepository({ ...network, networkId: options.networkId ?? 1 }),
+      apiRepository,
       store,
       ipHashSecret: 'x'.repeat(32),
       enabledNetworks: new Set(['testnet']),
@@ -207,6 +309,23 @@ function validPayloadBase64(): string {
     claims: { programId: 'xrpl-101' },
   }
   return Buffer.from(canonicalize(payload as JsonValue)).toString('base64')
+}
+
+async function attemptValidPin(fixture: ReturnType<typeof service>) {
+  const challenge = await fixture.service.createChallenge({
+    network: 'testnet',
+    wallet: ISSUER,
+    ipAddress: '203.0.113.42',
+  })
+  return fixture.service.pin({
+    network: 'testnet',
+    wallet: ISSUER,
+    challengeId: challenge.challengeId,
+    publicKey: PUBLIC_KEY,
+    signature: SIGNATURE,
+    payloadBase64: validPayloadBase64(),
+    ipAddress: '203.0.113.42',
+  })
 }
 
 describe('demo pinning', () => {
@@ -252,7 +371,123 @@ describe('demo pinning', () => {
     expect(result.uri).toMatch(/^ipfs:\/\/b[a-z2-7]+$/)
     expect(fixture.store.cid).toBe(result.cid)
     expect(fixture.repository.pin?.status).toBe('pinned')
+    expect(fixture.apiRepository.snapshotCalls).toBe(1)
     expect(Date.parse(result.expiresAt) - NOW.getTime()).toBe(90 * 24 * 60 * 60 * 1_000)
+  })
+
+  it.each([
+    {
+      label: 'indexer status is absent',
+      options: { status: null },
+      code: 'INDEXER_STATUS_UNAVAILABLE',
+    },
+    {
+      label: 'checkpoint is absent',
+      options: { checkpoint: null },
+      code: 'INDEXER_NOT_INITIALIZED',
+    },
+    {
+      label: 'writer lease is absent',
+      options: {
+        status: {
+          ...readyStatus,
+          writerId: null,
+          leaseExpiresAt: null,
+        },
+      },
+      code: 'INDEXER_LEASE_EXPIRED',
+    },
+    {
+      label: 'database time makes the checkpoint stale',
+      options: {
+        databaseNow: new Date(NOW.getTime() + 121_000),
+        status: {
+          ...readyStatus,
+          leaseExpiresAt: new Date(NOW.getTime() + 300_000),
+        },
+      },
+      code: 'INDEXER_STALE',
+    },
+    {
+      label: 'indexer is halted',
+      options: {
+        status: {
+          ...readyStatus,
+          state: 'halted' as const,
+          errorCode: 'LEDGER_SOURCE_DIVERGENCE',
+        },
+      },
+      code: 'INDEXER_HALTED',
+    },
+    {
+      label: 'indexer is halted while the schema is absent',
+      options: {
+        schemaRow: null,
+        status: {
+          ...readyStatus,
+          state: 'halted' as const,
+          errorCode: 'LEDGER_SOURCE_DIVERGENCE',
+        },
+      },
+      code: 'INDEXER_HALTED',
+    },
+    {
+      label: 'status and checkpoint disagree',
+      options: {
+        status: {
+          ...readyStatus,
+          lastAgreedLedgerHash: '0'.repeat(64),
+        },
+      },
+      code: 'INDEXER_EVIDENCE_INVALID',
+    },
+  ])('fails closed before pin side effects when $label', async ({ options, code }) => {
+    const fixture = service(options)
+
+    await expect(attemptValidPin(fixture)).rejects.toMatchObject({ code, statusCode: 503 })
+    expect(fixture.repository.attempts).toBe(0)
+    expect(fixture.repository.pin).toBeUndefined()
+    expect(fixture.repository.challenge?.usedAt).toBeNull()
+    expect(fixture.store.cid).toBeUndefined()
+  })
+
+  it('fails closed before reserving a pin when the schema projection drops required fields', async () => {
+    const fixture = service({
+      schemaRow: {
+        ...schema,
+        resolvedDefinition: {
+          ...resolved,
+          fields: {},
+        } as unknown as Record<string, unknown>,
+      },
+    })
+    const challenge = await fixture.service.createChallenge({
+      network: 'testnet',
+      wallet: ISSUER,
+      ipAddress: '203.0.113.42',
+    })
+
+    await expect(
+      fixture.service.pin({
+        network: 'testnet',
+        wallet: ISSUER,
+        challengeId: challenge.challengeId,
+        publicKey: PUBLIC_KEY,
+        signature: SIGNATURE,
+        payloadBase64: Buffer.from(
+          canonicalize({
+            xcsVersion: '0.1',
+            issuer: ISSUER,
+            subject: SUBJECT,
+            schema: UID,
+            claims: {},
+          }),
+        ).toString('base64'),
+        ipAddress: '203.0.113.42',
+      }),
+    ).rejects.toMatchObject({ code: 'SCHEMA_PROJECTION_INVALID', statusCode: 503 })
+    expect(fixture.repository.pin).toBeUndefined()
+    expect(fixture.store.cid).toBeUndefined()
   })
 
   it('rejects a payload over the 64 KiB demo limit before storage', async () => {

@@ -1,15 +1,24 @@
+import {
+  canonicalize,
+  computeSchemaUid,
+  encodeUtf8,
+  sha256Hex,
+  validateSchema,
+  type JsonValue,
+} from '@xcs-protocol/core'
 import type {
   CredentialEventRow,
   CredentialGenerationRow,
   IndexerStatusRow,
   LedgerCheckpointRow,
   NetworkProfileRow,
+  SchemaEventRow,
   SchemaRow,
 } from '@xcs-protocol/db'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createApi } from '../src/app.js'
-import type { ApiRepository } from '../src/types.js'
+import type { ApiRepository, SchemaProjectionEvidence } from '../src/types.js'
 import { StaticTrustPolicy } from '../src/verification.js'
 
 const UID = 'a'.repeat(64)
@@ -64,9 +73,9 @@ const generation: CredentialGenerationRow = {
   uriHex: null,
   expiration: null,
   accepted: true,
-  createdLedgerIndex: 90,
+  createdLedgerIndex: checkpoint.ledgerIndex,
   createdTransactionIndex: 0,
-  lastLedgerIndex: 95,
+  lastLedgerIndex: checkpoint.ledgerIndex,
   deletedLedgerIndex: null,
   deletionCause: null,
   createdAt: NOW,
@@ -78,8 +87,8 @@ const credentialEvent: CredentialEventRow = {
   nodeIndex: 0,
   generationId: generation.generationId,
   ledgerObjectId: generation.ledgerObjectId,
-  ledgerIndex: 95,
-  ledgerHash: '3'.repeat(64),
+  ledgerIndex: checkpoint.ledgerIndex,
+  ledgerHash: checkpoint.ledgerHash,
   transactionIndex: 1,
   eventType: 'accepted',
   issuer: ISSUER,
@@ -92,9 +101,60 @@ const credentialEvent: CredentialEventRow = {
   snapshot: {},
   recordedAt: NOW,
 }
+const registeredSchema = {
+  xcsVersion: '0.1' as const,
+  name: 'Course completion',
+  description: 'Completed a course.',
+  fields: { programId: { type: 'string' as const } },
+}
+const registeredSchemaUid = computeSchemaUid({
+  schema: registeredSchema,
+  networkId: network.networkId,
+  ledgerHash: checkpoint.ledgerHash,
+  ledgerIndex: checkpoint.ledgerIndex,
+  transactionIndex: 2,
+  publisher: ISSUER,
+})
+const acceptedSchemaRegistration: SchemaEventRow = {
+  profileId: 'testnet',
+  transactionHash: TX_HASH,
+  ledgerIndex: checkpoint.ledgerIndex,
+  ledgerHash: checkpoint.ledgerHash,
+  transactionIndex: 2,
+  publisher: ISSUER,
+  status: 'accepted',
+  reasonCode: null,
+  schemaUid: registeredSchemaUid,
+  memoJson: registeredSchema,
+  recordedAt: NOW,
+}
+const registeredSchemaRow: SchemaRow = {
+  profileId: 'testnet',
+  schemaUid: registeredSchemaUid,
+  publisher: ISSUER,
+  name: registeredSchema.name,
+  description: registeredSchema.description,
+  parentUid: null,
+  supersedesUid: null,
+  definition: registeredSchema,
+  resolvedDefinition: {
+    definition: registeredSchema,
+    fields: registeredSchema.fields,
+    lineage: [],
+  },
+  registrationTransactionHash: acceptedSchemaRegistration.transactionHash,
+  ledgerIndex: acceptedSchemaRegistration.ledgerIndex,
+  transactionIndex: acceptedSchemaRegistration.transactionIndex,
+  registeredAt: NOW,
+}
+const registeredSchemaEvidence: SchemaProjectionEvidence = {
+  schema: registeredSchemaRow,
+  registration: acceptedSchemaRegistration,
+}
 const credentialUrl = `/v1/networks/testnet/credentials/${ISSUER}/${SUBJECT}/${UID}`
 const credentialEventsUrl = `${credentialUrl}/events`
 const exactCredentialEventUrl = `${credentialEventsUrl}/${TX_HASH.toUpperCase()}`
+const schemaRegistrationUrl = `/v1/networks/testnet/schema-registrations/${TX_HASH.toUpperCase()}`
 const schemaUrl = `/v1/networks/testnet/schemas/${UID}`
 
 class RouteRepository implements ApiRepository {
@@ -118,6 +178,14 @@ class RouteRepository implements ApiRepository {
     return checkpoint
   }
   async getSchema(): Promise<SchemaRow | undefined> {
+    return undefined
+  }
+  async getSchemaProjectionEvidence(): Promise<SchemaProjectionEvidence[]> {
+    return []
+  }
+  async getSchemaRegistrationByTransaction(
+    _input: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0],
+  ): Promise<SchemaEventRow | undefined> {
     return undefined
   }
   async listSchemas(): Promise<SchemaRow[]> {
@@ -255,6 +323,74 @@ describe('read API', () => {
     })
   })
 
+  it('serves coherent root schemas through exact and list reads', async () => {
+    const repository = new RouteRepository()
+    const snapshot = new RouteRepository()
+    let snapshotCalls = 0
+    snapshot.getSchema = async () => registeredSchemaRow
+    snapshot.listSchemas = async () => [registeredSchemaRow]
+    snapshot.getSchemaProjectionEvidence = async () => [registeredSchemaEvidence]
+    repository.withConsistentSnapshot = async (callback) => {
+      snapshotCalls += 1
+      return callback(snapshot)
+    }
+    repository.getSchema = async () => {
+      throw new Error('schema read escaped the snapshot')
+    }
+    repository.listSchemas = async () => {
+      throw new Error('schema list escaped the snapshot')
+    }
+    repository.getSchemaProjectionEvidence = async () => {
+      throw new Error('schema evidence read escaped the snapshot')
+    }
+    const instance = await configuredApp({ repository })
+
+    const [exact, list] = await Promise.all([
+      instance.inject({
+        method: 'GET',
+        url: `/v1/networks/testnet/schemas/${registeredSchemaUid}`,
+      }),
+      instance.inject({ method: 'GET', url: '/v1/networks/testnet/schemas' }),
+    ])
+
+    expect(exact.statusCode).toBe(200)
+    expect(exact.json()).toMatchObject({ schemaUid: registeredSchemaUid })
+    expect(list.statusCode).toBe(200)
+    expect(list.json().items).toHaveLength(1)
+    expect(snapshotCalls).toBe(2)
+  })
+
+  it.each(['exact', 'list'] as const)(
+    'fails closed when the %s schema read contains an incoherent root projection',
+    async (surface) => {
+      const repository = new RouteRepository()
+      const corrupted: SchemaRow = {
+        ...registeredSchemaRow,
+        resolvedDefinition: {
+          definition: registeredSchema,
+          fields: { unexpected: { type: 'string' } },
+          lineage: [],
+        },
+      }
+      repository.getSchema = async () => corrupted
+      repository.listSchemas = async () => [corrupted]
+      repository.getSchemaProjectionEvidence = async () => [
+        { ...registeredSchemaEvidence, schema: corrupted },
+      ]
+      const instance = await configuredApp({ repository })
+      const response = await instance.inject({
+        method: 'GET',
+        url:
+          surface === 'exact'
+            ? `/v1/networks/testnet/schemas/${registeredSchemaUid}`
+            : '/v1/networks/testnet/schemas',
+      })
+
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({ error: 'SCHEMA_PROJECTION_INVALID' })
+    },
+  )
+
   it('fails readiness when the last indexed ledger is stale', async () => {
     const repository = new RouteRepository()
     repository.getLatestCheckpoint = async () => ({
@@ -332,6 +468,26 @@ describe('read API', () => {
     })
   })
 
+  it('fails closed on credential projections older than network activation', async () => {
+    const repository = new RouteRepository()
+    repository.getCredential = async () => ({
+      ...generation,
+      createdLedgerIndex: network.activationLedgerIndex - 1,
+    })
+    const instance = await configuredApp({ repository })
+
+    const state = await instance.inject({ method: 'GET', url: credentialUrl })
+    expect(state.statusCode).toBe(503)
+    expect(state.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getCredentialEvents = async () => [
+      { ...credentialEvent, ledgerIndex: network.activationLedgerIndex - 1 },
+    ]
+    const history = await instance.inject({ method: 'GET', url: credentialEventsUrl })
+    expect(history.statusCode).toBe(503)
+    expect(history.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
   it('serves every authoritative credential read from the repository snapshot', async () => {
     const repository = new RouteRepository()
     const snapshot = new RouteRepository()
@@ -398,11 +554,14 @@ describe('read API', () => {
         transactionHash: TX_HASH,
         nodeIndex: 0,
         generationId: generation.generationId,
-        ledgerIndex: 95,
+        ledgerIndex: checkpoint.ledgerIndex,
+        ledgerHash: credentialEvent.ledgerHash,
+        transactionIndex: 1,
         eventType: 'accepted',
         issuer: ISSUER,
         subject: SUBJECT,
         schemaUid: UID,
+        accepted: true,
         deletionCause: null,
       },
     })
@@ -426,6 +585,176 @@ describe('read API', () => {
     expect(operation?.responses).toHaveProperty('503')
   })
 
+  it('returns accepted and rejected schema registration evidence without exposing memo JSON', async () => {
+    const repository = new RouteRepository()
+    const snapshot = new RouteRepository()
+    let snapshotCalls = 0
+    let lookup: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0] | undefined
+    snapshot.getSchemaRegistrationByTransaction = async (input) => {
+      lookup = input
+      return acceptedSchemaRegistration
+    }
+    repository.withConsistentSnapshot = async (callback) => {
+      snapshotCalls += 1
+      return callback(snapshot)
+    }
+    repository.getNetwork = async () => {
+      throw new Error('schema registration read escaped the snapshot')
+    }
+    repository.getSchemaRegistrationByTransaction = async () => {
+      throw new Error('schema registration read escaped the snapshot')
+    }
+    const instance = await configuredApp({ repository })
+
+    const accepted = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(accepted.statusCode).toBe(200)
+    expect(accepted.json()).toEqual({
+      transactionHash: TX_HASH,
+      registration: {
+        status: 'accepted',
+        publisher: ISSUER,
+        ledgerIndex: acceptedSchemaRegistration.ledgerIndex,
+        ledgerHash: acceptedSchemaRegistration.ledgerHash,
+        transactionIndex: acceptedSchemaRegistration.transactionIndex,
+        schemaUid: registeredSchemaUid,
+        schemaDigestHex: sha256Hex(
+          encodeUtf8(canonicalize(acceptedSchemaRegistration.memoJson as JsonValue)),
+        ),
+        reasonCode: null,
+      },
+    })
+    expect(JSON.stringify(accepted.json())).not.toContain('memoJson')
+    expect(lookup).toEqual({ profileId: 'testnet', transactionHash: TX_HASH })
+    expect(snapshotCalls).toBe(1)
+
+    const rawMemoJson = {
+      ...registeredSchema,
+      fields: { programId: { type: 'string' as const, optional: false } },
+    }
+    const normalizedSchema = validateSchema(rawMemoJson)
+    const normalizedSchemaUid = computeSchemaUid({
+      schema: normalizedSchema,
+      networkId: network.networkId,
+      ledgerHash: checkpoint.ledgerHash,
+      ledgerIndex: checkpoint.ledgerIndex,
+      transactionIndex: acceptedSchemaRegistration.transactionIndex,
+      publisher: ISSUER,
+    })
+    snapshot.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      schemaUid: normalizedSchemaUid,
+      memoJson: rawMemoJson,
+    })
+    const acceptedUnnormalizedMemo = await instance.inject({
+      method: 'GET',
+      url: schemaRegistrationUrl,
+    })
+    expect(acceptedUnnormalizedMemo.statusCode).toBe(200)
+    expect(acceptedUnnormalizedMemo.json()).toMatchObject({
+      registration: {
+        schemaUid: normalizedSchemaUid,
+        schemaDigestHex: sha256Hex(encodeUtf8(canonicalize(rawMemoJson))),
+      },
+    })
+    expect(acceptedUnnormalizedMemo.json().registration.schemaDigestHex).not.toBe(
+      sha256Hex(encodeUtf8(canonicalize(normalizedSchema as unknown as JsonValue))),
+    )
+
+    snapshot.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      status: 'rejected',
+      schemaUid: null,
+      memoJson: null,
+      reasonCode: 'REGISTRATION_NOT_CANONICAL',
+    })
+    const rejected = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(rejected.statusCode).toBe(200)
+    expect(rejected.json()).toEqual({
+      transactionHash: TX_HASH,
+      registration: {
+        status: 'rejected',
+        publisher: ISSUER,
+        ledgerIndex: acceptedSchemaRegistration.ledgerIndex,
+        ledgerHash: acceptedSchemaRegistration.ledgerHash,
+        transactionIndex: acceptedSchemaRegistration.transactionIndex,
+        schemaUid: null,
+        schemaDigestHex: null,
+        reasonCode: 'REGISTRATION_NOT_CANONICAL',
+      },
+    })
+    expect(snapshotCalls).toBe(3)
+
+    const operation =
+      instance.swagger().paths?.['/v1/networks/{network}/schema-registrations/{transactionHash}']
+        ?.get
+    expect(operation?.responses).toHaveProperty('200')
+    expect(operation?.responses).toHaveProperty('400')
+    expect(operation?.responses).toHaveProperty('404')
+    expect(operation?.responses).toHaveProperty('503')
+  })
+
+  it('returns null for an unknown schema registration and validates its route boundary', async () => {
+    const instance = await app()
+    const missing = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(missing.statusCode).toBe(200)
+    expect(missing.json()).toEqual({ transactionHash: TX_HASH, registration: null })
+
+    const malformed = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/schema-registrations/not-a-hash',
+    })
+    expect(malformed.statusCode).toBe(400)
+    const missingNetwork = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/missing/schema-registrations/${TX_HASH}`,
+    })
+    expect(missingNetwork.statusCode).toBe(404)
+  })
+
+  it('fails closed on inconsistent schema registration evidence', async () => {
+    const repository = new RouteRepository()
+    repository.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      memoJson: null,
+    })
+    const instance = await configuredApp({ repository })
+    const malformed = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(malformed.statusCode).toBe(503)
+    expect(malformed.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      schemaUid: '0'.repeat(64),
+    })
+    const wrongUid = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(wrongUid.statusCode).toBe(503)
+    expect(wrongUid.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      transactionHash: '1'.repeat(64),
+    })
+    const wrongTransaction = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(wrongTransaction.statusCode).toBe(503)
+    expect(wrongTransaction.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      ledgerIndex: network.activationLedgerIndex - 1,
+    })
+    const beforeActivation = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(beforeActivation.statusCode).toBe(503)
+    expect(beforeActivation.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getSchemaRegistrationByTransaction = async () => ({
+      ...acceptedSchemaRegistration,
+      ledgerIndex: checkpoint.ledgerIndex + 1,
+    })
+    const ahead = await instance.inject({ method: 'GET', url: schemaRegistrationUrl })
+    expect(ahead.statusCode).toBe(503)
+    expect(ahead.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
   it('returns an explicit empty exact lookup and fails closed on ambiguous event rows', async () => {
     const repository = new RouteRepository()
     const instance = await configuredApp({ repository })
@@ -440,6 +769,20 @@ describe('read API', () => {
     const ambiguous = await instance.inject({ method: 'GET', url: exactCredentialEventUrl })
     expect(ambiguous.statusCode).toBe(503)
     expect(ambiguous.json()).toMatchObject({ error: 'CREDENTIAL_EVENT_AMBIGUOUS' })
+
+    repository.getCredentialEventsByTransaction = async () => [
+      { ...credentialEvent, ledgerIndex: network.activationLedgerIndex - 1 },
+    ]
+    const beforeActivation = await instance.inject({ method: 'GET', url: exactCredentialEventUrl })
+    expect(beforeActivation.statusCode).toBe(503)
+    expect(beforeActivation.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+
+    repository.getCredentialEventsByTransaction = async () => [
+      { ...credentialEvent, accepted: false },
+    ]
+    const contradictory = await instance.inject({ method: 'GET', url: exactCredentialEventUrl })
+    expect(contradictory.statusCode).toBe(503)
+    expect(contradictory.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
 
     const malformed = await instance.inject({
       method: 'GET',
@@ -469,6 +812,26 @@ describe('read API', () => {
         '/v1/networks/{network}/credentials/{issuer}/{subject}/{schemaUid}/events'
       ]?.get?.responses,
     ).toHaveProperty('413')
+  })
+
+  it('documents and returns ledger coordinates and acceptance in credential event history', async () => {
+    const repository = new RouteRepository()
+    repository.getCredentialEvents = async () => [credentialEvent]
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({ method: 'GET', url: credentialEventsUrl })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().items[0]).toMatchObject({
+      ledgerHash: credentialEvent.ledgerHash,
+      transactionIndex: credentialEvent.transactionIndex,
+      accepted: credentialEvent.accepted,
+      ledgerObjectId: credentialEvent.ledgerObjectId,
+    })
+    const operation =
+      instance.swagger().paths?.[
+        '/v1/networks/{network}/credentials/{issuer}/{subject}/{schemaUid}/events'
+      ]?.get
+    expect(operation?.responses).toHaveProperty('200')
   })
 
   it('uses PostgreSQL time to reject an expired writer lease in production mode', async () => {
@@ -541,7 +904,15 @@ describe('read API', () => {
       projectionReads += 1
       return undefined
     }
+    repository.getSchemaRegistrationByTransaction = async () => {
+      projectionReads += 1
+      return acceptedSchemaRegistration
+    }
     repository.listSchemas = async () => {
+      projectionReads += 1
+      return []
+    }
+    repository.getSchemaProjectionEvidence = async () => {
       projectionReads += 1
       return []
     }
@@ -561,6 +932,7 @@ describe('read API', () => {
 
     const responses = await Promise.all([
       instance.inject({ method: 'GET', url: schemaUrl }),
+      instance.inject({ method: 'GET', url: schemaRegistrationUrl }),
       instance.inject({ method: 'GET', url: '/v1/networks/testnet/schemas' }),
       instance.inject({ method: 'GET', url: credentialUrl }),
       instance.inject({ method: 'GET', url: credentialEventsUrl }),
@@ -571,7 +943,9 @@ describe('read API', () => {
         payload: { network: 'testnet', issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
       }),
     ])
-    expect(responses.map((response) => response.statusCode)).toEqual([503, 503, 503, 503, 503, 503])
+    expect(responses.map((response) => response.statusCode)).toEqual([
+      503, 503, 503, 503, 503, 503, 503,
+    ])
     expect(projectionReads).toBe(0)
   })
 
@@ -703,6 +1077,72 @@ describe('read API', () => {
       payload: 'not_checked',
       issuerTrust: 'unknown',
     })
+  })
+
+  it('returns a stable 503 when verification reads a corrupted schema projection', async () => {
+    const repository = new RouteRepository()
+    repository.getSchema = async () => ({
+      profileId: 'testnet',
+      schemaUid: UID,
+      publisher: ISSUER,
+      name: registeredSchema.name,
+      description: registeredSchema.description,
+      parentUid: null,
+      supersedesUid: null,
+      definition: registeredSchema,
+      resolvedDefinition: {
+        definition: registeredSchema,
+        fields: {},
+        lineage: [],
+      },
+      registrationTransactionHash: TX_HASH,
+      ledgerIndex: checkpoint.ledgerIndex,
+      transactionIndex: 0,
+      registeredAt: NOW,
+    })
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'POST',
+      url: '/v1/verify',
+      payload: { network: 'testnet', issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toEqual({
+      error: 'SCHEMA_PROJECTION_INVALID',
+      message: 'The indexed schema projection is incomplete or inconsistent.',
+    })
+  })
+
+  it('accepts a verification envelope containing a payload at the 1 MiB protocol limit', async () => {
+    const instance = await app()
+    const payload = {
+      xcsVersion: '0.1',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schema: UID,
+      claims: { proof: '' },
+    }
+    const emptyPayloadSize = encodeUtf8(canonicalize(payload)).length
+    payload.claims.proof = 'x'.repeat(1024 * 1024 - emptyPayloadSize)
+    expect(encodeUtf8(canonicalize(payload))).toHaveLength(1024 * 1024)
+
+    const requestBody = {
+      network: 'testnet',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      payload,
+    }
+    expect(Buffer.byteLength(JSON.stringify(requestBody))).toBeGreaterThan(1024 * 1024)
+
+    const response = await instance.inject({
+      method: 'POST',
+      url: '/v1/verify',
+      payload: requestBody,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ payload: 'invalid' })
   })
 
   it('checks verification network membership inside the authoritative snapshot', async () => {

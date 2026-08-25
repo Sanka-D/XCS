@@ -1,8 +1,10 @@
 import {
   canonicalize,
+  computeSchemaUid,
   createHttpsPayloadUri,
   type CredentialPayload,
   type ResolvedSchema,
+  type SchemaDefinition,
 } from '@xcs-protocol/core'
 import type {
   CredentialEventRow,
@@ -10,15 +12,15 @@ import type {
   IndexerStatusRow,
   LedgerCheckpointRow,
   NetworkProfileRow,
+  SchemaEventRow,
   SchemaRow,
 } from '@xcs-protocol/db'
 import { describe, expect, it } from 'vitest'
 
 import { DisabledPayloadResolver, PayloadUnavailableError } from '../src/payload-resolver.js'
-import type { ApiRepository, PayloadResolver } from '../src/types.js'
+import type { ApiRepository, PayloadResolver, SchemaProjectionEvidence } from '../src/types.js'
 import { StaticTrustPolicy, verifyCredential } from '../src/verification.js'
 
-const UID = 'a'.repeat(64)
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv'
 const NOW = new Date('2026-08-19T00:00:00.000Z')
@@ -28,15 +30,59 @@ const FRESHNESS = {
   maxLedgerAgeSeconds: 120,
 } as const
 
-const payload: CredentialPayload = {
-  xcsVersion: '0.1',
-  issuer: ISSUER,
-  subject: SUBJECT,
-  schema: UID,
-  claims: { programId: 'xrpl-101' },
+function registeredProjection(input: {
+  definition: SchemaDefinition
+  fields: ResolvedSchema['fields']
+  lineage: string[]
+  ledgerIndex: number
+  transactionIndex: number
+  ledgerHash: string
+  transactionHash: string
+}): SchemaProjectionEvidence {
+  const schemaUid = computeSchemaUid({
+    schema: input.definition,
+    networkId: 1,
+    ledgerHash: input.ledgerHash,
+    ledgerIndex: input.ledgerIndex,
+    transactionIndex: input.transactionIndex,
+    publisher: ISSUER,
+  })
+  const schema: SchemaRow = {
+    profileId: 'testnet',
+    schemaUid,
+    publisher: ISSUER,
+    name: input.definition.name,
+    description: input.definition.description,
+    parentUid: input.definition.extends ?? null,
+    supersedesUid: input.definition.supersedes ?? null,
+    definition: input.definition as unknown as Record<string, unknown>,
+    resolvedDefinition: {
+      definition: input.definition,
+      fields: input.fields,
+      lineage: input.lineage,
+    },
+    registrationTransactionHash: input.transactionHash,
+    ledgerIndex: input.ledgerIndex,
+    transactionIndex: input.transactionIndex,
+    registeredAt: NOW,
+  }
+  return {
+    schema,
+    registration: {
+      profileId: 'testnet',
+      transactionHash: input.transactionHash,
+      ledgerIndex: input.ledgerIndex,
+      ledgerHash: input.ledgerHash,
+      transactionIndex: input.transactionIndex,
+      publisher: ISSUER,
+      status: 'accepted',
+      reasonCode: null,
+      schemaUid,
+      memoJson: input.definition,
+      recordedAt: NOW,
+    },
+  }
 }
-const payloadText = canonicalize(payload)
-const uri = createHttpsPayloadUri('https://issuer.example/credential.json', payloadText)
 
 const resolved: ResolvedSchema = {
   definition: {
@@ -48,22 +94,27 @@ const resolved: ResolvedSchema = {
   fields: { programId: { type: 'string' } },
   lineage: [],
 }
-
-const schema: SchemaRow = {
-  profileId: 'testnet',
-  schemaUid: UID,
-  publisher: ISSUER,
-  name: 'Completion',
-  description: 'Course completion',
-  parentUid: null,
-  supersedesUid: null,
-  definition: resolved.definition as unknown as Record<string, unknown>,
-  resolvedDefinition: resolved as unknown as Record<string, unknown>,
-  registrationTransactionHash: 'b'.repeat(64),
+const baseEvidence = registeredProjection({
+  definition: resolved.definition,
+  fields: resolved.fields,
+  lineage: [],
   ledgerIndex: 100,
   transactionIndex: 0,
-  registeredAt: NOW,
+  ledgerHash: '4'.repeat(64),
+  transactionHash: 'b'.repeat(64),
+})
+const schema = baseEvidence.schema
+const UID = schema.schemaUid
+
+const payload: CredentialPayload = {
+  xcsVersion: '0.1',
+  issuer: ISSUER,
+  subject: SUBJECT,
+  schema: UID,
+  claims: { programId: 'xrpl-101' },
 }
+const payloadText = canonicalize(payload)
+const uri = createHttpsPayloadUri('https://issuer.example/credential.json', payloadText)
 
 const generation: CredentialGenerationRow = {
   profileId: 'testnet',
@@ -128,6 +179,9 @@ class VerificationRepository implements ApiRepository {
     private readonly schemaRow: SchemaRow | undefined,
     private readonly checkpointRow: LedgerCheckpointRow | null = checkpoint,
     private readonly statusRow: IndexerStatusRow | null = readyStatus,
+    private readonly schemaEvidence: readonly SchemaProjectionEvidence[] = schemaRow === undefined
+      ? []
+      : [{ ...baseEvidence, schema: schemaRow }],
   ) {}
 
   async withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T> {
@@ -152,6 +206,20 @@ class VerificationRepository implements ApiRepository {
   }
   async getSchema() {
     return this.schemaRow
+  }
+  async getSchemaProjectionEvidence(
+    input: Parameters<ApiRepository['getSchemaProjectionEvidence']>[0],
+  ): Promise<SchemaProjectionEvidence[]> {
+    return this.schemaEvidence.filter(
+      (item) =>
+        item.schema.profileId === input.profileId &&
+        input.schemaUids.includes(item.schema.schemaUid),
+    )
+  }
+  async getSchemaRegistrationByTransaction(
+    _input: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0],
+  ): Promise<SchemaEventRow | undefined> {
+    return undefined
   }
   async listSchemas(): Promise<SchemaRow[]> {
     return []
@@ -182,6 +250,60 @@ const request = {
   issuer: ISSUER,
   subject: SUBJECT,
   schemaUid: UID,
+}
+
+function multiLevelEvidence() {
+  const root = registeredProjection({
+    definition: {
+      xcsVersion: '0.1',
+      name: 'Course',
+      description: 'Course identifier',
+      fields: { programId: { type: 'string' } },
+    },
+    fields: { programId: { type: 'string' } },
+    lineage: [],
+    ledgerIndex: 90,
+    transactionIndex: 0,
+    ledgerHash: '5'.repeat(64),
+    transactionHash: '6'.repeat(64),
+  })
+  const middleDefinition: SchemaDefinition = {
+    xcsVersion: '0.1',
+    name: 'Named course',
+    description: 'Course identifier and name',
+    extends: root.schema.schemaUid,
+    fields: { courseName: { type: 'string' } },
+  }
+  const middle = registeredProjection({
+    definition: middleDefinition,
+    fields: { programId: { type: 'string' }, courseName: { type: 'string' } },
+    lineage: [root.schema.schemaUid],
+    ledgerIndex: 91,
+    transactionIndex: 0,
+    ledgerHash: '7'.repeat(64),
+    transactionHash: '8'.repeat(64),
+  })
+  const leafDefinition: SchemaDefinition = {
+    xcsVersion: '0.1',
+    name: 'Dated completion',
+    description: 'Course completion with its issued date',
+    extends: middle.schema.schemaUid,
+    fields: { issuedAt: { type: 'string' } },
+  }
+  const leaf = registeredProjection({
+    definition: leafDefinition,
+    fields: {
+      programId: { type: 'string' },
+      courseName: { type: 'string' },
+      issuedAt: { type: 'string' },
+    },
+    lineage: [root.schema.schemaUid, middle.schema.schemaUid],
+    ledgerIndex: 92,
+    transactionIndex: 0,
+    ledgerHash: '9'.repeat(64),
+    transactionHash: 'a'.repeat(64),
+  })
+  return { root, middle, leaf }
 }
 
 describe('verifyCredential', () => {
@@ -234,6 +356,124 @@ describe('verifyCredential', () => {
       generationId: generation.generationId,
     })
   })
+
+  it('fails closed when an authoritative schema projection drops required fields', async () => {
+    const corruptedSchema: SchemaRow = {
+      ...schema,
+      resolvedDefinition: {
+        ...resolved,
+        fields: {},
+      } as unknown as Record<string, unknown>,
+    }
+
+    await expect(
+      verifyCredential(
+        { ...request, payload: { ...payload, claims: {} } },
+        {
+          repository: new VerificationRepository(generation, corruptedSchema),
+          resolver: neverResolver,
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'SCHEMA_PROJECTION_INVALID', statusCode: 503 })
+  })
+
+  it('accepts a coherent multi-level inherited schema projection', async () => {
+    const hierarchy = multiLevelEvidence()
+
+    await expect(
+      verifyCredential(
+        { ...request, schemaUid: hierarchy.leaf.schema.schemaUid },
+        {
+          repository: new VerificationRepository(
+            undefined,
+            hierarchy.leaf.schema,
+            checkpoint,
+            readyStatus,
+            [hierarchy.root, hierarchy.middle, hierarchy.leaf],
+          ),
+          resolver: neverResolver,
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+    ).resolves.toMatchObject({ schema: 'valid', payload: 'not_checked' })
+  })
+
+  it.each(['ancestor type altered', 'inherited field missing', 'inherited field added'] as const)(
+    'fails closed when a multi-level projection has an %s',
+    async (corruption) => {
+      const hierarchy = multiLevelEvidence()
+      let evidence: SchemaProjectionEvidence[] = [hierarchy.root, hierarchy.middle, hierarchy.leaf]
+      if (corruption === 'ancestor type altered') {
+        const definition = {
+          ...hierarchy.middle.schema.definition,
+          fields: { courseName: { type: 'bool' } },
+        }
+        evidence = evidence.map((item) =>
+          item === hierarchy.middle
+            ? {
+                ...item,
+                schema: {
+                  ...item.schema,
+                  definition,
+                  resolvedDefinition: {
+                    definition,
+                    fields: { programId: { type: 'string' }, courseName: { type: 'bool' } },
+                    lineage: [hierarchy.root.schema.schemaUid],
+                  },
+                },
+              }
+            : item,
+        )
+      } else {
+        const fields = {
+          ...(corruption === 'inherited field added'
+            ? { programId: { type: 'string' as const } }
+            : {}),
+          courseName: { type: 'string' },
+          issuedAt: { type: 'string' },
+          ...(corruption === 'inherited field added'
+            ? { unexpected: { type: 'string' as const } }
+            : {}),
+        }
+        evidence = evidence.map((item) =>
+          item === hierarchy.leaf
+            ? {
+                ...item,
+                schema: {
+                  ...item.schema,
+                  resolvedDefinition: {
+                    ...(item.schema.resolvedDefinition as unknown as ResolvedSchema),
+                    fields,
+                  },
+                },
+              }
+            : item,
+        )
+      }
+      const leaf = evidence.at(-1)!.schema
+
+      await expect(
+        verifyCredential(
+          { ...request, schemaUid: leaf.schemaUid },
+          {
+            repository: new VerificationRepository(
+              undefined,
+              leaf,
+              checkpoint,
+              readyStatus,
+              evidence,
+            ),
+            resolver: neverResolver,
+            trustPolicy: new StaticTrustPolicy(),
+            ...FRESHNESS,
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'SCHEMA_PROJECTION_INVALID', statusCode: 503 })
+    },
+  )
 
   it('distinguishes a valid payload whose digest was changed', async () => {
     const changed = {

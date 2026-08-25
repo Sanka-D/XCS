@@ -93,6 +93,7 @@ export function assertAuthoritativeLedgerEvidence(input: {
   checkpoint: LedgerCheckpointRow | undefined
   now: Date
   maxLedgerAgeSeconds: number
+  minimumLedgerIndex?: number
   projectionLedgerIndexes?: readonly number[]
 }): asserts input is typeof input & {
   status: IndexerStatusRow
@@ -119,9 +120,14 @@ export function assertAuthoritativeLedgerEvidence(input: {
     )
   }
   if (
+    !Number.isInteger(input.minimumLedgerIndex ?? 0) ||
+    (input.minimumLedgerIndex ?? 0) < 0 ||
+    (input.minimumLedgerIndex ?? 0) > checkpoint.ledgerIndex ||
     input.projectionLedgerIndexes?.some(
       (ledgerIndex) =>
-        !Number.isInteger(ledgerIndex) || ledgerIndex < 0 || ledgerIndex > checkpoint.ledgerIndex,
+        !Number.isInteger(ledgerIndex) ||
+        ledgerIndex < (input.minimumLedgerIndex ?? 0) ||
+        ledgerIndex > checkpoint.ledgerIndex,
     ) === true
   ) {
     throw new IndexerUnavailableError(

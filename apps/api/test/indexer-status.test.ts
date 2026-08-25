@@ -83,6 +83,11 @@ describe('authoritative indexer evidence', () => {
       { projectionLedgerIndexes: [101] },
       'INDEXER_EVIDENCE_INVALID',
     ],
+    [
+      'projection older than network activation',
+      { minimumLedgerIndex: 50, projectionLedgerIndexes: [49] },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
     ['missing checkpoint', { checkpoint: undefined }, 'INDEXER_NOT_INITIALIZED'],
   ])('rejects %s', (_label, overrides, code) => {
     expect(() => assertAuthoritativeLedgerEvidence(evidence(overrides))).toThrow(

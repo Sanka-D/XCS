@@ -4,10 +4,11 @@ import {
   indexerStatuses,
   ledgerCheckpoints,
   networkProfiles,
+  schemaEvents,
   schemas,
   type XcsDatabase,
 } from '@xcs-protocol/db'
-import { and, asc, desc, eq, gt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
 
 import type { ApiRepository } from './types.js'
 
@@ -74,6 +75,42 @@ export class PostgresApiRepository implements ApiRepository {
       .select()
       .from(schemas)
       .where(and(eq(schemas.profileId, profileId), eq(schemas.schemaUid, schemaUid)))
+      .limit(1)
+    return row
+  }
+
+  getSchemaProjectionEvidence(input: Parameters<ApiRepository['getSchemaProjectionEvidence']>[0]) {
+    if (input.schemaUids.length === 0) return Promise.resolve([])
+    return this.db
+      .select({ schema: schemas, registration: schemaEvents })
+      .from(schemas)
+      .innerJoin(
+        schemaEvents,
+        and(
+          eq(schemaEvents.profileId, schemas.profileId),
+          eq(schemaEvents.transactionHash, schemas.registrationTransactionHash),
+        ),
+      )
+      .where(
+        and(
+          eq(schemas.profileId, input.profileId),
+          inArray(schemas.schemaUid, [...input.schemaUids]),
+        ),
+      )
+  }
+
+  async getSchemaRegistrationByTransaction(
+    input: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0],
+  ) {
+    const [row] = await this.db
+      .select()
+      .from(schemaEvents)
+      .where(
+        and(
+          eq(schemaEvents.profileId, input.profileId),
+          eq(schemaEvents.transactionHash, input.transactionHash),
+        ),
+      )
       .limit(1)
     return row
   }

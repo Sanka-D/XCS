@@ -19,6 +19,7 @@ const pinningService = config.demoPinning.enabled
       store: new KuboPinStore(config.demoPinning.kuboRpcUrl),
       ipHashSecret: config.demoPinning.ipHashSecret,
       enabledNetworks: new Set(config.demoPinning.networks),
+      maxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
     })
   : undefined
 const app = await createApi({

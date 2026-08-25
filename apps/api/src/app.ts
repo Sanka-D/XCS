@@ -2,7 +2,16 @@ import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
-import { isClassicAddress, type VerificationReport } from '@xcs-protocol/core'
+import {
+  canonicalize,
+  computeSchemaUid,
+  encodeUtf8,
+  isClassicAddress,
+  sha256Hex,
+  validateSchema,
+  type JsonValue,
+  type VerificationReport,
+} from '@xcs-protocol/core'
 import Fastify, { type FastifyInstance } from 'fastify'
 
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS, IndexerUnavailableError } from './ledger-freshness.js'
@@ -13,6 +22,11 @@ import {
 } from './indexer-status.js'
 import { decodeSchemaCursor, encodeSchemaCursor } from './pagination.js'
 import { DemoPinningService, PinningError } from './pinning.js'
+import {
+  authoritativeResolvedSchema,
+  SchemaProjectionInvalidError,
+  schemaProjectionEvidenceUids,
+} from './schema-projection.js'
 import type { ApiRepository, PayloadResolver, TrustPolicy } from './types.js'
 import {
   VerificationNetworkNotFoundError,
@@ -23,9 +37,19 @@ import {
 const PROFILE_PATTERN = '^[a-z0-9][a-z0-9._-]{0,127}$'
 const UID_PATTERN = '^[0-9a-f]{64}$'
 const INPUT_HASH_PATTERN = '^[0-9A-Fa-f]{64}$'
+const LOWERCASE_HASH = /^[0-9a-f]{64}$/u
+const REASON_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u
 const ADDRESS_PATTERN = '^r[1-9A-HJ-NP-Za-km-z]{24,34}$'
 const CREDENTIAL_EVENT_HISTORY_LIMIT = 100
 const EXACT_CREDENTIAL_EVENT_QUERY_LIMIT = 2
+const CREDENTIAL_DELETION_CAUSES = new Set([
+  'issuer_revoked',
+  'subject_rejected',
+  'subject_removed',
+  'expired_cleanup',
+  'account_deleted',
+  'self_deleted',
+])
 const errorResponseSchema = {
   type: 'object',
   additionalProperties: false,
@@ -87,10 +111,13 @@ const publicCredentialEventSchema = {
     'nodeIndex',
     'generationId',
     'ledgerIndex',
+    'ledgerHash',
+    'transactionIndex',
     'eventType',
     'issuer',
     'subject',
     'schemaUid',
+    'accepted',
     'deletionCause',
   ],
   properties: {
@@ -100,10 +127,13 @@ const publicCredentialEventSchema = {
       anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }],
     },
     ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    ledgerHash: { type: 'string', pattern: UID_PATTERN },
+    transactionIndex: { type: 'integer', minimum: 0 },
     eventType: { type: 'string', enum: ['created', 'accepted', 'deleted'] },
     issuer: { type: 'string', pattern: ADDRESS_PATTERN },
     subject: { type: 'string', pattern: ADDRESS_PATTERN },
     schemaUid: { type: 'string', pattern: UID_PATTERN },
+    accepted: { type: 'boolean' },
     deletionCause: {
       anyOf: [
         {
@@ -122,6 +152,17 @@ const publicCredentialEventSchema = {
     },
   },
 } as const
+const credentialEventHistoryResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      items: { ...publicCredentialEventSchema, additionalProperties: true },
+    },
+  },
+} as const
 const exactCredentialEventResponseSchema = {
   type: 'object',
   additionalProperties: false,
@@ -129,6 +170,39 @@ const exactCredentialEventResponseSchema = {
   properties: {
     transactionHash: { type: 'string', pattern: UID_PATTERN },
     event: { anyOf: [publicCredentialEventSchema, { type: 'null' }] },
+  },
+} as const
+const publicSchemaRegistrationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'status',
+    'publisher',
+    'ledgerIndex',
+    'ledgerHash',
+    'transactionIndex',
+    'schemaUid',
+    'schemaDigestHex',
+    'reasonCode',
+  ],
+  properties: {
+    status: { type: 'string', enum: ['accepted', 'rejected'] },
+    publisher: { type: 'string', pattern: ADDRESS_PATTERN },
+    ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    ledgerHash: { type: 'string', pattern: UID_PATTERN },
+    transactionIndex: { type: 'integer', minimum: 0 },
+    schemaUid: { anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }] },
+    schemaDigestHex: { anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }] },
+    reasonCode: { anyOf: [{ type: 'string', minLength: 1, maxLength: 128 }, { type: 'null' }] },
+  },
+} as const
+const exactSchemaRegistrationResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['transactionHash', 'registration'],
+  properties: {
+    transactionHash: { type: 'string', pattern: UID_PATTERN },
+    registration: { anyOf: [publicSchemaRegistrationSchema, { type: 'null' }] },
   },
 } as const
 
@@ -162,18 +236,142 @@ function credentialState(
 
 function publicCredentialEvent(
   row: Awaited<ReturnType<ApiRepository['getCredentialEvents']>>[number],
+  expected: {
+    readonly transactionHash: string
+    readonly issuer: string
+    readonly subject: string
+    readonly schemaUid: string
+    readonly activationLedgerIndex: number
+  },
 ) {
+  const validEventShape =
+    row.transactionHash === expected.transactionHash &&
+    row.issuer === expected.issuer &&
+    row.subject === expected.subject &&
+    row.schemaUid === expected.schemaUid &&
+    LOWERCASE_HASH.test(row.transactionHash) &&
+    typeof row.generationId === 'string' &&
+    LOWERCASE_HASH.test(row.generationId) &&
+    LOWERCASE_HASH.test(row.ledgerHash) &&
+    LOWERCASE_HASH.test(row.schemaUid) &&
+    isClassicAddress(row.issuer) &&
+    isClassicAddress(row.subject) &&
+    Number.isSafeInteger(row.nodeIndex) &&
+    row.nodeIndex >= 0 &&
+    Number.isSafeInteger(row.ledgerIndex) &&
+    row.ledgerIndex >= expected.activationLedgerIndex &&
+    row.ledgerIndex <= 4_294_967_295 &&
+    Number.isSafeInteger(row.transactionIndex) &&
+    row.transactionIndex >= 0 &&
+    (row.eventType === 'created' || row.eventType === 'accepted' || row.eventType === 'deleted') &&
+    (row.eventType === 'deleted'
+      ? typeof row.deletionCause === 'string' && CREDENTIAL_DELETION_CAUSES.has(row.deletionCause)
+      : row.deletionCause === null) &&
+    (row.eventType !== 'created' ||
+      (row.generationId === row.transactionHash &&
+        row.accepted === (row.issuer === row.subject))) &&
+    (row.eventType !== 'accepted' || row.accepted === true)
+  if (!validEventShape) {
+    throw new IndexerUnavailableError(
+      'INDEXER_EVIDENCE_INVALID',
+      'The indexed credential event evidence is incomplete or inconsistent.',
+    )
+  }
   return {
     transactionHash: row.transactionHash,
     nodeIndex: row.nodeIndex,
     generationId: row.generationId,
     ledgerIndex: row.ledgerIndex,
+    ledgerHash: row.ledgerHash,
+    transactionIndex: row.transactionIndex,
     eventType: row.eventType,
     issuer: row.issuer,
     subject: row.subject,
     schemaUid: row.schemaUid,
+    accepted: row.accepted,
     deletionCause: row.deletionCause,
   }
+}
+
+function invalidSchemaRegistrationEvidence(): never {
+  throw new IndexerUnavailableError(
+    'INDEXER_EVIDENCE_INVALID',
+    'The indexed schema registration evidence is incomplete or inconsistent.',
+  )
+}
+
+function publicSchemaRegistration(
+  row: NonNullable<Awaited<ReturnType<ApiRepository['getSchemaRegistrationByTransaction']>>>,
+  network: { readonly networkId: number; readonly activationLedgerIndex: number },
+  expectedTransactionHash: string,
+) {
+  if (
+    row.transactionHash !== expectedTransactionHash ||
+    !isClassicAddress(row.publisher) ||
+    !Number.isSafeInteger(row.ledgerIndex) ||
+    row.ledgerIndex < network.activationLedgerIndex ||
+    row.ledgerIndex > 4_294_967_295 ||
+    !LOWERCASE_HASH.test(row.ledgerHash) ||
+    !Number.isSafeInteger(row.transactionIndex) ||
+    row.transactionIndex < 0
+  ) {
+    return invalidSchemaRegistrationEvidence()
+  }
+  const common = {
+    status: row.status,
+    publisher: row.publisher,
+    ledgerIndex: row.ledgerIndex,
+    ledgerHash: row.ledgerHash,
+    transactionIndex: row.transactionIndex,
+  }
+
+  if (row.status === 'accepted') {
+    if (
+      row.schemaUid === null ||
+      !LOWERCASE_HASH.test(row.schemaUid) ||
+      row.reasonCode !== null ||
+      row.memoJson === null
+    ) {
+      return invalidSchemaRegistrationEvidence()
+    }
+    try {
+      const canonicalMemoJson = canonicalize(row.memoJson as JsonValue)
+      const schema = validateSchema(row.memoJson)
+      const computedSchemaUid = computeSchemaUid({
+        schema,
+        networkId: network.networkId,
+        ledgerHash: row.ledgerHash,
+        ledgerIndex: row.ledgerIndex,
+        transactionIndex: row.transactionIndex,
+        publisher: row.publisher,
+      })
+      if (computedSchemaUid !== row.schemaUid) return invalidSchemaRegistrationEvidence()
+      return {
+        ...common,
+        status: 'accepted' as const,
+        schemaUid: row.schemaUid,
+        schemaDigestHex: sha256Hex(encodeUtf8(canonicalMemoJson)),
+        reasonCode: null,
+      }
+    } catch {
+      return invalidSchemaRegistrationEvidence()
+    }
+  }
+
+  if (row.status === 'rejected') {
+    if (row.schemaUid !== null || row.reasonCode === null || !REASON_CODE.test(row.reasonCode)) {
+      return invalidSchemaRegistrationEvidence()
+    }
+    return {
+      ...common,
+      status: 'rejected' as const,
+      schemaUid: null,
+      schemaDigestHex: null,
+      reasonCode: row.reasonCode,
+    }
+  }
+
+  return invalidSchemaRegistrationEvidence()
 }
 
 export interface CreateApiOptions {
@@ -189,10 +387,16 @@ export interface CreateApiOptions {
   now?: () => Date
 }
 
+const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024
+// The protocol limit applies to the canonical payload itself. The verification
+// envelope also carries the network and credential tuple, so it needs a small,
+// bounded transport allowance above that payload limit.
+const VERIFY_BODY_LIMIT_BYTES = DEFAULT_BODY_LIMIT_BYTES + 64 * 1024
+
 export async function createApi(options: CreateApiOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: options.logger ?? false,
-    bodyLimit: 1024 * 1024,
+    bodyLimit: DEFAULT_BODY_LIMIT_BYTES,
     ajv: {
       customOptions: {
         removeAdditional: false,
@@ -245,6 +449,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     status: NonNullable<Awaited<ReturnType<ApiRepository['getIndexerStatus']>>>,
     now: Date,
     projectionLedgerIndexes: readonly number[] = [],
+    minimumLedgerIndex = 0,
   ) {
     const checkpoint = await repository.getLatestCheckpoint(profileId)
     const evidence = {
@@ -253,6 +458,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
       checkpoint,
       now,
       maxLedgerAgeSeconds,
+      minimumLedgerIndex,
       projectionLedgerIndexes,
     }
     assertAuthoritativeLedgerEvidence(evidence)
@@ -281,6 +487,10 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof PinningError) {
       reply.code(error.statusCode).send({ error: error.code, message: error.code })
+      return
+    }
+    if (error instanceof SchemaProjectionInvalidError) {
+      reply.code(error.statusCode).send({ error: error.code, message: error.message })
       return
     }
     if (error instanceof IndexerUnavailableError) {
@@ -322,7 +532,14 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
         for (const network of networks) {
           try {
             const status = await preflightAuthoritativeRead(repository, network.profileId, now)
-            await requireAuthoritativeCheckpoint(repository, network.profileId, status, now)
+            await requireAuthoritativeCheckpoint(
+              repository,
+              network.profileId,
+              status,
+              now,
+              [],
+              network.activationLedgerIndex,
+            )
           } catch (error) {
             if (error instanceof IndexerUnavailableError) {
               return reply.code(503).send({ status: 'not_ready', reason: readinessReason(error) })
@@ -394,17 +611,86 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
         const now = await authoritativeTime(repository)
         const status = await preflightAuthoritativeRead(repository, request.params.network, now)
         const schema = await repository.getSchema(request.params.network, request.params.uid)
+        const schemaEvidence =
+          schema === undefined
+            ? []
+            : await repository.getSchemaProjectionEvidence({
+                profileId: request.params.network,
+                schemaUids: schemaProjectionEvidenceUids([schema], request.params.network),
+              })
         await requireAuthoritativeCheckpoint(
           repository,
           request.params.network,
           status,
           now,
-          schema === undefined ? [] : [schema.ledgerIndex],
+          schemaEvidence.map((item) => item.schema.ledgerIndex),
+          network.activationLedgerIndex,
         )
         if (schema === undefined) {
           return reply.code(404).send({ error: 'SCHEMA_NOT_FOUND', message: 'Schema not found' })
         }
+        authoritativeResolvedSchema(schema, schemaEvidence, {
+          profileId: request.params.network,
+          schemaUid: request.params.uid,
+          networkId: network.networkId,
+          activationLedgerIndex: network.activationLedgerIndex,
+        })
         return schema
+      })
+    },
+  )
+
+  const schemaRegistrationParamsSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['network', 'transactionHash'],
+    properties: {
+      network: { type: 'string', pattern: PROFILE_PATTERN },
+      transactionHash: { type: 'string', pattern: INPUT_HASH_PATTERN },
+    },
+  } as const
+
+  app.get<{ Params: { network: string; transactionHash: string } }>(
+    '/v1/networks/:network/schema-registrations/:transactionHash',
+    {
+      schema: {
+        params: schemaRegistrationParamsSchema,
+        response: {
+          200: exactSchemaRegistrationResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const transactionHash = request.params.transactionHash.toLowerCase()
+      return options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const registration = await repository.getSchemaRegistrationByTransaction({
+          profileId: request.params.network,
+          transactionHash,
+        })
+        await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          registration === undefined ? [] : [registration.ledgerIndex],
+          network.activationLedgerIndex,
+        )
+        return {
+          transactionHash,
+          registration:
+            registration === undefined
+              ? null
+              : publicSchemaRegistration(registration, network, transactionHash),
+        }
       })
     },
   )
@@ -461,13 +747,26 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           ...(cursor === undefined ? {} : { cursor }),
           limit,
         })
+        const schemaEvidence = await repository.getSchemaProjectionEvidence({
+          profileId: request.params.network,
+          schemaUids: schemaProjectionEvidenceUids(rows, request.params.network),
+        })
         await requireAuthoritativeCheckpoint(
           repository,
           request.params.network,
           status,
           now,
-          rows.map((row) => row.ledgerIndex),
+          schemaEvidence.map((item) => item.schema.ledgerIndex),
+          network.activationLedgerIndex,
         )
+        for (const row of rows) {
+          authoritativeResolvedSchema(row, schemaEvidence, {
+            profileId: request.params.network,
+            schemaUid: row.schemaUid,
+            networkId: network.networkId,
+            activationLedgerIndex: network.activationLedgerIndex,
+          })
+        }
         const hasNext = rows.length > limit
         const items = hasNext ? rows.slice(0, limit) : rows
         const last = items.at(-1)
@@ -538,7 +837,10 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           request.params.network,
           status,
           now,
-          generation === undefined ? [] : [generation.lastLedgerIndex],
+          generation === undefined
+            ? []
+            : [generation.createdLedgerIndex, generation.lastLedgerIndex],
+          network.activationLedgerIndex,
         )
         if (generation === undefined) {
           return reply
@@ -558,7 +860,11 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     {
       schema: {
         params: credentialParamsSchema,
-        response: { 413: errorResponseSchema, 503: errorResponseSchema },
+        response: {
+          200: credentialEventHistoryResponseSchema,
+          413: errorResponseSchema,
+          503: errorResponseSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -588,6 +894,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           status,
           now,
           items.map((item) => item.ledgerIndex),
+          network.activationLedgerIndex,
         )
         if (items.length > CREDENTIAL_EVENT_HISTORY_LIMIT) {
           return reply.code(413).send({
@@ -655,6 +962,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           status,
           now,
           items.map((item) => item.ledgerIndex),
+          network.activationLedgerIndex,
         )
         if (items.length > 1) {
           return reply.code(503).send({
@@ -664,7 +972,16 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
         }
         return {
           transactionHash,
-          event: items[0] === undefined ? null : publicCredentialEvent(items[0]),
+          event:
+            items[0] === undefined
+              ? null
+              : publicCredentialEvent(items[0], {
+                  transactionHash,
+                  issuer: request.params.issuer,
+                  subject: request.params.subject,
+                  schemaUid: request.params.schemaUid,
+                  activationLedgerIndex: network.activationLedgerIndex,
+                }),
         }
       })
     },
@@ -673,6 +990,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
   app.post<{ Body: VerifyRequest }>(
     '/v1/verify',
     {
+      bodyLimit: VERIFY_BODY_LIMIT_BYTES,
       config: {
         rateLimit: { max: options.verifyRateLimit ?? 20, timeWindow: '1 minute' },
       },
@@ -772,6 +1090,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
               payloadBase64: { type: 'string', minLength: 4, maxLength: 90_000 },
             },
           },
+          response: { 503: errorResponseSchema },
         },
         config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
       },
