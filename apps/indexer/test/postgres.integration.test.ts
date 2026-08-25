@@ -925,29 +925,30 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     for (const [index, database] of [firstDatabase, secondDatabase].entries()) {
       const timestamp = timestamps[index]
       if (timestamp === undefined) throw new Error('Replay timestamp fixture is missing')
+      const timestampIso = timestamp.toISOString()
       await database.client.sql`
-        UPDATE network_profiles SET created_at = ${timestamp}
+        UPDATE network_profiles SET created_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
       await database.client.sql`
-        UPDATE ledger_checkpoints SET processed_at = ${timestamp}
+        UPDATE ledger_checkpoints SET processed_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
       await database.client.sql`
-        UPDATE schema_events SET recorded_at = ${timestamp}
+        UPDATE schema_events SET recorded_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
       await database.client.sql`
-        UPDATE schemas SET registered_at = ${timestamp}
+        UPDATE schemas SET registered_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
       await database.client.sql`
-        UPDATE credential_events SET recorded_at = ${timestamp}
+        UPDATE credential_events SET recorded_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
       await database.client.sql`
         UPDATE credential_generations
-        SET created_at = ${timestamp}, updated_at = ${timestamp}
+        SET created_at = ${timestampIso}, updated_at = ${timestampIso}
         WHERE profile_id = ${replayProfile.profileId}
       `
     }
