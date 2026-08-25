@@ -91,31 +91,45 @@ export async function provisionRuntimeDatabaseRoles(
             MESSAGE = 'XCS runtime roles must not own database objects';
         END IF;
 
+        -- Remove roles held by a runtime identity and every membership it
+        -- could have re-delegated through ADMIN OPTION.
         FOR membership IN
-          SELECT granted_role.rolname AS granted_role, member_role.rolname AS member_role
+          SELECT
+            granted_role.rolname AS granted_role,
+            member_role.rolname AS member_role,
+            grantor_role.rolname AS grantor_role
           FROM pg_auth_members auth_membership
           JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
           JOIN pg_roles member_role ON member_role.oid = auth_membership.member
+          JOIN pg_roles grantor_role ON grantor_role.oid = auth_membership.grantor
           WHERE member_role.rolname IN ('xcs_indexer', 'xcs_api')
         LOOP
           EXECUTE format(
-            'REVOKE %I FROM %I',
+            'REVOKE %I FROM %I GRANTED BY %I CASCADE',
             membership.granted_role,
-            membership.member_role
+            membership.member_role,
+            membership.grantor_role
           );
         END LOOP;
 
+        -- Also remove every identity that can assume a runtime role, including
+        -- dependent grants made through ADMIN OPTION.
         FOR membership IN
-          SELECT granted_role.rolname AS granted_role, member_role.rolname AS member_role
+          SELECT
+            granted_role.rolname AS granted_role,
+            member_role.rolname AS member_role,
+            grantor_role.rolname AS grantor_role
           FROM pg_auth_members auth_membership
           JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
           JOIN pg_roles member_role ON member_role.oid = auth_membership.member
+          JOIN pg_roles grantor_role ON grantor_role.oid = auth_membership.grantor
           WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api')
         LOOP
           EXECUTE format(
-            'REVOKE %I FROM %I CASCADE',
+            'REVOKE %I FROM %I GRANTED BY %I CASCADE',
             membership.granted_role,
-            membership.member_role
+            membership.member_role,
+            membership.grantor_role
           );
         END LOOP;
 

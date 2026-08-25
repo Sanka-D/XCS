@@ -482,10 +482,55 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     const legacyMemberRole = temporaryLegacyRoleName()
     await adminClient.sql`CREATE ROLE ${adminClient.sql(legacyMemberRole)} NOLOGIN`
     createdLegacyRoleNames.add(legacyMemberRole)
+    const downstreamRole = temporaryLegacyRoleName()
+    await adminClient.sql`CREATE ROLE ${adminClient.sql(downstreamRole)} NOLOGIN`
+    createdLegacyRoleNames.add(downstreamRole)
+    const intermediateGrantorRole = temporaryLegacyRoleName()
+    await adminClient.sql`CREATE ROLE ${adminClient.sql(intermediateGrantorRole)} NOLOGIN`
+    createdLegacyRoleNames.add(intermediateGrantorRole)
     await adminClient.sql`GRANT xcs_indexer TO ${adminClient.sql(legacyMemberRole)}`
     await adminClient.sql`GRANT xcs_api TO ${adminClient.sql(legacyMemberRole)}`
-    await adminClient.sql`GRANT pg_read_all_data TO xcs_api`
+    await adminClient.sql`
+      GRANT pg_read_all_data TO ${adminClient.sql(intermediateGrantorRole)} WITH ADMIN OPTION
+    `
+    await adminClient.sql.begin(async (sql) => {
+      await sql`SET LOCAL ROLE ${sql(intermediateGrantorRole)}`
+      await sql`GRANT pg_read_all_data TO xcs_api WITH ADMIN OPTION`
+    })
     await adminClient.sql`ALTER ROLE xcs_api CREATEDB`
+
+    const delegatingApiClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, 'xcs_api', API_DATABASE_PASSWORD),
+    )
+    try {
+      await delegatingApiClient.sql`
+        GRANT pg_read_all_data TO ${delegatingApiClient.sql(downstreamRole)}
+      `
+    } finally {
+      await delegatingApiClient.close()
+    }
+    const delegationsBeforeProvisioning = await adminClient.sql<
+      Array<{ memberRole: string; grantorRole: string; adminOption: boolean }>
+    >`
+      SELECT
+        member_role.rolname AS "memberRole",
+        grantor_role.rolname AS "grantorRole",
+        membership.admin_option AS "adminOption"
+      FROM pg_auth_members membership
+      JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+      JOIN pg_roles member_role ON member_role.oid = membership.member
+      JOIN pg_roles grantor_role ON grantor_role.oid = membership.grantor
+      WHERE granted_role.rolname = 'pg_read_all_data'
+        AND member_role.rolname IN ('xcs_api', ${downstreamRole})
+      ORDER BY member_role.rolname
+    `
+    expect(delegationsBeforeProvisioning).toEqual(
+      [
+        { memberRole: 'xcs_api', grantorRole: intermediateGrantorRole, adminOption: true },
+        { memberRole: downstreamRole, grantorRole: 'xcs_api', adminOption: false },
+      ].sort((left, right) => left.memberRole.localeCompare(right.memberRole)),
+    )
+
     await provisionRuntimeDatabaseRoles(database.client, {
       indexerPassword: INDEXER_DATABASE_PASSWORD,
       apiPassword: API_DATABASE_PASSWORD,
@@ -549,14 +594,23 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       JOIN pg_roles member_role ON member_role.oid = membership.member
       WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api')
         OR member_role.rolname IN ('xcs_indexer', 'xcs_api')
+        OR (
+          granted_role.rolname = 'pg_read_all_data'
+          AND member_role.rolname = ${downstreamRole}
+        )
     `
     expect(runtimeMemberships?.count).toBe(0)
-    const [legacyRole] = await adminClient.sql<{ canLogin: boolean }[]>`
-      SELECT rolcanlogin AS "canLogin"
+    const legacyRoles = await adminClient.sql<{ roleName: string; canLogin: boolean }[]>`
+      SELECT rolname AS "roleName", rolcanlogin AS "canLogin"
       FROM pg_roles
-      WHERE rolname = ${legacyMemberRole}
+      WHERE rolname IN (${legacyMemberRole}, ${downstreamRole}, ${intermediateGrantorRole})
+      ORDER BY rolname
     `
-    expect(legacyRole).toEqual({ canLogin: false })
+    expect(legacyRoles).toEqual(
+      [legacyMemberRole, downstreamRole, intermediateGrantorRole]
+        .sort()
+        .map((roleName) => ({ roleName, canLogin: false })),
+    )
 
     const indexerClient = createDatabaseClient(
       runtimeDatabaseUrl(database.url, 'xcs_indexer', INDEXER_DATABASE_PASSWORD),
