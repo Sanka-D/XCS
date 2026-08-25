@@ -50,4 +50,7 @@ export function assertValidatedTesSuccess(result: ReliableSubmissionResult): voi
   if (result.transactionResult !== 'tesSUCCESS') {
     throw new Error(`TRANSACTION_FAILED:${result.transactionResult ?? 'UNKNOWN'}`)
   }
+  if (!Number.isSafeInteger(result.ledgerIndex) || (result.ledgerIndex as number) <= 0) {
+    throw new Error('TRANSACTION_LEDGER_INDEX_INVALID')
+  }
 }

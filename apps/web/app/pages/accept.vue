@@ -2,22 +2,30 @@
 import { buildCredentialAccept, buildCredentialDelete } from '@xcs-protocol/sdk'
 import type { CredentialAccept, CredentialDelete } from 'xrpl'
 import type { ApiSchemaDetail } from '~/composables/useXcsApi'
+import type { WalletSubmissionResult } from '~/composables/useWallet'
 import {
+  assertPayloadFetchConsentCurrent,
   createPayloadFetchConsentToken,
   credentialActionBlockReason,
   loadCredentialReview,
-  loadCredentialReviewWithConsent,
   type CredentialReview,
   type CredentialSubjectAction,
   type PayloadFetchConsentToken,
 } from '~/utils/credentialReview'
+import {
+  assertLinkGeneration,
+  assertLinkProfile,
+  singleRouteQueryValue,
+} from '~/utils/operationLinks'
 import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
 
 const route = useRoute()
 const { account, busy: walletBusy, prepare, signAndSubmit } = useWallet()
 const { getActiveNetworkProfile, getCredential, getSchema, verify } = useXcsApi()
-const issuer = ref(typeof route.query.issuer === 'string' ? route.query.issuer : '')
-const schemaUid = ref(typeof route.query.schema === 'string' ? route.query.schema : '')
+const issuer = ref(singleRouteQueryValue(route.query.issuer))
+const schemaUid = ref(singleRouteQueryValue(route.query.schema))
+const linkedProfileId = ref(singleRouteQueryValue(route.query.profile))
+const linkedGenerationId = ref(singleRouteQueryValue(route.query.generation))
 const action = ref<CredentialSubjectAction>('accept')
 const transaction = shallowRef<CredentialAccept | CredentialDelete | null>(null)
 const review = shallowRef<CredentialReview | null>(null)
@@ -26,7 +34,7 @@ const payloadConsent = ref(false)
 const payloadConsentToken = shallowRef<PayloadFetchConsentToken | null>(null)
 const reviewBusy = ref(false)
 const message = ref('')
-const successHash = ref('')
+const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const blockReason = computed(() => {
   if (!review.value) return undefined
@@ -59,10 +67,20 @@ function invalidatePreview() {
   schemaDetail.value = null
   payloadConsent.value = false
   payloadConsentToken.value = null
+  result.value = null
 }
 
-watch([issuer, schemaUid, action], invalidatePreview)
+watch([issuer, schemaUid, action, linkedProfileId, linkedGenerationId], invalidatePreview)
 watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
+watch(
+  () => [route.query.issuer, route.query.schema, route.query.profile, route.query.generation],
+  ([nextIssuer, nextSchema, nextProfile, nextGeneration]) => {
+    issuer.value = singleRouteQueryValue(nextIssuer)
+    schemaUid.value = singleRouteQueryValue(nextSchema)
+    linkedProfileId.value = singleRouteQueryValue(nextProfile)
+    linkedGenerationId.value = singleRouteQueryValue(nextGeneration)
+  },
+)
 
 function setPayloadConsent(granted: boolean) {
   if (!granted) {
@@ -100,6 +118,7 @@ async function fetchExactReview(input: {
   schemaUid: string
   profileId: string
   payloadConsent?: PayloadFetchConsentToken | undefined
+  expectedGenerationId?: string | undefined
 }): Promise<{ credentialReview: CredentialReview; schema: ApiSchemaDetail | null }> {
   const [credential, metadataReport, schemaResult] = await Promise.all([
     getCredential(input.issuer, input.subject, input.schemaUid, input.profileId),
@@ -127,13 +146,11 @@ async function fetchExactReview(input: {
     schemaUid: input.schemaUid,
     ...(schema ? { schema: schema.resolved } : {}),
   }
-  const localReview = input.payloadConsent
-    ? await loadCredentialReviewWithConsent({
-        ...reviewOptions,
-        consent: input.payloadConsent,
-      })
-    : await loadCredentialReview(reviewOptions)
-  if (!input.payloadConsent) return { credentialReview: localReview, schema }
+  const metadataReview = await loadCredentialReview(reviewOptions)
+  assertLinkGeneration(input.expectedGenerationId, metadataReview.generationId)
+  if (!input.payloadConsent) return { credentialReview: metadataReview, schema }
+  assertPayloadFetchConsentCurrent(metadataReview, input.payloadConsent)
+  const localReview = await loadCredentialReview({ ...reviewOptions, fetchPayload: true })
   if (localReview.payload === undefined) throw new Error('CREDENTIAL_PAYLOAD_REVIEW_FAILED')
 
   // The API validates the already-consented, locally parsed object. It never
@@ -171,7 +188,7 @@ async function buildPreview() {
   previewRevision += 1
   transaction.value = null
   message.value = ''
-  successHash.value = ''
+  result.value = null
   if (!account.value) return void (message.value = 'WALLET_NOT_CONNECTED')
 
   reviewBusy.value = true
@@ -183,11 +200,13 @@ async function buildPreview() {
   const consent = selectedAction === 'accept' ? payloadConsentToken.value : null
   try {
     const profile = await getActiveNetworkProfile()
+    assertLinkProfile(linkedProfileId.value || undefined, profile.profileId)
     const loaded = await fetchExactReview({
       issuer: issuerAddress,
       subject: subjectAddress,
       schemaUid: normalizedSchemaUid,
       profileId: profile.profileId,
+      ...(linkedGenerationId.value ? { expectedGenerationId: linkedGenerationId.value } : {}),
       ...(consent ? { payloadConsent: consent } : {}),
     })
     if (revision !== previewRevision) throw new Error('CREDENTIAL_REVIEW_CHANGED_DURING_LOAD')
@@ -234,6 +253,8 @@ async function submit() {
   const expectedSchemaUid = schemaUid.value.toLowerCase()
   const expectedAction = action.value
   const expectedPayloadConsent = payloadConsentToken.value
+  const expectedLinkedProfileId = linkedProfileId.value
+  const expectedLinkedGenerationId = linkedGenerationId.value
   const expectedRevision = previewRevision
   if (!preparedTransaction || !expectedReview || !expectedSubject) {
     message.value = 'TRANSACTION_PREVIEW_REQUIRED'
@@ -251,18 +272,22 @@ async function submit() {
         issuer.value !== expectedIssuer ||
         schemaUid.value.toLowerCase() !== expectedSchemaUid ||
         action.value !== expectedAction ||
-        payloadConsentToken.value !== expectedPayloadConsent
+        payloadConsentToken.value !== expectedPayloadConsent ||
+        linkedProfileId.value !== expectedLinkedProfileId ||
+        linkedGenerationId.value !== expectedLinkedGenerationId
       ) {
         throw new Error('CREDENTIAL_REVIEW_CHANGED_BEFORE_SIGNATURE')
       }
     }
     assertCurrent()
     const profile = await getActiveNetworkProfile()
+    assertLinkProfile(expectedLinkedProfileId || undefined, profile.profileId)
     const loaded = await fetchExactReview({
       issuer: expectedIssuer,
       subject: expectedSubject,
       schemaUid: expectedSchemaUid,
       profileId: profile.profileId,
+      ...(expectedLinkedGenerationId ? { expectedGenerationId: expectedLinkedGenerationId } : {}),
       ...(expectedAction === 'accept' && expectedPayloadConsent
         ? { payloadConsent: expectedPayloadConsent }
         : {}),
@@ -292,8 +317,12 @@ async function submit() {
           : {}),
       },
       assertCurrent,
+      undefined,
+      (validated) => {
+        result.value = { ...validated }
+      },
     )
-    successHash.value = response.txHash
+    result.value = response
     transaction.value = null
   } catch (error) {
     clearStalePayloadConsent(error)
@@ -415,9 +444,13 @@ async function submit() {
     </article>
 
     <TransactionPreview :transaction="transaction" :busy="busy" @confirm="submit" />
-    <div v-if="successHash" class="success-box">
-      <strong>{{ $t('accept.submitted') }}</strong
-      ><code>{{ successHash }}</code>
-    </div>
+    <BusinessFinality
+      v-if="result"
+      :tx-hash="result.txHash"
+      :engine-result="result.transactionResult"
+      :ledger-index="result.ledgerIndex"
+      :business-confirmation="result.businessConfirmation"
+      :business-evidence="result.businessEvidence"
+    />
   </section>
 </template>

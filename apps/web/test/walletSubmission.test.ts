@@ -13,7 +13,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   applyJournalEntry,
+  canAbandonOperation,
   canRetryOperation,
+  operationBusinessKey,
   serializeOperationReceipts,
   toSanitizedOperationReceipt,
   type StoredOperation,
@@ -228,6 +230,7 @@ describe('reliable submission outcome', () => {
     status: 'validated',
     txHash: 'A'.repeat(64),
     transactionResult: 'tesSUCCESS',
+    ledgerIndex: 101,
   }
 
   it('only accepts a validated tesSUCCESS result', () => {
@@ -245,9 +248,63 @@ describe('reliable submission outcome', () => {
       assertValidatedTesSuccess({ ...successful, transactionResult: 'tecUNFUNDED_PAYMENT' }),
     ).toThrow('TRANSACTION_FAILED:tecUNFUNDED_PAYMENT')
   })
+
+  it('does not report success without a positive validated ledger index', () => {
+    expect(() => assertValidatedTesSuccess({ ...successful, ledgerIndex: undefined })).toThrow(
+      'TRANSACTION_LEDGER_INDEX_INVALID',
+    )
+    expect(() => assertValidatedTesSuccess({ ...successful, ledgerIndex: 0 })).toThrow(
+      'TRANSACTION_LEDGER_INDEX_INVALID',
+    )
+  })
 })
 
 describe('operation journal state', () => {
+  it('uses action-independent business locks for one credential generation', () => {
+    const profileId = 'xrpl-testnet-xcs-v0.1'
+    const tuple = {
+      issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+      subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+      schemaUid: '12'.repeat(32),
+      generationId: '34'.repeat(32),
+    }
+    expect(operationBusinessKey(profileId, { action: 'credential-accept', ...tuple })).toBe(
+      operationBusinessKey(profileId, { action: 'credential-revoke', ...tuple }),
+    )
+    expect(
+      operationBusinessKey(profileId, {
+        action: 'credential-issue',
+        issuer: tuple.issuer,
+        subject: tuple.subject,
+        schemaUid: tuple.schemaUid,
+      }),
+    ).not.toBe(operationBusinessKey(profileId, { action: 'credential-accept', ...tuple }))
+  })
+
+  it('allows abandoning only an unsigned prepared draft', () => {
+    expect(canAbandonOperation(storedOperation())).toBe(true)
+    expect(canAbandonOperation(storedOperation({ stage: 'signed', txHash: 'A'.repeat(64) }))).toBe(
+      false,
+    )
+    expect(canAbandonOperation(storedOperation({ stage: 'prepared', txBlob: 'ABCD' }))).toBe(false)
+  })
+
+  it('keeps an incomplete v0.1 registration record readable without inventing finality', () => {
+    const receipt = toSanitizedOperationReceipt(
+      storedOperation({
+        stage: 'validated',
+        txHash: 'AB'.repeat(32),
+        engineResult: 'tesSUCCESS',
+        business: { action: 'schema-register' },
+        businessConfirmation: 'confirmed',
+      }),
+    )
+
+    expect(receipt.business).toEqual({ action: 'schema-register' })
+    expect(receipt).not.toHaveProperty('businessConfirmation')
+    expect(receipt.receiptVersion).toBe('0.2')
+  })
+
   it('preserves the signed blob while applying SDK journal entries', () => {
     const operation = storedOperation({
       stage: 'signed',
@@ -378,10 +435,69 @@ describe('operation journal state', () => {
     expect(exported).not.toContain('claims')
     expect(exported).not.toContain('"businessConfirmation": "confirmed"')
     expect(JSON.parse(exported)).toMatchObject({
-      receiptExportVersion: '0.1',
+      receiptExportVersion: '0.2',
       exportedAt: '2026-08-19T13:00:00.000Z',
       receipts: [{ ledgerIndex: 123, engineResult: 'tesSUCCESS' }],
     })
+  })
+
+  it('exports a v0.2 issuance receipt with public context and exact indexed evidence', () => {
+    const issuer = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+    const subject = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
+    const schemaUid = '12'.repeat(32)
+    const txHash = 'AB'.repeat(32)
+    const digest = '34'.repeat(32)
+    const receipt = toSanitizedOperationReceipt(
+      storedOperation({
+        account: issuer,
+        transactionType: 'CredentialCreate',
+        stage: 'validated',
+        txHash,
+        engineResult: 'tesSUCCESS',
+        ledgerIndex: 101,
+        businessConfirmation: 'confirmed',
+        business: {
+          action: 'credential-issue',
+          issuer,
+          subject,
+          schemaUid,
+          credentialUri: `https://issuer.example/c.json#xcs-sha256=${digest}`,
+          payloadDigestHex: digest,
+          expiration: '2026-09-01T00:00:00.000Z',
+          claims: { secret: 'DO_NOT_EXPORT' },
+        } as never,
+        businessEvidence: {
+          transactionHash: txHash,
+          ledgerIndex: 101,
+          ledgerHash: 'CD'.repeat(32),
+          transactionIndex: 2,
+          schemaUid,
+          generationId: txHash,
+          eventType: 'created',
+          accepted: false,
+          deletionCause: null,
+        },
+      }),
+    )
+
+    expect(receipt).toMatchObject({
+      receiptVersion: '0.2',
+      businessConfirmation: 'confirmed',
+      business: {
+        action: 'credential-issue',
+        issuer,
+        subject,
+        schemaUid,
+        payloadDigestHex: digest,
+      },
+      businessEvidence: {
+        transactionHash: txHash.toLowerCase(),
+        generationId: txHash.toLowerCase(),
+        eventType: 'created',
+      },
+    })
+    expect(JSON.stringify(receipt)).not.toContain('DO_NOT_EXPORT')
+    expect(JSON.stringify(receipt)).not.toContain('claims')
   })
 
   it('never upgrades a generation-bound receipt to confirmed without event evidence', () => {
@@ -408,5 +524,22 @@ describe('operation journal state', () => {
         businessConfirmation: 'confirmed',
       }),
     ).toMatchObject({ stage: 'prepared', businessConfirmation: 'pending' })
+    expect(
+      toSanitizedOperationReceipt({
+        ...operation,
+        businessConfirmation: 'confirmed',
+        businessEvidence: {
+          transactionHash: operation.txHash!,
+          ledgerIndex: 101,
+          ledgerHash: 'CD'.repeat(32),
+          transactionIndex: 2,
+          schemaUid: '12'.repeat(32),
+          generationId: '34'.repeat(32),
+          eventType: 'accepted',
+          accepted: false,
+          deletionCause: null,
+        },
+      }),
+    ).toMatchObject({ businessConfirmation: 'pending' })
   })
 })

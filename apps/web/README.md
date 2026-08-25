@@ -10,6 +10,29 @@ Crossmark and GemWallet currently return `hash: ""` from their sign-only adapter
 
 The adapters still require real browser-extension testing for each native Credential transaction type. Unit tests cover the application-side blob, hash, persistence, and validation invariants; they do not prove that a particular released wallet UI supports XLS-70 transactions.
 
+## Deterministic browser gate
+
+The required Playwright gate exercises schema registration and credential issuance in Chromium,
+including the two distinct finality stages. Issuance first receives deliberately mismatched indexed
+evidence, withholds XCS success, then proves that `/operations` can re-confirm the exact event
+without signing or submitting again.
+
+```bash
+pnpm --filter @xcs-protocol/web exec playwright install chromium
+pnpm test:e2e
+```
+
+Playwright starts its own Nuxt development server with `XCS_BROWSER_E2E=1`. In that process only,
+the normal wallet and XRPL client are replaced by deterministic in-browser fakes. The fake signer
+encodes a syntactic transaction blob with an intentionally unusable signature marker; it contains
+no seed or private key. HTTP API and public payload responses are intercepted by the test before
+navigation, so the suite never contacts Testnet, an issuer host, or an XCS deployment.
+
+This harness is not a wallet compatibility test and must never be used for a deployed instance.
+Private and public runtime switches must match exactly, and both the Nitro startup guard and client
+plugin reject the mode outside a development bundle. `nuxt.config.ts` also rejects
+`XCS_BROWSER_E2E=1` when `NODE_ENV=production`.
+
 ## Network safety
 
 Set:
@@ -54,20 +77,40 @@ resolve the URI, so its remote resolver may remain disabled. There is intentiona
 fetch proxy, avoiding an SSRF trust boundary. IPFS remains part of the protocol and CLI, but is
 outside this browser pilot.
 
+The standalone `/verify` flow follows the same boundary. It first reads and displays indexed
+credential metadata without contacting the issuer. Only after the verifier consents to the exact
+displayed host does the browser fetch the payload with credentials omitted, CORS enabled and
+redirects disabled, then POST the parsed object to the API. Verification never requests API-side URI
+resolution. A link generation constraint is checked before the host fetch and again before the
+result is accepted.
+
 ## Durable submission journal
 
 Signed transaction blobs are stored in the origin's IndexedDB database `xcs-wallet-journal` before
 the first submit call, but only after the SDK has validated the wallet hash/blob and proved that the
 signed fields exactly equal the reviewed transaction. SDK journal stages are retained with the hash,
-`LastLedgerSequence`, profile, XRPL result and, for tuple-only credential actions, the exact reviewed
-generation ID. The `/operations` page first checks transaction status by hash; only a still-unvalidated
-transaction may be resubmitted, after checking that its generation is still current. The blob is
+`LastLedgerSequence`, profile, XRPL result and the minimum business context needed to reconcile the
+operation. Schema registration stores publisher, canonical schema digest and exact memo size.
+Issuance stores the tuple, public URI, payload digest and optional expiration. Tuple-only actions
+store the exact reviewed generation ID. The `/operations` page first checks transaction status by
+hash; only a still-unvalidated transaction may be resubmitted, after checking that its generation is
+still current. The blob is
 removed from the local record as soon as the operation becomes `validated`, `expired`, or `failed`.
-A transaction is presented as successful only when XRPL reports `validated: true` and
-`TransactionResult: tesSUCCESS`, then the indexer exposes an event matching its hash, generation and
-action type. The journal and exported receipt keep that second result separately as
-`businessConfirmation: pending|confirmed|mismatch|timeout`; an XRPL-valid transaction is never
-misrepresented as generation-confirmed when indexing times out or exposes a different event.
+A transaction has two separately displayed outcomes: XRPL must first report `validated: true` and
+`TransactionResult: tesSUCCESS`, then the authoritative indexer must expose its exact schema
+registration or Credential event. The journal and v0.2 receipt keep the latter as
+`businessConfirmation: pending|confirmed|rejected|mismatch|timeout`, with ledger hash/index,
+transaction index, UID/generation or protocol rejection reason where applicable. An XRPL-valid
+transaction is never represented as XCS-confirmed when it lacks a positive validated ledger index,
+when indexing times out, or when the indexed event reports a different transaction hash or ledger
+index. A timeout is recoverable by rechecking the indexer only; it never causes a rebroadcast.
+
+Before opening the wallet, IndexedDB atomically reserves a business key across tabs: profile,
+publisher and schema digest for registration; profile and credential tuple for issuance; profile,
+tuple and generation for every lifecycle action, independently of the selected action. A second
+recoverable operation with the same key is rejected. Ownership is checked atomically again after the
+wallet returns the signed blob and before submission. Only a `prepared` draft that has neither hash
+nor signed blob may be abandoned to release its key.
 
 Native `CredentialAccept` and `CredentialDelete` transactions contain only issuer, subject and
 credential type; they cannot cryptographically bind an XCS generation ID. An issuer could therefore
@@ -79,15 +122,19 @@ until XRPL provides a generation-bound precondition.
 The journal contains no seed or private key. A signed blob can nevertheless be relayed until its sequence or `LastLedgerSequence` makes it unusable, so the application must maintain a strict Content Security Policy and treat same-origin script execution as a trust boundary. Clearing browser site data removes the local recovery journal.
 
 Terminal journal entries delete the recoverable signed blob. Receipt export reconstructs a strict
-allowlist of operation, business tuple, transaction hash, validated ledger and XRPL result fields; it
-does not export signed blobs, claims, payload contents or free-form error messages.
+v0.2 allowlist of public business coordinates, transaction hash, validated XRPL result and indexed
+proof fields; it does not export signed blobs, claims, payload contents or free-form error messages.
+Records written by the v0.1 alpha remain readable, but an incomplete legacy context cannot be
+treated as XCS-confirmed without new exact evidence.
+Receipts are sanitized local records, not signatures from Commons or independent trust anchors; a
+verifier must still resolve the referenced transaction against an authoritative XCS indexer.
 
-For a generation-bound operation already validated with `tesSUCCESS`, `/operations` can re-check a
-`pending`, `timeout` or `mismatch` business confirmation. This action queries only the exact indexed
-event through
-`GET /v1/networks/:network/credentials/:issuer/:subject/:schemaUid/events/:transactionHash`, then
-verifies the returned tuple, transaction hash, generation and action before persisting the new
-confirmation. It never calls the credential history endpoint, reads a signed blob, connects to XRPL
-or rebroadcasts the transaction. The older `/events` history endpoint is retained for inspection,
-but the API limits its query to 101 rows and returns an explicit `413` instead of silently truncating
-histories above 100 events.
+For any complete operation already validated with `tesSUCCESS`, `/operations` can re-check a
+`pending`, `timeout` or `mismatch` business confirmation. Schema registration uses the exact
+`GET /v1/networks/:network/schema-registrations/:transactionHash` proof and requires its publisher
+and canonical digest before accepting the returned UID. Credential issuance and lifecycle actions
+use `GET /v1/networks/:network/credentials/:issuer/:subject/:schemaUid/events/:transactionHash` and
+verify tuple, hash, event type and generation. A confirmed issuance produces an acceptance link
+bound to profile, issuer, schema and generation (the subject still comes from the connected wallet),
+plus a full verification link. Reconfirmation never reads a signed blob, connects to XRPL or
+rebroadcasts the transaction.

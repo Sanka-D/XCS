@@ -28,6 +28,18 @@
     "confirmWarning": "Check the network, account, destination, fee and every field in your wallet.",
     "sign": "Sign and submit"
   },
+  "finality": {
+    "title": "Two-stage finality",
+    "xrplValidated": "1. XRPL validated with tesSUCCESS",
+    "xcsConfirmed": "2. XCS indexed proof confirmed",
+    "xcsRejected": "2. XCS rejected this protocol operation",
+    "xcsMismatch": "2. Indexed evidence does not match the reviewed operation",
+    "xcsPending": "2. XCS indexing is still pending",
+    "reconfirm": "The XRPL transaction will not be submitted again. Re-check its indexed proof from Operations.",
+    "proofLedger": "Proof ledger",
+    "proofLedgerHash": "Proof ledger hash",
+    "proofTransactionIndex": "Proof transaction index"
+  },
   "home": {
     "eyebrow": "Interoperable XRPL credentials",
     "title": "One shared schema. Independent issuers. Verifiable evidence.",
@@ -82,7 +94,8 @@
     "prepare": "Validate and prepare",
     "canonical": "Canonical registered bytes",
     "submitted": "Transaction validated",
-    "uidLater": "The final UID depends on validated ledger context and will be displayed by the indexer."
+    "uidLater": "The final UID depends on validated ledger context and will be displayed by the indexer.",
+    "openSchema": "Open the confirmed schema"
   },
   "issue": {
     "title": "Issue a credential",
@@ -96,7 +109,10 @@
     "httpsProof": "Pilot mode requires a public HTTPS URL with CORS. Before signing, the browser re-downloads the exact canonical JSON without cache or redirects (maximum 1 MiB).",
     "checking": "Checking the published HTTPS bytes immediately before signing…",
     "checked": "Published payload verified ({bytes} bytes): ",
-    "submitted": "Validated CredentialCreate: "
+    "submitted": "Validated CredentialCreate: ",
+    "links": "Share the confirmed credential",
+    "acceptLink": "Open the subject acceptance link",
+    "verifyLink": "Open the verification link"
   },
   "accept": {
     "title": "Accept or remove a credential",
@@ -134,7 +150,12 @@
   "verify": {
     "title": "Verify a credential",
     "description": "Lookup requires the exact network, issuer, subject and schema UID.",
-    "fetch": "Resolve and check the public payload",
+    "fetch": "Fetch and check the public payload",
+    "loadMetadata": "Load indexed metadata",
+    "metadata": "Indexed credential metadata",
+    "payloadConsentIntro": "Payload bytes have not been fetched. Fetching contacts {host} directly, which can observe your IP address and request time.",
+    "payloadConsent": "I consent to fetching the public payload from this exact host.",
+    "payloadChecked": "Browser payload verification complete ({bytes} bytes): ",
     "run": "Verify",
     "onChain": "On-ledger state",
     "schema": "Schema",
@@ -151,14 +172,24 @@
     "export": "Export sanitized receipts",
     "retry": "Resume",
     "reconfirm": "Re-check indexed event",
+    "abandon": "Abandon unsigned draft",
     "hash": "Transaction hash",
     "profile": "Network profile",
     "updated": "Last updated",
     "lastLedger": "Last allowed ledger",
     "result": "XRPL result",
     "action": "Business action",
+    "xcsResult": "XCS indexed result",
+    "schemaHash": "Schema digest",
+    "memoBytes": "Memo bytes",
+    "expiration": "Expiration",
     "payloadHash": "Payload digest",
-    "ledger": "Validated ledger"
+    "ledger": "Validated XRPL ledger",
+    "proofLedgerHash": "Indexed proof ledger hash",
+    "proofTransactionIndex": "Indexed proof transaction index",
+    "reason": "Protocol reason",
+    "acceptLink": "Subject acceptance",
+    "verifyLink": "Verification"
   },
   "footer": { "summary": "XCS v0.1 — open standard and MIT reference implementation." }
 }

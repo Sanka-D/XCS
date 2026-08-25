@@ -1,6 +1,10 @@
 import type { NetworkProfile, ResolvedSchema, SchemaDefinition } from '@xcs-protocol/core'
 import type { VerificationDimensions } from '~/utils/credentialReview'
-import { exactCredentialEventPath, exactCredentialPath } from '~/utils/transactions'
+import {
+  exactCredentialEventPath,
+  exactCredentialPath,
+  exactSchemaRegistrationPath,
+} from '~/utils/transactions'
 
 export interface ApiSchemaSummary {
   uid: string
@@ -136,6 +140,14 @@ export function useXcsApi() {
     )
   }
 
+  async function getSchemaRegistrationByTransaction(transactionHash: string, network?: string) {
+    const profileId = await resolveNetworkId(network)
+    return $fetch<unknown>(exactSchemaRegistrationPath(profileId, transactionHash), {
+      baseURL,
+      timeout: 5_000,
+    })
+  }
+
   return {
     listNetworks,
     getActiveNetworkProfile,
@@ -143,6 +155,7 @@ export function useXcsApi() {
     getSchema,
     getCredential,
     getCredentialEventByTransaction,
+    getSchemaRegistrationByTransaction,
     verify,
   }
 }

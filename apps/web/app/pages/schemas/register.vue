@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { parseJsonStrict } from '@xcs-protocol/core'
+import { encodeUtf8, parseJsonStrict, sha256Hex } from '@xcs-protocol/core'
 import { buildSchemaRegistrationPayment } from '@xcs-protocol/sdk'
 import type { Payment } from 'xrpl'
+import type { WalletSubmissionResult } from '~/composables/useWallet'
 
 const example = `{
   "xcsVersion": "0.1",
@@ -20,14 +21,21 @@ const { getActiveNetworkProfile } = useXcsApi()
 const schemaText = ref(example)
 const transaction = shallowRef<Payment | null>(null)
 const canonicalSchema = ref('')
+const schemaDigestHex = ref('')
+const memoByteLength = ref<number | null>(null)
 const formError = ref('')
-const result = ref<Record<string, unknown> | null>(null)
+const result = shallowRef<WalletSubmissionResult | null>(null)
+const submitting = ref(false)
+const pageBusy = computed(() => busy.value || submitting.value)
 let previewRevision = 0
 
 function invalidatePreview() {
   previewRevision += 1
   transaction.value = null
   canonicalSchema.value = ''
+  schemaDigestHex.value = ''
+  memoByteLength.value = null
+  result.value = null
 }
 
 watch(schemaText, invalidatePreview)
@@ -54,6 +62,8 @@ async function buildPreview() {
     const prepared = (await prepare(built.transaction, profile)) as Payment
     if (revision !== previewRevision) throw new Error('SCHEMA_PREVIEW_CHANGED_DURING_BUILD')
     canonicalSchema.value = built.canonicalSchema
+    schemaDigestHex.value = sha256Hex(encodeUtf8(built.canonicalSchema))
+    memoByteLength.value = built.memoByteLength
     transaction.value = prepared
   } catch (error) {
     formError.value = error instanceof Error ? error.message : String(error)
@@ -66,8 +76,20 @@ async function submit() {
   const expectedPublisher = account.value?.address
   const expectedSchema = schemaText.value
   const expectedCanonical = canonicalSchema.value
+  const expectedDigest = schemaDigestHex.value
+  const expectedMemoByteLength = memoByteLength.value
   const expectedRevision = previewRevision
-  if (!preparedTransaction || !expectedPublisher || !expectedCanonical) return
+  if (
+    !preparedTransaction ||
+    !expectedPublisher ||
+    !expectedCanonical ||
+    !expectedDigest ||
+    expectedMemoByteLength === null
+  ) {
+    formError.value = 'TRANSACTION_PREVIEW_REQUIRED'
+    return
+  }
+  submitting.value = true
   try {
     const assertCurrent = () => {
       if (
@@ -75,20 +97,33 @@ async function submit() {
         transaction.value !== preparedTransaction ||
         account.value?.address !== expectedPublisher ||
         schemaText.value !== expectedSchema ||
-        canonicalSchema.value !== expectedCanonical
+        canonicalSchema.value !== expectedCanonical ||
+        schemaDigestHex.value !== expectedDigest ||
+        memoByteLength.value !== expectedMemoByteLength
       ) {
         throw new Error('SCHEMA_PREVIEW_CHANGED_BEFORE_SIGNATURE')
       }
     }
     const response = await signAndSubmit(
       preparedTransaction,
-      { action: 'schema-register' },
+      {
+        action: 'schema-register',
+        publisher: expectedPublisher,
+        schemaDigestHex: expectedDigest,
+        memoByteLength: expectedMemoByteLength,
+      },
       assertCurrent,
+      undefined,
+      (validated) => {
+        result.value = { ...validated }
+      },
     )
-    result.value = { ...response }
+    result.value = response
     transaction.value = null
   } catch (error) {
     formError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    submitting.value = false
   }
 }
 </script>
@@ -106,10 +141,10 @@ async function submit() {
         v-model="schemaText"
         rows="18"
         spellcheck="false"
-        :disabled="busy"
+        :disabled="pageBusy"
       />
       <div class="warning-box">{{ $t('register.irreversible') }}</div>
-      <button class="button" type="button" :disabled="busy" @click="buildPreview">
+      <button class="button" type="button" :disabled="pageBusy" @click="buildPreview">
         {{ $t('register.prepare') }}
       </button>
     </div>
@@ -118,12 +153,26 @@ async function submit() {
     <div v-if="canonicalSchema" class="form-card">
       <h2>{{ $t('register.canonical') }}</h2>
       <pre>{{ canonicalSchema }}</pre>
+      <p class="muted">
+        {{ memoByteLength }} bytes · <code>{{ schemaDigestHex }}</code>
+      </p>
     </div>
-    <TransactionPreview :transaction="transaction" :busy="busy" @confirm="submit" />
-    <div v-if="result" class="success-box">
-      <h2>{{ $t('register.submitted') }}</h2>
-      <p>{{ $t('register.uidLater') }}</p>
-      <pre>{{ JSON.stringify(result, null, 2) }}</pre>
+    <TransactionPreview :transaction="transaction" :busy="pageBusy" @confirm="submit" />
+    <BusinessFinality
+      v-if="result"
+      :tx-hash="result.txHash"
+      :engine-result="result.transactionResult"
+      :ledger-index="result.ledgerIndex"
+      :business-confirmation="result.businessConfirmation"
+      :business-evidence="result.businessEvidence"
+    />
+    <div
+      v-if="result?.businessConfirmation === 'confirmed' && result.businessEvidence?.schemaUid"
+      class="success-box"
+    >
+      <NuxtLinkLocale :to="`/schemas/${result.businessEvidence.schemaUid}`">
+        {{ $t('register.openSchema') }}
+      </NuxtLinkLocale>
     </div>
   </section>
 </template>

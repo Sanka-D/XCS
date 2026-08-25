@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import {
+  canAbandonOperation,
   canReconfirmOperation,
   canRetryOperation,
+  operationBusinessEvidence,
   operationBusinessConfirmation,
   serializeOperationReceipts,
+  type StoredOperation,
 } from '~/utils/operationJournal'
+import { buildCredentialAcceptLink, buildCredentialVerifyLink } from '~/utils/operationLinks'
 
-const { operations, busy, loadOperations, retryOperation, reconfirmOperation } = useWallet()
+const { operations, busy, loadOperations, retryOperation, reconfirmOperation, abandonOperation } =
+  useWallet()
 const pageError = ref('')
 const resultMessage = ref('')
-const resultSucceeded = ref(false)
+const resultTone = ref<'success' | 'notice' | 'error'>('notice')
 
 async function refresh() {
   pageError.value = ''
@@ -23,11 +28,29 @@ async function refresh() {
 async function retry(operationId: string) {
   pageError.value = ''
   resultMessage.value = ''
-  resultSucceeded.value = false
+  resultTone.value = 'notice'
   try {
     const result = await retryOperation(operationId)
-    resultMessage.value = `VALIDATED:${result.txHash}`
-    resultSucceeded.value = true
+    resultMessage.value = `XRPL_VALIDATED:${result.txHash} XCS:${result.businessConfirmation ?? 'pending'}`
+    resultTone.value =
+      result.businessConfirmation === 'confirmed'
+        ? 'success'
+        : result.businessConfirmation === 'mismatch' || result.businessConfirmation === 'rejected'
+          ? 'error'
+          : 'notice'
+  } catch (error) {
+    pageError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function abandon(operationId: string) {
+  pageError.value = ''
+  resultMessage.value = ''
+  resultTone.value = 'notice'
+  try {
+    await abandonOperation(operationId)
+    resultMessage.value = 'OPERATION_ABANDONED'
+    resultTone.value = 'success'
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : String(error)
   }
@@ -36,11 +59,16 @@ async function retry(operationId: string) {
 async function reconfirm(operationId: string) {
   pageError.value = ''
   resultMessage.value = ''
-  resultSucceeded.value = false
+  resultTone.value = 'notice'
   try {
     const confirmation = await reconfirmOperation(operationId)
     resultMessage.value = `BUSINESS_CONFIRMATION:${confirmation}`
-    resultSucceeded.value = confirmation === 'confirmed'
+    resultTone.value =
+      confirmation === 'confirmed'
+        ? 'success'
+        : confirmation === 'mismatch' || confirmation === 'rejected'
+          ? 'error'
+          : 'notice'
   } catch (error) {
     pageError.value = error instanceof Error ? error.message : String(error)
   }
@@ -61,6 +89,31 @@ function downloadReceipts() {
   anchor.download = `xcs-operation-receipts-${new Date().toISOString().slice(0, 10)}.json`
   anchor.click()
   URL.revokeObjectURL(url)
+}
+
+function operationAcceptLink(operation: StoredOperation): string | null {
+  const business = operation.business
+  const evidence = operationBusinessEvidence(operation)
+  if (business?.action !== 'credential-issue' || !evidence?.generationId) return null
+  return buildCredentialAcceptLink({
+    profileId: operation.profileId,
+    issuer: business.issuer,
+    schemaUid: business.schemaUid,
+    generationId: evidence.generationId,
+  })
+}
+
+function operationVerifyLink(operation: StoredOperation): string | null {
+  const business = operation.business
+  const evidence = operationBusinessEvidence(operation)
+  if (business?.action !== 'credential-issue' || !evidence?.generationId) return null
+  return buildCredentialVerifyLink({
+    profileId: operation.profileId,
+    issuer: business.issuer,
+    subject: business.subject,
+    schemaUid: business.schemaUid,
+    generationId: evidence.generationId,
+  })
 }
 
 onMounted(refresh)
@@ -91,13 +144,18 @@ onMounted(refresh)
 
     <div class="warning-box">{{ $t('operations.localOnly') }}</div>
     <div v-if="pageError" class="error-box">{{ pageError }}</div>
-    <div v-if="resultMessage" :class="resultSucceeded ? 'success-box' : 'error-box'">
+    <div v-if="resultMessage" :class="`${resultTone}-box`">
       {{ resultMessage }}
     </div>
     <div v-if="operations.length === 0" class="empty-state">{{ $t('operations.empty') }}</div>
 
     <div v-else class="operation-list">
-      <article v-for="operation in operations" :key="operation.operationId" class="form-card">
+      <article
+        v-for="operation in operations"
+        :key="operation.operationId"
+        class="form-card"
+        data-testid="operation-card"
+      >
         <div class="operation-heading">
           <div>
             <p class="eyebrow">{{ operation.transactionType }}</p>
@@ -116,11 +174,21 @@ onMounted(refresh)
             <button
               v-if="canReconfirmOperation(operation)"
               class="button secondary"
+              data-testid="operation-reconfirm"
               type="button"
               :disabled="busy"
               @click="reconfirm(operation.operationId)"
             >
               {{ $t('operations.reconfirm') }}
+            </button>
+            <button
+              v-if="canAbandonOperation(operation)"
+              class="button secondary"
+              type="button"
+              :disabled="busy"
+              @click="abandon(operation.operationId)"
+            >
+              {{ $t('operations.abandon') }}
             </button>
           </div>
         </div>
@@ -146,7 +214,19 @@ onMounted(refresh)
             <dd>
               <code>{{ operation.business.action }}</code>
             </dd>
-            <template v-if="operation.business.action !== 'schema-register'">
+            <template v-if="operation.business.action === 'schema-register'">
+              <dt>Publisher</dt>
+              <dd>
+                <code>{{ operation.business.publisher ?? '—' }}</code>
+              </dd>
+              <dt>{{ $t('operations.schemaHash') }}</dt>
+              <dd>
+                <code>{{ operation.business.schemaDigestHex ?? '—' }}</code>
+              </dd>
+              <dt>{{ $t('operations.memoBytes') }}</dt>
+              <dd>{{ operation.business.memoByteLength ?? '—' }}</dd>
+            </template>
+            <template v-else>
               <dt>Issuer</dt>
               <dd>
                 <code>{{ operation.business.issuer }}</code>
@@ -164,20 +244,67 @@ onMounted(refresh)
                 <dd>
                   <code>{{ operation.business.generationId }}</code>
                 </dd>
-                <dt>Business confirmation</dt>
+              </template>
+              <template v-else>
+                <dt>URI</dt>
                 <dd>
-                  <code>{{ operationBusinessConfirmation(operation) }}</code>
+                  <code>{{ operation.business.credentialUri ?? '—' }}</code>
                 </dd>
+                <dt>{{ $t('operations.expiration') }}</dt>
+                <dd>{{ operation.business.expiration ?? '—' }}</dd>
               </template>
               <dt>{{ $t('operations.payloadHash') }}</dt>
               <dd>
                 <code>{{ operation.business.payloadDigestHex ?? '—' }}</code>
               </dd>
             </template>
+            <dt>{{ $t('operations.xcsResult') }}</dt>
+            <dd data-testid="operation-xcs-result">
+              <code>{{ operationBusinessConfirmation(operation) ?? '—' }}</code>
+            </dd>
           </template>
           <dt>{{ $t('operations.ledger') }}</dt>
           <dd>{{ operation.ledgerIndex ?? '—' }}</dd>
+          <template v-if="operationBusinessEvidence(operation)">
+            <dt>{{ $t('operations.proofLedgerHash') }}</dt>
+            <dd>
+              <code>{{ operationBusinessEvidence(operation)?.ledgerHash }}</code>
+            </dd>
+            <dt>{{ $t('operations.proofTransactionIndex') }}</dt>
+            <dd>{{ operationBusinessEvidence(operation)?.transactionIndex }}</dd>
+            <dt v-if="operationBusinessEvidence(operation)?.schemaUid">Schema UID</dt>
+            <dd v-if="operationBusinessEvidence(operation)?.schemaUid">
+              <code>{{ operationBusinessEvidence(operation)?.schemaUid }}</code>
+            </dd>
+            <dt v-if="operationBusinessEvidence(operation)?.generationId">Generation ID</dt>
+            <dd v-if="operationBusinessEvidence(operation)?.generationId">
+              <code>{{ operationBusinessEvidence(operation)?.generationId }}</code>
+            </dd>
+            <dt v-if="operationBusinessEvidence(operation)?.reasonCode">
+              {{ $t('operations.reason') }}
+            </dt>
+            <dd v-if="operationBusinessEvidence(operation)?.reasonCode">
+              <code>{{ operationBusinessEvidence(operation)?.reasonCode }}</code>
+            </dd>
+          </template>
         </dl>
+        <div
+          v-if="operationAcceptLink(operation) && operationVerifyLink(operation)"
+          class="button-row"
+        >
+          <NuxtLinkLocale
+            class="button secondary"
+            :to="operationAcceptLink(operation) ?? '/accept'"
+          >
+            {{ $t('operations.acceptLink') }}
+          </NuxtLinkLocale>
+          <NuxtLinkLocale
+            class="button secondary"
+            :to="operationVerifyLink(operation) ?? '/verify'"
+          >
+            {{ $t('operations.verifyLink') }}
+          </NuxtLinkLocale>
+        </div>
         <p v-if="operation.message" class="muted">{{ operation.message }}</p>
       </article>
     </div>

@@ -11,6 +11,7 @@
     "start": "node .output/server/index.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "xrpl-connect": "0.8.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.0",
     "vitest": "^3.2.4",
     "vue-tsc": "^3.1.2"

@@ -2,6 +2,7 @@
 import { decodeUtf8Hex, rippleTimeToIso8601 } from '@xcs-protocol/core'
 import { buildCredentialDelete } from '@xcs-protocol/sdk'
 import type { CredentialDelete } from 'xrpl'
+import type { WalletSubmissionResult } from '~/composables/useWallet'
 import {
   credentialRevocationBlockReason,
   parseApiCredentialDetail,
@@ -9,18 +10,25 @@ import {
   type ApiCredentialDetail,
   type VerificationDimensions,
 } from '~/utils/credentialReview'
+import {
+  assertLinkGeneration,
+  assertLinkProfile,
+  singleRouteQueryValue,
+} from '~/utils/operationLinks'
 
 const route = useRoute()
 const { account, busy: walletBusy, prepare, signAndSubmit } = useWallet()
 const { getActiveNetworkProfile, getCredential, verify } = useXcsApi()
-const subject = ref(typeof route.query.subject === 'string' ? route.query.subject : '')
-const schemaUid = ref(typeof route.query.schema === 'string' ? route.query.schema : '')
+const subject = ref(singleRouteQueryValue(route.query.subject))
+const schemaUid = ref(singleRouteQueryValue(route.query.schema))
+const linkedProfileId = ref(singleRouteQueryValue(route.query.profile))
+const linkedGenerationId = ref(singleRouteQueryValue(route.query.generation))
 const transaction = shallowRef<CredentialDelete | null>(null)
 const credential = shallowRef<ApiCredentialDetail | null>(null)
 const report = shallowRef<VerificationDimensions | null>(null)
 const reviewBusy = ref(false)
 const message = ref('')
-const successHash = ref('')
+const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const decodedUri = computed(() => {
   if (!credential.value?.uriHex) return null
@@ -42,16 +50,27 @@ function invalidatePreview() {
   transaction.value = null
   credential.value = null
   report.value = null
+  result.value = null
 }
 
-watch([subject, schemaUid], invalidatePreview)
+watch([subject, schemaUid, linkedProfileId, linkedGenerationId], invalidatePreview)
 watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
+watch(
+  () => [route.query.subject, route.query.schema, route.query.profile, route.query.generation],
+  ([nextSubject, nextSchema, nextProfile, nextGeneration]) => {
+    subject.value = singleRouteQueryValue(nextSubject)
+    schemaUid.value = singleRouteQueryValue(nextSchema)
+    linkedProfileId.value = singleRouteQueryValue(nextProfile)
+    linkedGenerationId.value = singleRouteQueryValue(nextGeneration)
+  },
+)
 
 async function fetchExactCredential(input: {
   issuer: string
   subject: string
   schemaUid: string
   profileId: string
+  expectedGenerationId?: string | undefined
 }) {
   const [rawCredential, rawReport] = await Promise.all([
     getCredential(input.issuer, input.subject, input.schemaUid, input.profileId),
@@ -66,6 +85,7 @@ async function fetchExactCredential(input: {
     ),
   ])
   const exactCredential = parseApiCredentialDetail(rawCredential, input)
+  assertLinkGeneration(input.expectedGenerationId, exactCredential.generationId)
   const dimensions = parseVerificationDimensions(rawReport)
   if (exactCredential.state !== dimensions.onChain) {
     throw new Error('CREDENTIAL_REVIEW_STATE_MISMATCH')
@@ -81,7 +101,6 @@ async function fetchExactCredential(input: {
 async function buildPreview() {
   invalidatePreview()
   message.value = ''
-  successHash.value = ''
   if (!account.value) return void (message.value = 'WALLET_NOT_CONNECTED')
 
   reviewBusy.value = true
@@ -91,11 +110,13 @@ async function buildPreview() {
   const normalizedSchemaUid = schemaUid.value.toLowerCase()
   try {
     const profile = await getActiveNetworkProfile()
+    assertLinkProfile(linkedProfileId.value || undefined, profile.profileId)
     const loaded = await fetchExactCredential({
       issuer: issuerAddress,
       subject: subjectAddress,
       schemaUid: normalizedSchemaUid,
       profileId: profile.profileId,
+      ...(linkedGenerationId.value ? { expectedGenerationId: linkedGenerationId.value } : {}),
     })
     if (revision !== previewRevision) throw new Error('CREDENTIAL_REVIEW_CHANGED_DURING_LOAD')
     credential.value = loaded.exactCredential
@@ -123,6 +144,8 @@ async function submit() {
   const expectedIssuer = account.value?.address
   const expectedSubject = subject.value
   const expectedSchemaUid = schemaUid.value.toLowerCase()
+  const expectedLinkedProfileId = linkedProfileId.value
+  const expectedLinkedGenerationId = linkedGenerationId.value
   const expectedRevision = previewRevision
   if (!preparedTransaction || !expectedCredential || !expectedIssuer) {
     message.value = 'TRANSACTION_PREVIEW_REQUIRED'
@@ -138,18 +161,22 @@ async function submit() {
         transaction.value !== preparedTransaction ||
         account.value?.address !== expectedIssuer ||
         subject.value !== expectedSubject ||
-        schemaUid.value.toLowerCase() !== expectedSchemaUid
+        schemaUid.value.toLowerCase() !== expectedSchemaUid ||
+        linkedProfileId.value !== expectedLinkedProfileId ||
+        linkedGenerationId.value !== expectedLinkedGenerationId
       ) {
         throw new Error('CREDENTIAL_REVIEW_CHANGED_BEFORE_SIGNATURE')
       }
     }
     assertCurrent()
     const profile = await getActiveNetworkProfile()
+    assertLinkProfile(expectedLinkedProfileId || undefined, profile.profileId)
     const loaded = await fetchExactCredential({
       issuer: expectedIssuer,
       subject: expectedSubject,
       schemaUid: expectedSchemaUid,
       profileId: profile.profileId,
+      ...(expectedLinkedGenerationId ? { expectedGenerationId: expectedLinkedGenerationId } : {}),
     })
     assertCurrent()
     if (loaded.exactCredential.generationId !== expectedCredential.generationId) {
@@ -167,8 +194,12 @@ async function submit() {
         generationId: loaded.exactCredential.generationId,
       },
       assertCurrent,
+      undefined,
+      (validated) => {
+        result.value = { ...validated }
+      },
     )
-    successHash.value = response.txHash
+    result.value = response
     transaction.value = null
   } catch (error) {
     message.value = error instanceof Error ? error.message : String(error)
@@ -232,9 +263,13 @@ async function submit() {
     </article>
 
     <TransactionPreview :transaction="transaction" :busy="busy" @confirm="submit" />
-    <div v-if="successHash" class="success-box">
-      <strong>{{ $t('revoke.submitted') }}</strong
-      ><code>{{ successHash }}</code>
-    </div>
+    <BusinessFinality
+      v-if="result"
+      :tx-hash="result.txHash"
+      :engine-result="result.transactionResult"
+      :ledger-index="result.ledgerIndex"
+      :business-confirmation="result.businessConfirmation"
+      :business-evidence="result.businessEvidence"
+    />
   </section>
 </template>

@@ -79,7 +79,8 @@ database. Never point the former application at the new projection database.
 Work:
 
 - perform the dedicated registry-account blackhole ceremony in
-  `config/networks/README.md`, retaining public transaction and ledger evidence;
+  `config/networks/README.md`, using `ACCOUNT_ZERO` unless a documented reason requires
+  `ACCOUNT_ONE`, and retain public transaction and ledger evidence;
 - confirm that the required Credentials amendment is supported and enabled on the selected network;
 - record the exact activation ledger index and hash after the ceremony;
 - publish `config/networks/testnet.json` and its SHA-256 digest through at least two organization
@@ -102,7 +103,9 @@ Exit criteria:
 - two reviewers independently reproduce the profile validation;
 - the indexer starts at the activation boundary, reaches the Testnet tip, and remains ready;
 - a clean rebuild produces identical schema UIDs, events, projections, and checkpoint hashes;
-- changing any immutable profile field causes startup to fail closed.
+- reusing a `profileId` with any changed immutable profile field causes startup to fail closed;
+- a Testnet reset or corrected profile field is published under a new `profileId` and activation
+  boundary rather than changing the prior profile;
 - omitting or changing any ledger transaction or metadata field on either provider halts ingestion
   before the checkpoint advances;
 - two fresh databases replayed from activation produce the same timestamp-free projection digest.
@@ -122,8 +125,8 @@ Work:
   expiry, restart recovery, and duplicate submission attempts;
 - verify that every UI preview exactly matches the signed blob and that every success shown to the
   user is `validated` with `tesSUCCESS`;
-- capture redacted, non-sensitive ledger fixtures from those transactions for deterministic indexer
-  regression tests;
+- capture the exact public ledger transactions and metadata for deterministic indexer regression
+  tests, review the bundle for on-ledger identifiers, and bind it to a published manifest digest;
 - add PostgreSQL integration tests that apply the migration to an empty database, ingest fixtures,
   restart at checkpoints, and rebuild projections;
 - add browser tests with a deterministic mock signer, while retaining the manual extension-wallet
@@ -159,7 +162,7 @@ Work:
 Exit criteria:
 
 - TypeScript and Go pass every v0.1 conformance vector with identical validity outcomes and stable
-  error classes;
+  error codes; diagnostic messages and paths need not be identical;
 - no open issue can change historical schema validity, UID bytes, payload interpretation, or
   lifecycle projection without a new protocol version;
 - an external implementation can derive a known UID and verify a known Credential from the published

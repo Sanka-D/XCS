@@ -6,7 +6,12 @@ defineEmits<{ confirm: [] }>()
 </script>
 
 <template>
-  <section v-if="transaction" class="preview-card" aria-live="polite">
+  <section
+    v-if="transaction"
+    class="preview-card"
+    data-testid="transaction-preview"
+    aria-live="polite"
+  >
     <div>
       <p class="eyebrow">{{ $t('transaction.preview') }}</p>
       <h2>{{ transaction.TransactionType }}</h2>
@@ -20,7 +25,13 @@ defineEmits<{ confirm: [] }>()
       </dl>
     </div>
     <div class="warning-box">{{ $t('transaction.confirmWarning') }}</div>
-    <button class="button" type="button" :disabled="busy" @click="$emit('confirm')">
+    <button
+      class="button"
+      data-testid="transaction-sign"
+      type="button"
+      :disabled="busy"
+      @click="$emit('confirm')"
+    >
       {{ busy ? $t('common.working') : $t('transaction.sign') }}
     </button>
   </section>

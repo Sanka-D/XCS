@@ -8,6 +8,8 @@ import {
 } from '@xcs-protocol/core'
 import { buildCredentialCreate } from '@xcs-protocol/sdk'
 import type { CredentialCreate } from 'xrpl'
+import type { WalletSubmissionResult } from '~/composables/useWallet'
+import { buildCredentialAcceptLink, buildCredentialVerifyLink } from '~/utils/operationLinks'
 import {
   verifyHttpsPayloadPublication,
   type PayloadPublicationProof,
@@ -29,12 +31,20 @@ const httpsUrl = ref('https://issuer.example/credentials/replace-me.json')
 const expiration = ref('')
 const publicationProof = ref<PayloadPublicationProof | null>(null)
 const publicationCheckBusy = ref(false)
+const flowBusy = ref(false)
 const canonicalPayload = ref('')
 const credentialUri = ref('')
 const transaction = shallowRef<CredentialCreate | null>(null)
+const preparedProfileId = ref('')
 const formError = ref('')
-const successHash = ref('')
-const submissionBusy = computed(() => busy.value || publicationCheckBusy.value)
+const result = shallowRef<WalletSubmissionResult | null>(null)
+const issuedLinkInputs = shallowRef<{
+  profileId: string
+  issuer: string
+  subject: string
+  schemaUid: string
+} | null>(null)
+const submissionBusy = computed(() => busy.value || flowBusy.value)
 let previewRevision = 0
 
 function invalidatePreview() {
@@ -43,6 +53,9 @@ function invalidatePreview() {
   canonicalPayload.value = ''
   credentialUri.value = ''
   transaction.value = null
+  preparedProfileId.value = ''
+  result.value = null
+  issuedLinkInputs.value = null
 }
 
 watch([schemaUid, subject, claimsText, httpsUrl, expiration], invalidatePreview)
@@ -61,7 +74,7 @@ function downloadPayload() {
 async function buildPreview() {
   invalidatePreview()
   formError.value = ''
-  successHash.value = ''
+  result.value = null
   if (!account.value) return void (formError.value = 'WALLET_NOT_CONNECTED')
   const revision = previewRevision
   const issuerAddress = account.value.address
@@ -102,6 +115,7 @@ async function buildPreview() {
     const prepared = (await prepare(raw, profile)) as CredentialCreate
     if (revision !== previewRevision) throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_BUILD')
     transaction.value = prepared
+    preparedProfileId.value = profile.profileId
   } catch (error) {
     transaction.value = null
     formError.value = error instanceof Error ? error.message : String(error)
@@ -118,12 +132,20 @@ async function submit() {
   const expectedClaims = claimsText.value
   const expectedHttpsUrl = httpsUrl.value
   const expectedExpiration = expiration.value
+  const expectedProfileId = preparedProfileId.value
   const expectedRevision = previewRevision
-  if (!preparedTransaction || !expectedPayload || !expectedUri || !expectedIssuer) {
+  if (
+    !preparedTransaction ||
+    !expectedPayload ||
+    !expectedUri ||
+    !expectedIssuer ||
+    !expectedProfileId
+  ) {
     formError.value = 'TRANSACTION_PREVIEW_REQUIRED'
     return
   }
 
+  flowBusy.value = true
   publicationCheckBusy.value = true
   publicationProof.value = null
   formError.value = ''
@@ -139,7 +161,8 @@ async function submit() {
         schemaUid.value.toLowerCase() !== expectedSchemaUid ||
         claimsText.value !== expectedClaims ||
         httpsUrl.value !== expectedHttpsUrl ||
-        expiration.value !== expectedExpiration
+        expiration.value !== expectedExpiration ||
+        preparedProfileId.value !== expectedProfileId
       ) {
         throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_PUBLICATION_CHECK')
       }
@@ -150,6 +173,10 @@ async function submit() {
     })
     assertCurrent()
     publicationProof.value = proof
+    publicationCheckBusy.value = false
+    const normalizedExpiration = expectedExpiration
+      ? new Date(expectedExpiration).toISOString()
+      : undefined
     const response = await signAndSubmit(
       preparedTransaction,
       {
@@ -157,18 +184,55 @@ async function submit() {
         issuer: expectedIssuer,
         subject: expectedSubject,
         schemaUid: expectedSchemaUid,
+        credentialUri: expectedUri,
         payloadDigestHex: proof.digestHex,
+        ...(normalizedExpiration ? { expiration: normalizedExpiration } : {}),
       },
       assertCurrent,
+      undefined,
+      (validated) => {
+        issuedLinkInputs.value = {
+          profileId: expectedProfileId,
+          issuer: expectedIssuer,
+          subject: expectedSubject,
+          schemaUid: expectedSchemaUid,
+        }
+        result.value = { ...validated }
+      },
     )
-    successHash.value = response.txHash
+    result.value = response
     transaction.value = null
   } catch (error) {
     formError.value = error instanceof Error ? error.message : String(error)
   } finally {
     publicationCheckBusy.value = false
+    flowBusy.value = false
   }
 }
+
+const acceptLink = computed(() => {
+  const generationId = result.value?.businessEvidence?.generationId
+  if (
+    result.value?.businessConfirmation !== 'confirmed' ||
+    !generationId ||
+    !issuedLinkInputs.value
+  ) {
+    return null
+  }
+  return buildCredentialAcceptLink({ ...issuedLinkInputs.value, generationId })
+})
+
+const verifyLink = computed(() => {
+  const generationId = result.value?.businessEvidence?.generationId
+  if (
+    result.value?.businessConfirmation !== 'confirmed' ||
+    !generationId ||
+    !issuedLinkInputs.value
+  ) {
+    return null
+  }
+  return buildCredentialVerifyLink({ ...issuedLinkInputs.value, generationId })
+})
 </script>
 
 <template>
@@ -235,9 +299,22 @@ async function submit() {
       </div>
     </div>
     <TransactionPreview :transaction="transaction" :busy="submissionBusy" @confirm="submit" />
-    <div v-if="successHash" class="success-box">
-      <strong>{{ $t('issue.submitted') }}</strong
-      ><code>{{ successHash }}</code>
+    <BusinessFinality
+      v-if="result"
+      :tx-hash="result.txHash"
+      :engine-result="result.transactionResult"
+      :ledger-index="result.ledgerIndex"
+      :business-confirmation="result.businessConfirmation"
+      :business-evidence="result.businessEvidence"
+    />
+    <div v-if="acceptLink && verifyLink" class="form-card">
+      <h2>{{ $t('issue.links') }}</h2>
+      <p>
+        <NuxtLinkLocale :to="acceptLink">{{ $t('issue.acceptLink') }}</NuxtLinkLocale>
+      </p>
+      <p>
+        <NuxtLinkLocale :to="verifyLink">{{ $t('issue.verifyLink') }}</NuxtLinkLocale>
+      </p>
     </div>
   </section>
 </template>

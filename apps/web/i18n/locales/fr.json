@@ -28,6 +28,18 @@
     "confirmWarning": "Contrôlez le réseau, le compte, la destination, les frais et chaque champ dans votre wallet.",
     "sign": "Signer et soumettre"
   },
+  "finality": {
+    "title": "Finalité en deux étapes",
+    "xrplValidated": "1. XRPL a validé la transaction avec tesSUCCESS",
+    "xcsConfirmed": "2. La preuve indexée XCS est confirmée",
+    "xcsRejected": "2. XCS a rejeté cette opération protocolaire",
+    "xcsMismatch": "2. La preuve indexée ne correspond pas à l’opération relue",
+    "xcsPending": "2. L’indexation XCS est toujours en attente",
+    "reconfirm": "La transaction XRPL ne sera pas soumise à nouveau. Revérifiez uniquement sa preuve depuis Opérations.",
+    "proofLedger": "Ledger de preuve",
+    "proofLedgerHash": "Hash du ledger de preuve",
+    "proofTransactionIndex": "Index de transaction de la preuve"
+  },
   "home": {
     "eyebrow": "Des credentials XRPL interopérables",
     "title": "Un schéma commun. Des émetteurs indépendants. Une preuve vérifiable.",
@@ -85,7 +97,8 @@
     "prepare": "Valider et préparer",
     "canonical": "Octets canoniques enregistrés",
     "submitted": "Transaction validée",
-    "uidLater": "L’UID final dépend du ledger validé et sera affiché par l’indexeur."
+    "uidLater": "L’UID final dépend du ledger validé et sera affiché par l’indexeur.",
+    "openSchema": "Ouvrir le schéma confirmé"
   },
   "issue": {
     "title": "Émettre un credential",
@@ -99,7 +112,10 @@
     "httpsProof": "Le pilote exige une URL HTTPS publique avec CORS. Juste avant signature, le navigateur retélécharge le JSON canonique exact, sans cache ni redirection (1 Mio maximum).",
     "checking": "Vérification des octets HTTPS publiés juste avant signature…",
     "checked": "Payload publié vérifié ({bytes} octets) : ",
-    "submitted": "CredentialCreate validé : "
+    "submitted": "CredentialCreate validé : ",
+    "links": "Partager le credential confirmé",
+    "acceptLink": "Ouvrir le lien d’acceptation du sujet",
+    "verifyLink": "Ouvrir le lien de vérification"
   },
   "accept": {
     "title": "Accepter ou retirer un credential",
@@ -137,7 +153,12 @@
   "verify": {
     "title": "Vérifier un credential",
     "description": "La recherche exige le réseau, l’émetteur, le sujet et le schema UID exacts.",
-    "fetch": "Résoudre et contrôler le payload public",
+    "fetch": "Charger et contrôler le payload public",
+    "loadMetadata": "Charger les métadonnées indexées",
+    "metadata": "Métadonnées indexées du credential",
+    "payloadConsentIntro": "Les octets du payload n’ont pas été chargés. Le chargement contacte directement {host}, qui peut observer votre adresse IP et l’heure de la requête.",
+    "payloadConsent": "Je consens au chargement du payload public depuis cet hôte exact.",
+    "payloadChecked": "Vérification navigateur du payload terminée ({bytes} octets) : ",
     "run": "Vérifier",
     "onChain": "État on-chain",
     "schema": "Schéma",
@@ -154,14 +175,24 @@
     "export": "Exporter les reçus minimisés",
     "retry": "Reprendre",
     "reconfirm": "Revérifier l’événement indexé",
+    "abandon": "Abandonner le brouillon non signé",
     "hash": "Hash de transaction",
     "profile": "Profil réseau",
     "updated": "Dernière mise à jour",
     "lastLedger": "Dernier ledger autorisé",
     "result": "Résultat XRPL",
     "action": "Action métier",
+    "xcsResult": "Résultat indexé XCS",
+    "schemaHash": "Digest du schéma",
+    "memoBytes": "Octets du memo",
+    "expiration": "Expiration",
     "payloadHash": "Digest du payload",
-    "ledger": "Ledger validé"
+    "ledger": "Ledger XRPL validé",
+    "proofLedgerHash": "Hash du ledger de preuve indexée",
+    "proofTransactionIndex": "Index de transaction de la preuve indexée",
+    "reason": "Raison protocolaire",
+    "acceptLink": "Acceptation du sujet",
+    "verifyLink": "Vérification"
   },
   "footer": { "summary": "XCS v0.1 — standard ouvert et implémentation de référence MIT." }
 }

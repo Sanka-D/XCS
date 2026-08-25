@@ -89,6 +89,17 @@ describe('pilot flow without a wallet extension', () => {
       ledgerIndex: 100,
       engineResult: 'tesSUCCESS',
       businessConfirmation: 'confirmed',
+      businessEvidence: {
+        transactionHash: 'AB'.repeat(32),
+        ledgerIndex: 100,
+        ledgerHash: 'CD'.repeat(32),
+        transactionIndex: 1,
+        schemaUid,
+        generationId,
+        eventType: 'accepted',
+        accepted: true,
+        deletionCause: null,
+      },
       business: {
         action: 'credential-accept',
         issuer,

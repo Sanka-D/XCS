@@ -1,13 +1,18 @@
 <script setup lang="ts">
 const { locale, locales, setLocale } = useI18n()
+const clientReady = ref(false)
 
 const availableLocales = computed(() =>
   locales.value.map((item) => (typeof item === 'string' ? { code: item, name: item } : item)),
 )
+
+onMounted(() => {
+  clientReady.value = true
+})
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :data-client-ready="clientReady ? 'true' : 'false'">
     <header class="site-header">
       <NuxtLinkLocale class="brand" to="/" aria-label="XCS home">
         <span class="brand-mark">X</span>

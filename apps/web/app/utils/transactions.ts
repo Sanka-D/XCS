@@ -32,3 +32,7 @@ export function exactCredentialEventPath(
 ): string {
   return `${exactCredentialPath(network, issuer, subject, schemaUid)}/events/${encodeURIComponent(transactionHash.toLowerCase())}`
 }
+
+export function exactSchemaRegistrationPath(network: string, transactionHash: string): string {
+  return `/v1/networks/${encodeURIComponent(network)}/schema-registrations/${encodeURIComponent(transactionHash.toLowerCase())}`
+}

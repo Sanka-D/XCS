@@ -7,21 +7,24 @@ import {
   submitSignedTransaction,
   type ReliableSubmissionResult,
 } from '@xcs-protocol/sdk'
-import { Client, type SubmittableTransaction } from 'xrpl'
+import type { SubmittableTransaction } from 'xrpl'
 import type { AccountInfo, NetworkInfo, Transaction } from 'xrpl-connect'
-import { reconfirmValidatedBusinessOperation } from '~/utils/businessConfirmation'
+import {
+  reconfirmValidatedBusinessOperation,
+  waitForIndexedBusinessEvidence,
+} from '~/utils/businessConfirmation'
 import {
   canRetryOperation,
   IndexedDbOperationJournal,
+  isConfirmableBusinessContext,
   isGenerationBoundBusinessContext,
   validateOperationBusinessContext,
+  type BusinessConfirmation,
+  type BusinessEvidence,
   type OperationBusinessContext,
   type StoredOperation,
 } from '~/utils/operationJournal'
-import {
-  assertCredentialGenerationCurrent,
-  waitForCredentialOperationEvent,
-} from '~/utils/credentialReview'
+import { assertCredentialGenerationCurrent } from '~/utils/credentialReview'
 import { assertPublicRpcUrl } from '~/utils/publicRpcUrl'
 import { assertTransactionSigner } from '~/utils/transactions'
 import { assertValidatedTesSuccess, createWalletSigner } from '~/utils/walletSubmission'
@@ -35,6 +38,11 @@ const preparedProfiles = new WeakMap<object, NetworkProfile>()
 const preparedWalletSessions = new WeakMap<object, number>()
 let walletSession = 0
 let journal: IndexedDbOperationJournal | undefined
+
+export interface WalletSubmissionResult extends ReliableSubmissionResult {
+  readonly businessConfirmation?: Exclude<BusinessConfirmation, 'pending'> | undefined
+  readonly businessEvidence?: BusinessEvidence | undefined
+}
 
 function operationJournal(): IndexedDbOperationJournal {
   if (!import.meta.client) throw new Error('WALLET_BROWSER_REQUIRED')
@@ -74,9 +82,14 @@ function sameProfile(left: NetworkProfile, right: NetworkProfile): boolean {
 }
 
 export function useWallet() {
-  const { $walletManager } = useNuxtApp()
+  const { $walletManager, $xrplClientFactory } = useNuxtApp()
   const config = useRuntimeConfig()
-  const { getActiveNetworkProfile, getCredential, getCredentialEventByTransaction } = useXcsApi()
+  const {
+    getActiveNetworkProfile,
+    getCredential,
+    getCredentialEventByTransaction,
+    getSchemaRegistrationByTransaction,
+  } = useXcsApi()
 
   async function assertBusinessGenerationCurrent(
     business: OperationBusinessContext | undefined,
@@ -92,38 +105,59 @@ export function useWallet() {
     assertCredentialGenerationCurrent(credential, business)
   }
 
+  function loadIndexedBusinessEvidence(
+    business: OperationBusinessContext,
+    profileId: string,
+    txHash: string,
+  ): Promise<unknown> {
+    return business.action === 'schema-register'
+      ? getSchemaRegistrationByTransaction(txHash, profileId)
+      : getCredentialEventByTransaction(
+          business.issuer,
+          business.subject,
+          business.schemaUid,
+          txHash,
+          profileId,
+        )
+  }
+
   async function confirmBusinessEvent(
     business: OperationBusinessContext | undefined,
     profileId: string,
     txHash: string,
     operationStore: IndexedDbOperationJournal,
     operationId: string,
-  ): Promise<void> {
-    if (!isGenerationBoundBusinessContext(business)) return
+  ): Promise<Pick<WalletSubmissionResult, 'businessConfirmation' | 'businessEvidence'>> {
+    if (!isConfirmableBusinessContext(business)) return {}
     try {
-      await waitForCredentialOperationEvent({
-        ...business,
+      const outcome = await waitForIndexedBusinessEvidence({
+        business,
         txHash,
-        loadEvent: () =>
-          getCredentialEventByTransaction(
-            business.issuer,
-            business.subject,
-            business.schemaUid,
-            txHash,
-            profileId,
-          ),
+        loadEvidence: () => loadIndexedBusinessEvidence(business, profileId, txHash),
       })
-    } catch (error) {
       await operationStore.setBusinessConfirmation(
         operationId,
-        error instanceof Error && error.message === 'CREDENTIAL_EVENT_CONFIRMATION_MISMATCH'
+        outcome.confirmation,
+        new Date().toISOString(),
+        outcome.evidence,
+      )
+      return {
+        businessConfirmation: outcome.confirmation,
+        businessEvidence: outcome.evidence,
+      }
+    } catch (error) {
+      const confirmation =
+        error instanceof Error &&
+        ['BUSINESS_EVIDENCE_MISMATCH', 'BUSINESS_EVIDENCE_RESPONSE_INVALID'].includes(error.message)
           ? 'mismatch'
-          : 'timeout',
+          : 'timeout'
+      await operationStore.setBusinessConfirmation(
+        operationId,
+        confirmation,
         new Date().toISOString(),
       )
-      throw error
+      return { businessConfirmation: confirmation }
     }
-    await operationStore.setBusinessConfirmation(operationId, 'confirmed', new Date().toISOString())
   }
 
   if (import.meta.client && !listenersInstalled.value) {
@@ -214,7 +248,7 @@ export function useWallet() {
     if (expectedProfile !== undefined && !sameProfile(expectedProfile, profile)) {
       throw new Error('NETWORK_PROFILE_CHANGED_BEFORE_PREVIEW')
     }
-    const client = new Client(assertPublicRpcUrl(config.public.rpcUrl))
+    const client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
     try {
       await connectAndValidateNetwork(client, profile)
       assertWalletContext(transaction, preparingAddress, preparingSession)
@@ -234,7 +268,7 @@ export function useWallet() {
     assertCurrent?: () => void,
     afterSignatureValidated?: () => void | Promise<void>,
     afterLedgerValidated?: (result: ReliableSubmissionResult) => void | Promise<void>,
-  ): Promise<ReliableSubmissionResult> {
+  ): Promise<WalletSubmissionResult> {
     if (!account.value) throw new Error('WALLET_NOT_CONNECTED')
     assertWalletTestnet(account.value)
     assertTransactionSigner(transaction, account.value.address)
@@ -259,7 +293,7 @@ export function useWallet() {
     walletError.value = null
     const operationId = crypto.randomUUID()
     const operationStore = operationJournal()
-    const client = new Client(assertPublicRpcUrl(config.public.rpcUrl))
+    const client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
 
     try {
       // Network identity is known before the wallet is asked to sign. The SDK
@@ -324,17 +358,17 @@ export function useWallet() {
         },
       )
       assertValidatedTesSuccess(result)
-      await confirmBusinessEvent(
+      await afterLedgerValidated?.(result)
+      const businessResult = await confirmBusinessEvent(
         normalizedBusiness,
         activeProfile.profileId,
         result.txHash,
         operationStore,
         operationId,
       )
-      await afterLedgerValidated?.(result)
       preparedProfiles.delete(transaction)
       preparedWalletSessions.delete(transaction)
-      return result
+      return { ...result, ...businessResult }
     } finally {
       await loadOperations().catch(() => undefined)
       if (client.isConnected()) await client.disconnect()
@@ -348,11 +382,11 @@ export function useWallet() {
     return operations.value
   }
 
-  async function retryOperation(operationId: string): Promise<ReliableSubmissionResult> {
+  async function retryOperation(operationId: string): Promise<WalletSubmissionResult> {
     walletBusy.value = true
     walletError.value = null
     const operationStore = operationJournal()
-    const client = new Client(assertPublicRpcUrl(config.public.rpcUrl))
+    const client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
     try {
       const stored = (await operationStore.list()).find(
         (operation) => operation.operationId === operationId,
@@ -399,20 +433,21 @@ export function useWallet() {
           throw new Error('OPERATION_GENERATION_CONTEXT_REQUIRED')
         }
         await assertBusinessGenerationCurrent(business, activeProfile.profileId)
+        await operationStore.assertBusinessLockOwned(operationId)
         result = await submitSignedTransaction(client, stored.txBlob, {
           journal: operationStore,
           operationId,
         })
       }
       assertValidatedTesSuccess(result)
-      await confirmBusinessEvent(
+      const businessResult = await confirmBusinessEvent(
         business,
         activeProfile.profileId,
         result.txHash,
         operationStore,
         operationId,
       )
-      return result
+      return { ...result, ...businessResult }
     } finally {
       await loadOperations().catch(() => undefined)
       if (client.isConnected()) await client.disconnect()
@@ -440,25 +475,29 @@ export function useWallet() {
       const business = stored.business
         ? validateOperationBusinessContext(stored.business)
         : undefined
-      if (!isGenerationBoundBusinessContext(business)) {
-        throw new Error('OPERATION_GENERATION_CONTEXT_REQUIRED')
+      if (!isConfirmableBusinessContext(business)) {
+        throw new Error('OPERATION_BUSINESS_CONTEXT_REQUIRED')
       }
       const txHash = stored.txHash
       if (!txHash) throw new Error('OPERATION_TRANSACTION_HASH_REQUIRED')
 
       return await reconfirmValidatedBusinessOperation({
         operation: stored,
-        loadEvent: () =>
-          getCredentialEventByTransaction(
-            business.issuer,
-            business.subject,
-            business.schemaUid,
-            txHash,
-            activeProfile.profileId,
-          ),
-        persist: (confirmation, at) =>
-          operationStore.setBusinessConfirmation(operationId, confirmation, at),
+        loadEvidence: () => loadIndexedBusinessEvidence(business, activeProfile.profileId, txHash),
+        persist: (confirmation, at, evidence) =>
+          operationStore.setBusinessConfirmation(operationId, confirmation, at, evidence),
       })
+    } finally {
+      await loadOperations().catch(() => undefined)
+      walletBusy.value = false
+    }
+  }
+
+  async function abandonOperation(operationId: string): Promise<void> {
+    walletBusy.value = true
+    walletError.value = null
+    try {
+      await operationJournal().abandon(operationId)
     } finally {
       await loadOperations().catch(() => undefined)
       walletBusy.value = false
@@ -478,5 +517,6 @@ export function useWallet() {
     loadOperations,
     retryOperation,
     reconfirmOperation,
+    abandonOperation,
   }
 }

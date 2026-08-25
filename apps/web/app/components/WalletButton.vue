@@ -28,7 +28,13 @@ function shortAddress(address: string) {
 
 <template>
   <div class="wallet-control">
-    <button class="button secondary compact" :disabled="busy" type="button" @click="toggle">
+    <button
+      class="button secondary compact"
+      data-testid="wallet-toggle"
+      :disabled="busy"
+      type="button"
+      @click="toggle"
+    >
       {{ account ? shortAddress(account.address) : $t('wallet.connect') }}
     </button>
 
@@ -38,6 +44,7 @@ function shortAddress(address: string) {
         v-for="wallet in wallets"
         :key="wallet.id"
         class="wallet-choice"
+        :data-wallet-id="wallet.id"
         type="button"
         @click="chooseWallet(wallet.id)"
       >

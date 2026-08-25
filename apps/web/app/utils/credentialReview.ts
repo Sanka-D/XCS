@@ -329,7 +329,8 @@ export function inspectCredentialOperationEvent(
     typeof event.subject !== 'string' ||
     typeof event.schemaUid !== 'string' ||
     !/^[0-9a-f]{64}$/i.test(event.schemaUid) ||
-    typeof event.eventType !== 'string'
+    typeof event.eventType !== 'string' ||
+    typeof event.accepted !== 'boolean'
   ) {
     throw new Error('CREDENTIAL_EVENT_RESPONSE_INVALID')
   }
@@ -355,6 +356,7 @@ export function inspectCredentialOperationEvent(
     typeof event.generationId === 'string' &&
     event.generationId.toLowerCase() === expected.generationId.toLowerCase() &&
     event.eventType === expectedEventType &&
+    (expected.action !== 'credential-accept' || event.accepted === true) &&
     (expectedDeletionCause === undefined || event.deletionCause === expectedDeletionCause)
   return confirmed ? 'confirmed' : 'mismatch'
 }

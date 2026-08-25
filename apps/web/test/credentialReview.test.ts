@@ -251,6 +251,7 @@ describe('exact credential review', () => {
             schemaUid: UID,
             generationId: GENERATION,
             eventType: 'deleted',
+            accepted: false,
             deletionCause: 'subject_rejected',
           },
         },
@@ -268,6 +269,7 @@ describe('exact credential review', () => {
             schemaUid: UID,
             generationId: '56'.repeat(32),
             eventType: 'deleted',
+            accepted: false,
             deletionCause: 'subject_rejected',
           },
         },
@@ -285,6 +287,7 @@ describe('exact credential review', () => {
             schemaUid: UID,
             generationId: GENERATION,
             eventType: 'deleted',
+            accepted: false,
             deletionCause: 'subject_rejected',
           },
         },
@@ -294,6 +297,25 @@ describe('exact credential review', () => {
     expect(() =>
       inspectCredentialOperationEvent({ transactionHash: 'CD'.repeat(32), event: null }, expected),
     ).toThrow('CREDENTIAL_EVENT_RESPONSE_INVALID')
+
+    expect(
+      inspectCredentialOperationEvent(
+        {
+          transactionHash: expected.txHash,
+          event: {
+            transactionHash: expected.txHash,
+            issuer: ISSUER,
+            subject: SUBJECT,
+            schemaUid: UID,
+            generationId: GENERATION,
+            eventType: 'accepted',
+            accepted: false,
+            deletionCause: null,
+          },
+        },
+        { ...expected, action: 'credential-accept' },
+      ),
+    ).toBe('mismatch')
   })
 
   it('bounds indexer event reconciliation instead of reporting success indefinitely', async () => {
