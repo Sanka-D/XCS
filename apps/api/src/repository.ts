@@ -1,6 +1,7 @@
 import {
   credentialEvents,
   credentialGenerations,
+  indexerStatuses,
   ledgerCheckpoints,
   networkProfiles,
   schemas,
@@ -12,6 +13,21 @@ import type { ApiRepository } from './types.js'
 
 export class PostgresApiRepository implements ApiRepository {
   constructor(private readonly db: XcsDatabase) {}
+
+  withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T> {
+    return this.db.transaction(
+      (transaction) => callback(new PostgresApiRepository(transaction as unknown as XcsDatabase)),
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    )
+  }
+
+  async getDatabaseTime(): Promise<Date> {
+    const [row] = await this.db.execute<{ now: Date }>(sql`SELECT CURRENT_TIMESTAMP AS "now"`)
+    if (row === undefined || !Number.isFinite(row.now.getTime())) {
+      throw new Error('PostgreSQL returned an invalid current timestamp')
+    }
+    return row.now
+  }
 
   async ping(): Promise<void> {
     await this.db.execute(sql`select 1`)
@@ -30,6 +46,15 @@ export class PostgresApiRepository implements ApiRepository {
       .select()
       .from(networkProfiles)
       .where(and(eq(networkProfiles.profileId, profileId), eq(networkProfiles.enabled, true)))
+      .limit(1)
+    return row
+  }
+
+  async getIndexerStatus(profileId: string) {
+    const [row] = await this.db
+      .select()
+      .from(indexerStatuses)
+      .where(eq(indexerStatuses.profileId, profileId))
       .limit(1)
     return row
   }
@@ -120,5 +145,25 @@ export class PostgresApiRepository implements ApiRepository {
         asc(credentialEvents.transactionIndex),
         asc(credentialEvents.nodeIndex),
       )
+      .limit(input.limit)
+  }
+
+  getCredentialEventsByTransaction(
+    input: Parameters<ApiRepository['getCredentialEventsByTransaction']>[0],
+  ) {
+    return this.db
+      .select()
+      .from(credentialEvents)
+      .where(
+        and(
+          eq(credentialEvents.profileId, input.profileId),
+          eq(credentialEvents.transactionHash, input.transactionHash),
+          eq(credentialEvents.issuer, input.issuer),
+          eq(credentialEvents.subject, input.subject),
+          eq(credentialEvents.schemaUid, input.schemaUid),
+        ),
+      )
+      .orderBy(asc(credentialEvents.nodeIndex))
+      .limit(input.limit)
   }
 }

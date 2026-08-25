@@ -24,4 +24,6 @@ COPY --from=build /workspace /workspace
 ARG XCS_PACKAGE
 ENV XCS_PACKAGE=$XCS_PACKAGE
 
+USER node
+
 CMD ["sh", "-c", "pnpm --filter \"$XCS_PACKAGE\" start"]

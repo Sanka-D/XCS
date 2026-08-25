@@ -8,6 +8,7 @@ import type {
   CredentialEventRow,
   CredentialGenerationRow,
   DemoPinRow,
+  IndexerStatusRow,
   LedgerCheckpointRow,
   NetworkProfileRow,
   PinChallengeRow,
@@ -66,12 +67,21 @@ const network: NetworkProfileRow = {
 class FakeApiRepository implements ApiRepository {
   constructor(private readonly configuredNetwork: NetworkProfileRow = network) {}
 
+  async withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T> {
+    return callback(this)
+  }
+  async getDatabaseTime() {
+    return NOW
+  }
   async ping() {}
   async listNetworks() {
     return [this.configuredNetwork]
   }
   async getNetwork(profileId: string) {
     return profileId === 'testnet' ? this.configuredNetwork : undefined
+  }
+  async getIndexerStatus(): Promise<IndexerStatusRow | undefined> {
+    return undefined
   }
   async getLatestCheckpoint(): Promise<LedgerCheckpointRow | undefined> {
     return undefined
@@ -85,7 +95,14 @@ class FakeApiRepository implements ApiRepository {
   async getCredential(): Promise<CredentialGenerationRow | undefined> {
     return undefined
   }
-  async getCredentialEvents(): Promise<CredentialEventRow[]> {
+  async getCredentialEvents(
+    _input: Parameters<ApiRepository['getCredentialEvents']>[0],
+  ): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getCredentialEventsByTransaction(
+    _input: Parameters<ApiRepository['getCredentialEventsByTransaction']>[0],
+  ): Promise<CredentialEventRow[]> {
     return []
   }
 }

@@ -6,8 +6,9 @@ For a real profile:
 
 1. create and fund a dedicated Testnet account;
 2. set a regular key whose secret is provably unavailable;
-3. disable the master key;
-4. independently verify those ledger objects and that the account can only receive funds;
+3. disable the master key without enabling DepositAuth or RequireDestTag;
+4. independently verify the AccountRoot, absence of outgoing Delegate permissions and SignerList,
+   and that the account can receive the one-drop registration Payment without any destination tag;
 5. choose the first post-ceremony validated ledger as the XCS activation boundary;
 6. copy the example to `testnet.json` and replace every placeholder;
 7. publish the exact file and its SHA-256 digest.

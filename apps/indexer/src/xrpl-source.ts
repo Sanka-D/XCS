@@ -1,40 +1,72 @@
 import { Client } from 'xrpl'
 
-import type { LedgerSource, LedgerTransaction, ValidatedLedger } from './types.js'
+import {
+  assertRegistryBlackholed,
+  assertSourceCoversProfile,
+  normalizeAccountObjectsPage,
+  normalizeServerInfo,
+} from './profile-preflight.js'
+import { sourceFailure, XrplSourceError } from './source-errors.js'
+import type {
+  LedgerSource,
+  LedgerSourcePreflight,
+  LedgerSourceTips,
+  LedgerTransaction,
+  NetworkProfile,
+  ValidatedLedger,
+} from './types.js'
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${label} is not an object`)
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be an object`)
   }
   return value as Record<string, unknown>
 }
 
 function uint(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`${label} is not a non-negative safe integer`)
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > 0xffff_ffff
+  ) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be a uint32`)
   }
   return value
 }
 
 function hash(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^[0-9a-fA-F]{64}$/.test(value)) {
-    throw new Error(`${label} is not a 32-byte hex value`)
+  if (typeof value !== 'string' || !/^[0-9a-fA-F]{64}$/u.test(value)) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be a 32-byte hexadecimal hash`)
   }
   return value.toLowerCase()
 }
 
-export function assertFeatureResponseSupportsAmendment(value: unknown, amendmentId: string): void {
-  const result = asRecord(value, 'feature result')
-  const match = Object.entries(result).find(
-    ([key]) => key.toUpperCase() === amendmentId.toUpperCase(),
-  )
-  if (match === undefined) {
-    throw new Error(`Required XRPL amendment ${amendmentId} is absent from feature response`)
+function uint64String(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^(?:0|[1-9]\d*)$/u.test(value)) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be a canonical uint64 string`)
   }
-  const feature = asRecord(match[1], `feature result ${match[0]}`)
-  if (feature.enabled !== true || feature.supported !== true) {
-    throw new Error(`Required XRPL amendment ${amendmentId} is not enabled and supported`)
+  if (BigInt(value) > 0xffff_ffff_ffff_ffffn) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be a canonical uint64 string`)
   }
+  return value
+}
+
+function matchingHash(values: unknown[], label: string): string {
+  const present = values.filter((value) => value !== undefined)
+  if (present.length === 0) return hash(undefined, label)
+  const normalized = present.map((value) => hash(value, label))
+  if (normalized.some((value) => value !== normalized[0])) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} values disagree inside one response`)
+  }
+  return normalized[0]!
+}
+
+function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', `${label} must be a non-empty string`)
+  }
+  return value
 }
 
 function normalizeTransaction(value: unknown): LedgerTransaction {
@@ -45,9 +77,18 @@ function normalizeTransaction(value: unknown): LedgerTransaction {
       : typeof envelope.tx === 'object' && envelope.tx !== null
         ? asRecord(envelope.tx, 'tx')
         : envelope
-  const metadataValue = envelope.meta ?? envelope.metaData ?? transaction.metaData
+  const metadataValue =
+    envelope.meta ?? envelope.metaData ?? transaction.meta ?? transaction.metaData
   const metadata = asRecord(metadataValue, 'transaction metadata')
-  const transactionHash = envelope.hash ?? transaction.hash
+  nonEmptyString(transaction.TransactionType, 'transaction.TransactionType')
+  if (!Array.isArray(metadata.AffectedNodes)) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', 'metadata.AffectedNodes must be an array')
+  }
+  nonEmptyString(metadata.TransactionResult, 'metadata.TransactionResult')
+  const transactionHash = matchingHash(
+    [envelope.hash, transaction === envelope ? undefined : transaction.hash],
+    'transaction hash',
+  )
   const transactionIndex = uint(metadata.TransactionIndex, 'metadata.TransactionIndex')
 
   const cleanTransaction = { ...transaction }
@@ -56,9 +97,9 @@ function normalizeTransaction(value: unknown): LedgerTransaction {
   delete cleanTransaction.hash
 
   return {
-    hash: hash(transactionHash, 'transaction hash'),
+    hash: transactionHash,
     transaction: cleanTransaction,
-    metadata,
+    metadata: { ...metadata },
     transactionIndex,
   }
 }
@@ -66,28 +107,102 @@ function normalizeTransaction(value: unknown): LedgerTransaction {
 export function normalizeLedgerResponse(value: unknown): ValidatedLedger {
   const result = asRecord(value, 'ledger response')
   if (result.validated !== true) {
-    throw new Error('XRPL server returned a non-validated ledger')
+    return sourceFailure('SOURCE_RESPONSE_INVALID', 'XRPL server returned a non-validated ledger')
   }
   const ledger = asRecord(result.ledger, 'ledger')
-  const transactions = Array.isArray(ledger.transactions)
-    ? ledger.transactions
-        .map(normalizeTransaction)
-        .sort((left, right) => left.transactionIndex - right.transactionIndex)
-    : []
+  if (ledger.closed !== true) {
+    return sourceFailure('SOURCE_RESPONSE_INVALID', 'Validated ledger must be marked closed')
+  }
+  if (!Array.isArray(ledger.transactions)) {
+    return sourceFailure(
+      'SOURCE_RESPONSE_INVALID',
+      'Expanded validated ledger must contain a transactions array',
+    )
+  }
+
+  const transactions = ledger.transactions
+    .map(normalizeTransaction)
+    .sort((left, right) => left.transactionIndex - right.transactionIndex)
+  const hashes = new Set<string>()
+  transactions.forEach((transaction, position) => {
+    if (transaction.transactionIndex !== position) {
+      return sourceFailure(
+        'SOURCE_RESPONSE_INVALID',
+        `Validated ledger is missing transaction index ${position}`,
+      )
+    }
+    if (hashes.has(transaction.hash)) {
+      return sourceFailure(
+        'SOURCE_RESPONSE_INVALID',
+        `Validated ledger contains duplicate transaction hash ${transaction.hash}`,
+      )
+    }
+    hashes.add(transaction.hash)
+  })
+
+  const ledgerIndex = uint(ledger.ledger_index, 'ledger.ledger_index')
+  const responseLedgerIndex = uint(result.ledger_index, 'ledger response ledger_index')
+  if (ledgerIndex !== responseLedgerIndex) {
+    return sourceFailure(
+      'SOURCE_RESPONSE_INVALID',
+      'Ledger index values disagree inside one response',
+    )
+  }
+  const ledgerHash = hash(ledger.ledger_hash, 'ledger.ledger_hash')
+  const responseLedgerHash = hash(result.ledger_hash, 'ledger response ledger_hash')
+  if (ledgerHash !== responseLedgerHash) {
+    return sourceFailure(
+      'SOURCE_RESPONSE_INVALID',
+      'Ledger hash values disagree inside one response',
+    )
+  }
 
   return {
-    ledgerIndex: uint(ledger.ledger_index ?? result.ledger_index, 'ledger_index'),
-    ledgerHash: hash(ledger.ledger_hash ?? result.ledger_hash, 'ledger_hash'),
-    parentHash: hash(ledger.parent_hash, 'parent_hash'),
-    closeTime: uint(ledger.close_time, 'close_time'),
+    ledgerIndex,
+    ledgerHash,
+    parentHash: hash(ledger.parent_hash, 'ledger.parent_hash'),
+    accountRoot: hash(ledger.account_hash, 'ledger.account_hash'),
+    transactionRoot: hash(ledger.transaction_hash, 'ledger.transaction_hash'),
+    parentCloseTime: uint(ledger.parent_close_time, 'ledger.parent_close_time'),
+    closeTime: uint(ledger.close_time, 'ledger.close_time'),
+    closeTimeResolution: uint(ledger.close_time_resolution, 'ledger.close_time_resolution'),
+    closeFlags: uint(ledger.close_flags, 'ledger.close_flags'),
+    totalCoins: uint64String(ledger.total_coins, 'ledger.total_coins'),
     transactions,
+  }
+}
+
+export function assertFeatureResponseSupportsAmendment(value: unknown, amendmentId: string): void {
+  const result = asRecord(value, 'feature result')
+  const featureMap =
+    typeof result.features === 'object' && result.features !== null
+      ? asRecord(result.features, 'feature result.features')
+      : result
+  const match = Object.entries(featureMap).find(
+    ([key]) => key.toUpperCase() === amendmentId.toUpperCase(),
+  )
+  if (match === undefined) {
+    return sourceFailure(
+      'SOURCE_AMENDMENT_UNAVAILABLE',
+      `Required XRPL amendment ${amendmentId} is absent from feature response`,
+    )
+  }
+  const feature = asRecord(match[1], `feature result ${match[0]}`)
+  if (feature.enabled !== true || feature.supported !== true) {
+    return sourceFailure(
+      'SOURCE_AMENDMENT_UNAVAILABLE',
+      `Required XRPL amendment ${amendmentId} is not enabled and supported`,
+    )
   }
 }
 
 export class XrplLedgerSource implements LedgerSource {
   private readonly client: Client
 
-  constructor(url: string) {
+  constructor(
+    url: string,
+    private readonly sourceId = 'xrpl',
+  ) {
     this.client = new Client(url)
   }
 
@@ -99,29 +214,138 @@ export class XrplLedgerSource implements LedgerSource {
     if (this.client.isConnected()) await this.client.disconnect()
   }
 
+  async preflight(profile: NetworkProfile): Promise<LedgerSourcePreflight> {
+    try {
+      const status = normalizeServerInfo(await this.request({ command: 'server_info' }))
+      assertSourceCoversProfile(status, profile)
+      await this.assertAmendmentEnabled(profile.requiredAmendment)
+
+      const activationLedger = await this.getLedger(profile.activationLedgerIndex)
+      if (activationLedger.ledgerHash !== profile.activationLedgerHash) {
+        return sourceFailure(
+          'SOURCE_ACTIVATION_MISMATCH',
+          `Activation ledger hash does not match profile ${profile.profileId}`,
+          {
+            expectedLedgerHash: profile.activationLedgerHash,
+            actualLedgerHash: activationLedger.ledgerHash,
+          },
+        )
+      }
+
+      const accountInfo = await this.request({
+        command: 'account_info',
+        account: profile.registryAddress,
+        ledger_hash: profile.activationLedgerHash,
+        signer_lists: true,
+        strict: true,
+      })
+      const accountObjects = await this.getAllAccountObjects(profile)
+      assertRegistryBlackholed({ accountInfo, accountObjects, profile })
+
+      return {
+        networkId: status.networkId,
+        completeLedgerRanges: status.completeLedgerRanges,
+        activationLedger,
+        tips: {
+          primary: status.validatedLedgerIndex,
+          secondary: status.validatedLedgerIndex,
+          effective: status.validatedLedgerIndex,
+        },
+      }
+    } catch (error) {
+      if (error instanceof XrplSourceError) {
+        throw new XrplSourceError(
+          error.code,
+          error.message,
+          { ...error.details, source: this.sourceId },
+          { cause: error },
+        )
+      }
+      throw new XrplSourceError(
+        'SOURCE_UNAVAILABLE',
+        `XRPL source ${this.sourceId} preflight failed`,
+        { source: this.sourceId },
+        { cause: error },
+      )
+    }
+  }
+
   async assertAmendmentEnabled(amendmentId: string): Promise<void> {
-    const request = this.client.request.bind(this.client) as unknown as (
-      request: Record<string, unknown>,
-    ) => Promise<{ result: unknown }>
-    const response = await request({ command: 'feature', feature: amendmentId })
-    assertFeatureResponseSupportsAmendment(response.result, amendmentId)
+    const response = await this.request({ command: 'feature', feature: amendmentId })
+    assertFeatureResponseSupportsAmendment(response, amendmentId)
   }
 
   async getValidatedLedgerIndex(): Promise<number> {
-    const response = await this.client.request({ command: 'server_info' })
-    const info = asRecord(response.result.info, 'server_info.info')
-    const validatedLedger = asRecord(info.validated_ledger, 'server_info.info.validated_ledger')
-    return uint(validatedLedger.seq, 'validated_ledger.seq')
+    const status = normalizeServerInfo(await this.request({ command: 'server_info' }))
+    return status.validatedLedgerIndex
+  }
+
+  async getValidatedLedgerTips(): Promise<LedgerSourceTips> {
+    const tip = await this.getValidatedLedgerIndex()
+    return { primary: tip, secondary: tip, effective: tip }
   }
 
   async getLedger(ledgerIndex: number): Promise<ValidatedLedger> {
-    const response = await this.client.request({
+    const result = await this.request({
       command: 'ledger',
       ledger_index: ledgerIndex,
       transactions: true,
       expand: true,
       binary: false,
     })
-    return normalizeLedgerResponse(response.result)
+    const ledger = normalizeLedgerResponse(result)
+    if (ledger.ledgerIndex !== ledgerIndex) {
+      return sourceFailure(
+        'SOURCE_RESPONSE_INVALID',
+        `XRPL source returned ledger ${ledger.ledgerIndex} when ${ledgerIndex} was requested`,
+      )
+    }
+    return ledger
+  }
+
+  private async request(request: Record<string, unknown>): Promise<unknown> {
+    const call = this.client.request.bind(this.client) as unknown as (
+      input: Record<string, unknown>,
+    ) => Promise<{ result: unknown }>
+    return (await call(request)).result
+  }
+
+  private async getAllAccountObjects(profile: NetworkProfile): Promise<unknown[]> {
+    const objects: unknown[] = []
+    const markers = new Set<string>()
+    let marker: unknown
+
+    for (let pageNumber = 0; pageNumber < 1_000; pageNumber += 1) {
+      const response = await this.request({
+        command: 'account_objects',
+        account: profile.registryAddress,
+        ledger_hash: profile.activationLedgerHash,
+        limit: 400,
+        ...(marker === undefined ? {} : { marker }),
+      })
+      const page = normalizeAccountObjectsPage(response, profile)
+      objects.push(...page.objects)
+      if (page.marker === undefined) return objects
+
+      let markerKey: string
+      try {
+        markerKey = JSON.stringify(page.marker)
+      } catch {
+        return sourceFailure(
+          'SOURCE_RESPONSE_INVALID',
+          'account_objects marker is not serializable',
+        )
+      }
+      if (markers.has(markerKey)) {
+        return sourceFailure('SOURCE_RESPONSE_INVALID', 'account_objects marker repeated')
+      }
+      markers.add(markerKey)
+      marker = page.marker
+    }
+
+    return sourceFailure(
+      'SOURCE_RESPONSE_INVALID',
+      'account_objects pagination exceeded 1000 pages',
+    )
   }
 }

@@ -12,7 +12,8 @@ import {
 } from '@xcs-protocol/core'
 import type { CredentialGenerationRow, SchemaRow } from '@xcs-protocol/db'
 
-import { assertFreshLedgerCheckpoint, DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
+import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
+import { assertAuthoritativeLedgerEvidence, assertIndexerReady } from './indexer-status.js'
 import { PayloadUnavailableError } from './payload-resolver.js'
 import type { ApiRepository, PayloadResolver, TrustPolicy } from './types.js'
 
@@ -23,6 +24,16 @@ export interface VerifyRequest {
   schemaUid: string
   payload?: unknown
   resolvePayload?: boolean
+}
+
+export class VerificationNetworkNotFoundError extends Error {
+  readonly code = 'NETWORK_NOT_FOUND'
+  readonly statusCode = 404
+
+  constructor() {
+    super('Network not found')
+    this.name = 'VerificationNetworkNotFoundError'
+  }
 }
 
 function onChainStatus(
@@ -118,22 +129,39 @@ export async function verifyCredential(
     now?: () => Date
   },
 ): Promise<VerificationReport> {
-  const [generation, schemaRow, checkpoint] = await Promise.all([
-    dependencies.repository.getCredential({
-      profileId: request.network,
-      issuer: request.issuer,
-      subject: request.subject,
-      schemaUid: request.schemaUid,
-    }),
-    dependencies.repository.getSchema(request.network, request.schemaUid),
-    dependencies.repository.getLatestCheckpoint(request.network),
-  ])
+  const { generation, schemaRow, checkpoint } =
+    await dependencies.repository.withConsistentSnapshot(async (repository) => {
+      const network = await repository.getNetwork(request.network)
+      if (network === undefined) throw new VerificationNetworkNotFoundError()
 
-  assertFreshLedgerCheckpoint(
-    checkpoint?.closeTime,
-    dependencies.now?.() ?? new Date(),
-    dependencies.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
-  )
+      const now = dependencies.now?.() ?? (await repository.getDatabaseTime())
+      const status = await repository.getIndexerStatus(request.network)
+      assertIndexerReady(status, now)
+
+      const [generation, schemaRow] = await Promise.all([
+        repository.getCredential({
+          profileId: request.network,
+          issuer: request.issuer,
+          subject: request.subject,
+          schemaUid: request.schemaUid,
+        }),
+        repository.getSchema(request.network, request.schemaUid),
+      ])
+      const checkpoint = await repository.getLatestCheckpoint(request.network)
+      const evidence = {
+        expectedProfileId: request.network,
+        status,
+        checkpoint,
+        now,
+        maxLedgerAgeSeconds: dependencies.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+        projectionLedgerIndexes: [
+          ...(generation === undefined ? [] : [generation.lastLedgerIndex]),
+          ...(schemaRow === undefined ? [] : [schemaRow.ledgerIndex]),
+        ],
+      }
+      assertAuthoritativeLedgerEvidence(evidence)
+      return { generation, schemaRow, checkpoint: evidence.checkpoint }
+    })
 
   let schema: ResolvedSchema | undefined
   let schemaStatus: VerificationReport['schema'] = 'unknown'
@@ -147,7 +175,7 @@ export async function verifyCredential(
   }
 
   const report: VerificationReport = {
-    onChain: onChainStatus(generation, checkpoint?.closeTime),
+    onChain: onChainStatus(generation, checkpoint.closeTime),
     schema: schemaStatus,
     payload: await payloadStatus({ request, generation, schema, resolver: dependencies.resolver }),
     issuerTrust: dependencies.trustPolicy.evaluate(request.issuer),

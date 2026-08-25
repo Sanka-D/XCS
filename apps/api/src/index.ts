@@ -1,4 +1,5 @@
 export * from './app.js'
+export * from './indexer-status.js'
 export * from './pagination.js'
 export * from './payload-resolver.js'
 export * from './pinning.js'

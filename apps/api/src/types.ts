@@ -2,6 +2,7 @@ import type {
   CredentialEventRow,
   CredentialGenerationRow,
   DemoPinRow,
+  IndexerStatusRow,
   LedgerCheckpointRow,
   NetworkProfileRow,
   PinChallengeRow,
@@ -20,9 +21,12 @@ export interface SchemaPage {
 }
 
 export interface ApiRepository {
+  withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T>
+  getDatabaseTime(): Promise<Date>
   ping(): Promise<void>
   listNetworks(): Promise<NetworkProfileRow[]>
   getNetwork(profileId: string): Promise<NetworkProfileRow | undefined>
+  getIndexerStatus(profileId: string): Promise<IndexerStatusRow | undefined>
   getLatestCheckpoint(profileId: string): Promise<LedgerCheckpointRow | undefined>
   getSchema(profileId: string, schemaUid: string): Promise<SchemaRow | undefined>
   listSchemas(input: {
@@ -42,6 +46,15 @@ export interface ApiRepository {
     issuer: string
     subject: string
     schemaUid: string
+    limit: number
+  }): Promise<CredentialEventRow[]>
+  getCredentialEventsByTransaction(input: {
+    profileId: string
+    transactionHash: string
+    issuer: string
+    subject: string
+    schemaUid: string
+    limit: number
   }): Promise<CredentialEventRow[]>
 }
 

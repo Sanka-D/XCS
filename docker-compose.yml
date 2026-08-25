@@ -5,17 +5,17 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: xcs
-      POSTGRES_USER: xcs
-      POSTGRES_PASSWORD: ${XCS_POSTGRES_PASSWORD:-xcs-local-only}
+      POSTGRES_USER: xcs_admin
+      POSTGRES_PASSWORD: ${XCS_POSTGRES_ADMIN_PASSWORD:?Set XCS_POSTGRES_ADMIN_PASSWORD in .env}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U xcs -d xcs']
+      test: ['CMD-SHELL', 'pg_isready -U xcs_admin -d xcs']
       interval: 5s
       timeout: 3s
       retries: 20
     ports:
       - '${XCS_BIND_ADDRESS:-127.0.0.1}:5432:5432'
     volumes:
-      - xcs-postgres:/var/lib/postgresql/data
+      - xcs-postgres:/var/lib/postgresql
 
   migrate:
     build:
@@ -25,11 +25,39 @@ services:
         XCS_PACKAGE: '@xcs-protocol/db'
     command: ['pnpm', '--filter', '@xcs-protocol/db', 'db:migrate']
     environment:
-      XCS_DATABASE_URL: postgres://xcs:${XCS_POSTGRES_PASSWORD:-xcs-local-only}@postgres:5432/xcs
+      XCS_MIGRATOR_DATABASE_URL: postgres://xcs_admin:${XCS_POSTGRES_ADMIN_PASSWORD:?Set XCS_POSTGRES_ADMIN_PASSWORD in .env}@postgres:5432/xcs
     depends_on:
       postgres:
         condition: service_healthy
     restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 100
+
+  provision:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.node
+      args:
+        XCS_PACKAGE: '@xcs-protocol/db'
+    command: ['pnpm', '--filter', '@xcs-protocol/db', 'db:provision']
+    environment:
+      XCS_MIGRATOR_DATABASE_URL: postgres://xcs_admin:${XCS_POSTGRES_ADMIN_PASSWORD:?Set XCS_POSTGRES_ADMIN_PASSWORD in .env}@postgres:5432/xcs
+      XCS_INDEXER_DATABASE_PASSWORD: ${XCS_INDEXER_DATABASE_PASSWORD:?Set XCS_INDEXER_DATABASE_PASSWORD in .env}
+      XCS_API_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:?Set XCS_API_DATABASE_PASSWORD in .env}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 100
 
   api:
     build:
@@ -40,23 +68,31 @@ services:
     environment:
       XCS_API_HOST: 0.0.0.0
       XCS_API_PORT: 3001
-      XCS_DATABASE_URL: postgres://xcs:${XCS_POSTGRES_PASSWORD:-xcs-local-only}@postgres:5432/xcs
+      XCS_DATABASE_URL: postgres://xcs_api:${XCS_API_DATABASE_PASSWORD:?Set XCS_API_DATABASE_PASSWORD in .env}@postgres:5432/xcs
       XCS_ALLOWED_ORIGINS: ${XCS_ALLOWED_ORIGINS:-http://localhost:3000}
       XCS_READINESS_MAX_LEDGER_AGE_SECONDS: ${XCS_READINESS_MAX_LEDGER_AGE_SECONDS:-120}
       XCS_PAYLOAD_FETCH_ENABLED: ${XCS_PAYLOAD_FETCH_ENABLED:-false}
       XCS_IPFS_GATEWAY_URL: ${XCS_IPFS_GATEWAY_URL:-https://ipfs.io/}
+      XCS_TRUSTED_ISSUERS: ${XCS_TRUSTED_ISSUERS:-}
+      XCS_UNTRUSTED_ISSUERS: ${XCS_UNTRUSTED_ISSUERS:-}
       XCS_DEMO_PINNING_ENABLED: ${XCS_DEMO_PINNING_ENABLED:-false}
       XCS_PINNING_IP_HASH_SECRET: ${XCS_PINNING_IP_HASH_SECRET:-}
       XCS_PINNING_NETWORKS: ${XCS_PINNING_NETWORKS:-}
       XCS_IPFS_API_URL: ${XCS_IPFS_API_URL:-http://ipfs:5001}
     depends_on:
-      migrate:
+      provision:
         condition: service_completed_successfully
     ports:
       - '${XCS_BIND_ADDRESS:-127.0.0.1}:3001:3001'
     volumes:
       - ./config/networks:/workspace/config/networks:ro
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 200
 
   indexer:
     build:
@@ -65,17 +101,25 @@ services:
       args:
         XCS_PACKAGE: '@xcs-protocol/indexer'
     environment:
-      XCS_DATABASE_URL: postgres://xcs:${XCS_POSTGRES_PASSWORD:-xcs-local-only}@postgres:5432/xcs
+      XCS_INDEXER_DATABASE_URL: postgres://xcs_indexer:${XCS_INDEXER_DATABASE_PASSWORD:?Set XCS_INDEXER_DATABASE_PASSWORD in .env}@postgres:5432/xcs
       XCS_NETWORK_PROFILE: /workspace/config/networks/testnet.json
-      XCS_RPC_URL: ${XCS_RPC_URL:-wss://s.altnet.rippletest.net:51233}
+      XCS_RPC_URL_PRIMARY: ${XCS_RPC_URL_PRIMARY:?Set XCS_RPC_URL_PRIMARY to a complete-history provider}
+      XCS_RPC_URL_SECONDARY: ${XCS_RPC_URL_SECONDARY:?Set XCS_RPC_URL_SECONDARY to an independently operated provider}
       XCS_INDEXER_POLL_INTERVAL_MS: ${XCS_INDEXER_POLL_INTERVAL_MS:-4000}
       XCS_INDEXER_BATCH_SIZE: ${XCS_INDEXER_BATCH_SIZE:-20}
+      XCS_INDEXER_LEASE_DURATION_MS: ${XCS_INDEXER_LEASE_DURATION_MS:-30000}
     depends_on:
-      migrate:
+      provision:
         condition: service_completed_successfully
     volumes:
       - ./config/networks:/workspace/config/networks:ro
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 200
 
   web:
     build:
@@ -91,18 +135,23 @@ services:
       # This value is embedded in browser code, so it must be reachable from the host.
       NUXT_PUBLIC_API_BASE_URL: ${XCS_PUBLIC_API_BASE_URL:-http://localhost:3001}
       NUXT_PUBLIC_PROFILE_ID: ${XCS_PUBLIC_PROFILE_ID:-}
-      NUXT_PUBLIC_RPC_URL: ${XCS_RPC_URL:-wss://s.altnet.rippletest.net:51233}
+      NUXT_PUBLIC_RPC_URL: ${XCS_PUBLIC_RPC_URL:?Set XCS_PUBLIC_RPC_URL for browser submission}
     depends_on:
       - api
     ports:
       - '${XCS_BIND_ADDRESS:-127.0.0.1}:3000:3000'
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 200
 
   ipfs:
     image: ipfs/kubo:v0.35.0
     profiles: ['demo-pinning']
     ports:
-      - '${XCS_BIND_ADDRESS:-127.0.0.1}:5001:5001'
       - '${XCS_BIND_ADDRESS:-127.0.0.1}:8080:8080'
     volumes:
       - xcs-ipfs:/data/ipfs

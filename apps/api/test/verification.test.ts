@@ -7,6 +7,7 @@ import {
 import type {
   CredentialEventRow,
   CredentialGenerationRow,
+  IndexerStatusRow,
   LedgerCheckpointRow,
   NetworkProfileRow,
   SchemaRow,
@@ -90,22 +91,61 @@ const checkpoint: LedgerCheckpointRow = {
   parentHash: 'f'.repeat(64),
   closeTime: NOW_RIPPLE - 10,
   transactionCount: 0,
+  transactionRoot: '1'.repeat(64),
   processedAt: NOW,
+}
+const readyStatus: IndexerStatusRow = {
+  profileId: 'testnet',
+  state: 'ready',
+  primarySourceTip: 102,
+  secondarySourceTip: 102,
+  lastAgreedLedgerIndex: 102,
+  lastAgreedLedgerHash: checkpoint.ledgerHash,
+  errorCode: null,
+  writerId: 'writer-1',
+  writerEpoch: 1,
+  leaseExpiresAt: new Date(NOW.getTime() + 60_000),
+  updatedAt: NOW,
+}
+const network: NetworkProfileRow = {
+  profileId: 'testnet',
+  xcsVersion: '0.1',
+  networkId: 1,
+  requiredAmendment: '2'.repeat(64),
+  registryAddress: ISSUER,
+  registrationAmountDrops: 1,
+  activationLedgerIndex: 1,
+  activationLedgerHash: '3'.repeat(64),
+  enabled: true,
+  createdAt: NOW,
 }
 
 class VerificationRepository implements ApiRepository {
+  snapshotCalls = 0
+
   constructor(
     private readonly credential: CredentialGenerationRow | undefined,
     private readonly schemaRow: SchemaRow | undefined,
     private readonly checkpointRow: LedgerCheckpointRow | null = checkpoint,
+    private readonly statusRow: IndexerStatusRow | null = readyStatus,
   ) {}
 
+  async withConsistentSnapshot<T>(callback: (repository: ApiRepository) => Promise<T>): Promise<T> {
+    this.snapshotCalls += 1
+    return callback(this)
+  }
+  async getDatabaseTime() {
+    return NOW
+  }
   async ping() {}
   async listNetworks(): Promise<NetworkProfileRow[]> {
     return []
   }
-  async getNetwork(): Promise<NetworkProfileRow | undefined> {
-    return undefined
+  async getNetwork(profileId: string): Promise<NetworkProfileRow | undefined> {
+    return profileId === network.profileId ? network : undefined
+  }
+  async getIndexerStatus() {
+    return this.statusRow ?? undefined
   }
   async getLatestCheckpoint() {
     return this.checkpointRow ?? undefined
@@ -119,7 +159,14 @@ class VerificationRepository implements ApiRepository {
   async getCredential() {
     return this.credential
   }
-  async getCredentialEvents(): Promise<CredentialEventRow[]> {
+  async getCredentialEvents(
+    _input: Parameters<ApiRepository['getCredentialEvents']>[0],
+  ): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getCredentialEventsByTransaction(
+    _input: Parameters<ApiRepository['getCredentialEventsByTransaction']>[0],
+  ): Promise<CredentialEventRow[]> {
     return []
   }
 }
@@ -138,6 +185,36 @@ const request = {
 }
 
 describe('verifyCredential', () => {
+  it('reads projections and authority evidence from one repository snapshot', async () => {
+    const repository = new VerificationRepository(generation, schema)
+
+    await verifyCredential(request, {
+      repository,
+      resolver: neverResolver,
+      trustPolicy: new StaticTrustPolicy(),
+      ...FRESHNESS,
+    })
+
+    expect(repository.snapshotCalls).toBe(1)
+  })
+
+  it('rejects a missing network from inside the same repository snapshot', async () => {
+    const repository = new VerificationRepository(generation, schema)
+
+    await expect(
+      verifyCredential(
+        { ...request, network: 'missing' },
+        {
+          repository,
+          resolver: neverResolver,
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'NETWORK_NOT_FOUND', statusCode: 404 })
+    expect(repository.snapshotCalls).toBe(1)
+  })
+
   it('reports independent on-chain, schema, payload and trust results', async () => {
     await expect(
       verifyCredential(
@@ -250,5 +327,26 @@ describe('verifyCredential', () => {
         ...FRESHNESS,
       }),
     ).rejects.toMatchObject({ code: 'INDEXER_NOT_INITIALIZED', statusCode: 503 })
+  })
+
+  it.each([
+    ['missing', null, 'INDEXER_STATUS_UNAVAILABLE'],
+    ['starting', { ...readyStatus, state: 'starting' as const }, 'INDEXER_NOT_READY'],
+    ['catching up', { ...readyStatus, state: 'catching_up' as const }, 'INDEXER_NOT_READY'],
+    [
+      'halted',
+      { ...readyStatus, state: 'halted' as const, errorCode: 'LEDGER_SOURCE_DIVERGENCE' },
+      'INDEXER_HALTED',
+    ],
+  ])('fails closed before verification when durable status is %s', async (_label, status, code) => {
+    const repository = new VerificationRepository(generation, schema, checkpoint, status)
+    await expect(
+      verifyCredential(request, {
+        repository,
+        resolver: neverResolver,
+        trustPolicy: new StaticTrustPolicy(),
+        ...FRESHNESS,
+      }),
+    ).rejects.toMatchObject({ code, statusCode: 503 })
   })
 })
