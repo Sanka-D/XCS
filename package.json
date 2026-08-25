@@ -19,7 +19,7 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
-    "test:postgres": "pnpm --filter @xcs-protocol/indexer test:postgres",
+    "test:postgres": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/indexer test:postgres",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
