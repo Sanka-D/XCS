@@ -8,6 +8,11 @@ export const XCS_SCHEMA_MEMO_FORMAT = 'application/json'
 export const MAX_XRPL_MEMO_BYTES = 1_024
 export const MAX_CREDENTIAL_URI_BYTES = 256
 
+// rippled measures sfMemos via STArray::add: the serialized Memo objects only.
+// xrpl.js encodes two additional one-byte field delimiters around that body:
+// the sfMemos field header (F9) and the STArray end marker (F1).
+const XRPL_MEMOS_FIELD_ENVELOPE_BYTES = 2
+
 const SCHEMA_UID_PATTERN = /^[0-9a-f]{64}$/u
 const CREDENTIAL_TYPE_PATTERN = /^[0-9a-fA-F]{64}$/u
 const HEX_PATTERN = /^(?:[0-9a-fA-F]{2})+$/u
@@ -61,7 +66,7 @@ export function credentialHexToUri(uriHex: string): string {
   return uri
 }
 
-export function assertMemoFits(canonicalSchema: string): void {
+export function measureSchemaRegistrationMemoBytes(canonicalSchema: string): number {
   const base: Payment = {
     TransactionType: 'Payment',
     Account: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
@@ -83,7 +88,13 @@ export function assertMemoFits(canonicalSchema: string): void {
       },
     ],
   }
-  const byteLength = (encode(withMemo).length - encode(base).length) / 2
+  const serializedMemosFieldBytes = (encode(withMemo).length - encode(base).length) / 2
+
+  return serializedMemosFieldBytes - XRPL_MEMOS_FIELD_ENVELOPE_BYTES
+}
+
+export function assertMemoFits(canonicalSchema: string): void {
+  const byteLength = measureSchemaRegistrationMemoBytes(canonicalSchema)
 
   if (byteLength > MAX_XRPL_MEMO_BYTES) {
     throw new XcsSdkError(

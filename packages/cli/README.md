@@ -21,6 +21,8 @@ URI. Use `--output credential.json` to write those exact bytes without a trailin
 publication. `xcs payload check` rejects non-canonical bytes, schema mismatches, and URI digest mismatches.
 Schemas using `extends` require a resolved catalog and are deliberately rejected by these initial
 offline commands instead of being validated against incomplete fields.
+`xcs schema register` includes `memoByteLength`, the exact serialized size of the complete XRPL Memo,
+alongside the canonical schema and unsigned Payment so an operator can review the size before signing.
 
 Exit codes are `0` for success, `2` for invalid input, `3` for network/service failures, `4` for a
 transaction that was not validated, and `5` when the on-ledger, schema, or payload dimension is not

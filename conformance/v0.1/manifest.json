@@ -1,0 +1,31 @@
+{
+  "formatVersion": 1,
+  "protocolVersion": "0.1",
+  "revision": 5,
+  "files": [
+    {
+      "file": "canonicalization.json",
+      "handler": "canonicalization"
+    },
+    {
+      "file": "schema-validation.json",
+      "handler": "schema-validation"
+    },
+    {
+      "file": "schema-uid.json",
+      "handler": "schema-uid"
+    },
+    {
+      "file": "claims.json",
+      "handler": "claims"
+    },
+    {
+      "file": "payload-integrity.json",
+      "handler": "payload-integrity"
+    },
+    {
+      "file": "payload-validation.json",
+      "handler": "payload-validation"
+    }
+  ]
+}

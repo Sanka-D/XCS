@@ -6,11 +6,18 @@ import { sha256Hex } from './sha256.js'
 import type { JsonValue, SchemaUidInput } from './types.js'
 import { encodeUtf8 } from './utf8.js'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function isUint32(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff
 }
 
 export function computeSchemaUid(input: SchemaUidInput): string {
+  if (!isRecord(input)) {
+    return fail('UID_INPUT_INVALID', 'Schema UID input must be an object', '$')
+  }
   if (!isUint32(input.networkId)) {
     return fail('UID_INPUT_INVALID', 'networkId must be a uint32', '$.networkId')
   }

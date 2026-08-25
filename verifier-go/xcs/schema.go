@@ -129,7 +129,14 @@ func ParseSchema(data []byte) (SchemaDefinition, error) {
 	}
 	var schema SchemaDefinition
 	if err := decodeKnownJSON(data, &schema); err != nil {
-		return SchemaDefinition{}, err
+		var protocolError *Error
+		if errors.As(err, &protocolError) && protocolError.Code == "SCHEMA_INVALID" {
+			return SchemaDefinition{}, err
+		}
+		// ParseJSON above has already established that the bytes are strict JSON.
+		// Any remaining decoder failure describes the schema's structure, not its
+		// JSON syntax.
+		return SchemaDefinition{}, invalid("SCHEMA_INVALID", "$", "%v", err)
 	}
 	if err := ValidateSchema(schema); err != nil {
 		return SchemaDefinition{}, err

@@ -103,14 +103,18 @@ func validateClaimObject(claims map[string]any, fields map[string]FieldDescripto
 	return nil
 }
 
-func ValidateClaims(claims map[string]any, fields map[string]FieldDescriptor) error {
-	return validateClaimObject(claims, fields, "$.claims")
+func ValidateClaims(claims any, fields map[string]FieldDescriptor) error {
+	object, ok := claims.(map[string]any)
+	if !ok {
+		return invalid("CLAIMS_INVALID", "$.claims", "claims must be an object")
+	}
+	return validateClaimObject(object, fields, "$.claims")
 }
 
 // ValidateClaimsAgainstSchema validates claims only when the supplied schema is
 // locally complete. Inherited schemas require parent resolution, which this
 // offline verifier cannot infer from a child definition alone.
-func ValidateClaimsAgainstSchema(claims map[string]any, schema SchemaDefinition) error {
+func ValidateClaimsAgainstSchema(claims any, schema SchemaDefinition) error {
 	if err := ValidateSchema(schema); err != nil {
 		return err
 	}

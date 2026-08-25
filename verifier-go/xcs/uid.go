@@ -49,7 +49,13 @@ func ParseSchemaUIDInput(data []byte) (SchemaUIDInput, error) {
 		Schema           json.RawMessage `json:"schema"`
 	}
 	if err := decodeKnownJSON(data, &raw); err != nil {
-		return SchemaUIDInput{}, err
+		// ParseJSON above has already established that the wrapper is strict JSON.
+		// Decoder failures here are therefore UID wrapper structure errors. The
+		// nested schema remains RawMessage and is classified separately below.
+		return SchemaUIDInput{}, invalid("UID_INPUT_INVALID", "$", "invalid UID input structure: %v", err)
+	}
+	if len(raw.Schema) == 0 {
+		return SchemaUIDInput{}, invalid("SCHEMA_INVALID", "$.schema", "schema is required")
 	}
 	schema, err := ParseSchema(raw.Schema)
 	if err != nil {

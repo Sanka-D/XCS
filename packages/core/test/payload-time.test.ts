@@ -1,9 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
   canonicalize,
-  computePayloadSha256Hex,
   createHttpsPayloadUri,
   createIpfsRawPayloadUri,
   inspectPayloadUri,
@@ -11,47 +9,23 @@ import {
   parseCredentialPayload,
   rippleTimeToIso8601,
   verifyPayloadIntegrity,
-  XcsError,
 } from '../src/index.js'
 
-interface PayloadVectors {
-  cases: Array<{
-    name: string
-    contentUtf8: string
-    sha256: string
-    uri: string
-  }>
-}
-
-const vectors = JSON.parse(
-  readFileSync(
-    new URL('../../../conformance/v0.1/payload-integrity.json', import.meta.url),
-    'utf8',
-  ),
-) as PayloadVectors
+const RAW_HELLO_URI = 'ipfs://bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'
+const HTTPS_HELLO_URI =
+  'https://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
 
 describe('payload integrity', () => {
-  for (const vector of vectors.cases) {
-    it(vector.name, () => {
-      expect(computePayloadSha256Hex(vector.contentUtf8)).toBe(vector.sha256)
-      expect(verifyPayloadIntegrity(vector.contentUtf8, vector.uri)).toMatchObject({
-        status: 'valid',
-        expectedDigestHex: vector.sha256,
-        actualDigestHex: vector.sha256,
-      })
-    })
-  }
-
   it('creates canonical HTTPS and raw CIDv1 URIs', () => {
     expect(createHttpsPayloadUri('https://issuer.example/credentials/1.json', 'hello')).toBe(
-      vectors.cases[1]?.uri,
+      HTTPS_HELLO_URI,
     )
-    expect(createIpfsRawPayloadUri('hello')).toBe(vectors.cases[0]?.uri)
-    expect(inspectPayloadUri(vectors.cases[0]?.uri ?? '').kind).toBe('ipfs')
+    expect(createIpfsRawPayloadUri('hello')).toBe(RAW_HELLO_URI)
+    expect(inspectPayloadUri(RAW_HELLO_URI).kind).toBe('ipfs')
   })
 
   it('distinguishes tampering from an invalid URI', () => {
-    expect(verifyPayloadIntegrity('HELLO', vectors.cases[0]?.uri ?? '').status).toBe('tampered')
+    expect(verifyPayloadIntegrity('HELLO', RAW_HELLO_URI).status).toBe('tampered')
     expect(verifyPayloadIntegrity('hello', 'http://issuer.example/file').status).toBe('invalid_uri')
   })
 

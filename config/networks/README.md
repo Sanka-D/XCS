@@ -5,7 +5,10 @@
 For a real profile:
 
 1. create and fund a dedicated Testnet account;
-2. set a regular key whose secret is provably unavailable;
+2. set the regular key to the XRPL `ACCOUNT_ZERO` address
+   (`rrrrrrrrrrrrrrrrrrrrrhoLvTp`, recommended) or `ACCOUNT_ONE`
+   (`rrrrrrrrrrrrrrrrrrrrBZbvji`); no other address or claim that a secret is unavailable satisfies
+   the XCS blackhole policy;
 3. disable the master key without enabling DepositAuth or RequireDestTag;
 4. independently verify the AccountRoot, absence of outgoing Delegate permissions and SignerList,
    and that the account can receive the one-drop registration Payment without any destination tag;
@@ -13,4 +16,6 @@ For a real profile:
 6. copy the example to `testnet.json` and replace every placeholder;
 7. publish the exact file and its SHA-256 digest.
 
-Never reuse a Testnet profile after a network reset and never copy its registry address into a Mainnet profile.
+Never reuse a `profileId` after a Testnet reset or after changing any profile field, and never copy
+its registry address into a Mainnet profile. Publish a new profile and activation boundary instead
+of editing the prior profile in place.

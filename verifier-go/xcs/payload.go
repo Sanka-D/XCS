@@ -7,9 +7,11 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 const maxPayloadBytes = 1024 * 1024
+const httpsPrefix = "https://"
 
 var (
 	ipfsPattern        = regexp.MustCompile(`^ipfs://(b[a-z2-7]+)$`)
@@ -17,6 +19,24 @@ var (
 )
 
 const base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+
+func hasValidRawHTTPSEnvelope(rawURI string) bool {
+	if !strings.HasPrefix(rawURI, httpsPrefix) {
+		return false
+	}
+	for index := 0; index < len(rawURI); index++ {
+		character := rawURI[index]
+		if character <= 0x20 || character == 0x7f || character == '\\' {
+			return false
+		}
+	}
+	remainder := rawURI[len(httpsPrefix):]
+	authorityEnd := strings.IndexAny(remainder, "/?#")
+	if authorityEnd >= 0 {
+		remainder = remainder[:authorityEnd]
+	}
+	return remainder != "" && !strings.Contains(remainder, "@")
+}
 
 func decodeBase32Lower(value string) ([]byte, bool) {
 	bits := 0
@@ -65,6 +85,9 @@ func ParseCredentialPayload(data []byte, context PayloadContext) (CredentialPayl
 	if len(data) > maxPayloadBytes {
 		return CredentialPayload{}, invalid("PAYLOAD_INVALID", "$payload", "payload exceeds 1 MiB")
 	}
+	if !utf8.Valid(data) {
+		return CredentialPayload{}, invalid("UTF8_INVALID", "$payload", "payload bytes are not valid UTF-8")
+	}
 	value, err := ParseJSON(data)
 	if err != nil {
 		return CredentialPayload{}, err
@@ -85,7 +108,7 @@ func ParseCredentialPayload(data []byte, context PayloadContext) (CredentialPayl
 	issuer, issuerOK := object["issuer"].(string)
 	subject, subjectOK := object["subject"].(string)
 	schemaUID, schemaOK := object["schema"].(string)
-	claims, claimsOK := object["claims"].(map[string]any)
+	claimsValue := object["claims"]
 	if !versionOK || version != "0.1" {
 		return CredentialPayload{}, invalid("PAYLOAD_INVALID", "$.xcsVersion", "must be 0.1")
 	}
@@ -98,11 +121,12 @@ func ParseCredentialPayload(data []byte, context PayloadContext) (CredentialPayl
 	if !schemaOK || !uidPattern.MatchString(schemaUID) || schemaUID != context.SchemaUID {
 		return CredentialPayload{}, invalid("PAYLOAD_INVALID", "$.schema", "does not match CredentialType")
 	}
-	if !claimsOK {
-		return CredentialPayload{}, invalid("PAYLOAD_INVALID", "$.claims", "must be an object")
-	}
-	if err := ValidateClaimsAgainstSchema(claims, context.Schema); err != nil {
+	if err := ValidateClaimsAgainstSchema(claimsValue, context.Schema); err != nil {
 		return CredentialPayload{}, err
+	}
+	claims, ok := claimsValue.(map[string]any)
+	if !ok {
+		return CredentialPayload{}, invalid("CLAIMS_INVALID", "$.claims", "claims must be an object")
 	}
 	canonical, err := Canonicalize(object)
 	if err != nil {
@@ -121,7 +145,7 @@ func ParseCredentialPayload(data []byte, context PayloadContext) (CredentialPayl
 }
 
 func InspectPayloadURI(rawURI string) (PayloadURI, error) {
-	if len([]byte(rawURI)) < 1 || len([]byte(rawURI)) > 256 {
+	if !utf8.ValidString(rawURI) || len(rawURI) < 1 || len(rawURI) > 256 {
 		return PayloadURI{}, invalid("PAYLOAD_URI_INVALID", "$uri", "must contain 1 to 256 UTF-8 bytes")
 	}
 	if match := ipfsPattern.FindStringSubmatch(rawURI); match != nil {
@@ -134,9 +158,17 @@ func InspectPayloadURI(rawURI string) (PayloadURI, error) {
 			Kind: "ipfs", URI: rawURI, CID: cid, DigestHex: hex.EncodeToString(decoded[4:]),
 		}, nil
 	}
+	if !hasValidRawHTTPSEnvelope(rawURI) {
+		return PayloadURI{}, invalid("PAYLOAD_URI_INVALID", "$uri", "HTTPS URI has an invalid raw envelope")
+	}
 	parsed, err := url.Parse(rawURI)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return PayloadURI{}, invalid("PAYLOAD_URI_INVALID", "$uri", "must be HTTPS without user information")
+	}
+	// net/url percent-decodes Fragment and retains the original spelling in
+	// RawFragment. XCS requires the digest fragment itself to be literal.
+	if parsed.RawFragment != "" {
+		return PayloadURI{}, invalid("PAYLOAD_URI_INVALID", "$uri", "digest fragment must not be percent-encoded")
 	}
 	digestMatch := httpsDigestPattern.FindStringSubmatch(parsed.Fragment)
 	if digestMatch == nil {

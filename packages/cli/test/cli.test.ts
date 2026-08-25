@@ -111,6 +111,7 @@ describe('xcs CLI', () => {
     ).resolves.toBe(0)
     expect(JSON.parse(registration.stdout[0] ?? '{}')).toMatchObject({
       transaction: { TransactionType: 'Payment', Amount: '1', Destination: REGISTRY },
+      memoByteLength: expect.any(Number),
     })
 
     const uid = memoryIo(files)

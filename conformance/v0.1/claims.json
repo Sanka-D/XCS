@@ -19,11 +19,15 @@
           "note": { "type": "string", "optional": true }
         }
       },
+      "definition": { "type": "string", "optional": true },
+      "lineage": { "type": "string", "optional": true },
+      "fields": { "type": "string", "optional": true },
       "optionalText": { "type": "string", "optional": true }
     }
   },
   "cases": [
     {
+      "id": "claims.all-supported-types",
       "name": "all supported types",
       "valid": true,
       "claims": {
@@ -38,6 +42,35 @@
       }
     },
     {
+      "id": "claims.accept-resolved-schema-property-names",
+      "name": "accepts definition, lineage and fields as ordinary claim names",
+      "valid": true,
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "0",
+        "data": "",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" },
+        "definition": "ordinary claim",
+        "lineage": "ordinary claim",
+        "fields": "ordinary claim"
+      }
+    },
+    {
+      "id": "claims.reject-invalid-resolved-schema-property-names",
+      "name": "validates colliding claim names instead of treating them as a resolved schema",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "type": "not-declared",
+        "optional": true
+      }
+    },
+    {
+      "id": "claims.reject-non-canonical-integer",
       "name": "rejects a non-canonical integer",
       "valid": false,
       "errorCode": "CLAIMS_INVALID",
@@ -53,6 +86,7 @@
       }
     },
     {
+      "id": "claims.reject-additional-claim",
       "name": "rejects an additional claim",
       "valid": false,
       "errorCode": "CLAIMS_INVALID",
@@ -67,6 +101,20 @@
         "detail": { "code": "course-1" },
         "extra": true
       }
+    },
+    {
+      "id": "claims.reject-array-root",
+      "name": "rejects an array instead of a claim object",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": []
+    },
+    {
+      "id": "claims.reject-null-root",
+      "name": "rejects null instead of a claim object",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": null
     }
   ]
 }

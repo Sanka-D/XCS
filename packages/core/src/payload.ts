@@ -17,9 +17,19 @@ const MAX_PAYLOAD_BYTES = 1024 * 1024
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567'
 const PAYLOAD_KEYS = new Set(['xcsVersion', 'issuer', 'subject', 'schema', 'claims'])
 const SCHEMA_UID = /^[0-9a-f]{64}$/
+const INVALID_RAW_HTTPS_CHARACTER = /[\u0000-\u0020\u007f\\]/
+const HTTPS_PREFIX = 'https://'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasValidRawHttpsEnvelope(uri: string): boolean {
+  if (!uri.startsWith(HTTPS_PREFIX) || INVALID_RAW_HTTPS_CHARACTER.test(uri)) return false
+  const remainder = uri.slice(HTTPS_PREFIX.length)
+  const delimiterIndex = remainder.search(/[/?#]/)
+  const authority = delimiterIndex === -1 ? remainder : remainder.slice(0, delimiterIndex)
+  return authority.length > 0 && !authority.includes('@')
 }
 
 function decodeBase32(value: string): Uint8Array | undefined {
@@ -106,6 +116,14 @@ export function inspectPayloadUri(uri: string): ParsedPayloadUri {
       cid,
       digestHex: bytesToHex(decoded.subarray(4)),
     }
+  }
+
+  if (!hasValidRawHttpsEnvelope(uri)) {
+    return fail(
+      'PAYLOAD_URI_INVALID',
+      'HTTPS URI must use literal https://, a non-empty authority without userinfo, and no raw ASCII whitespace, control, or backslash',
+      '$uri',
+    )
   }
 
   let parsed: URL

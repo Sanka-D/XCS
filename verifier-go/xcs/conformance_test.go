@@ -1,36 +1,97 @@
 package xcs
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-func vectorFile(t *testing.T, name string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "..", "conformance", "v0.1", name))
+func TestConformanceVectors(t *testing.T) {
+	suite, err := loadConformanceSuite(conformanceDirectory())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return data
+	if suite.Manifest.FormatVersion != 1 || suite.Manifest.ProtocolVersion != "0.1" || suite.Manifest.Revision != 5 {
+		t.Fatalf("unexpected frozen manifest metadata: %+v", suite.Manifest)
+	}
+
+	consumed := make(map[conformanceHandler]bool, len(suite.Files))
+	for _, file := range suite.Files {
+		var run func(*testing.T, []byte)
+		switch file.Handler {
+		case canonicalizationHandler:
+			run = runCanonicalizationVectors
+		case schemaValidationHandler:
+			run = runSchemaValidationVectors
+		case schemaUIDHandler:
+			run = runSchemaUIDVectors
+		case claimsHandler:
+			run = runClaimVectors
+		case payloadIntegrityHandler:
+			run = runPayloadIntegrityVectors
+		case payloadValidationHandler:
+			run = runPayloadValidationVectors
+		default:
+			t.Fatalf("no consumer for conformance handler %s", file.Handler)
+		}
+		consumed[file.Handler] = true
+		t.Run(string(file.Handler), func(t *testing.T) {
+			run(t, file.Data)
+		})
+	}
+	if len(consumed) != len(suite.Files) {
+		t.Fatalf("not every declared conformance file was consumed: %d/%d", len(consumed), len(suite.Files))
+	}
 }
 
-func TestCanonicalizationVectors(t *testing.T) {
+func runSchemaValidationVectors(t *testing.T, data []byte) {
+	t.Helper()
 	var vectors struct {
 		Cases []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Valid     bool   `json:"valid"`
+			ErrorCode string `json:"errorCode"`
+			InputJSON string `json:"inputJson"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, vector := range vectors.Cases {
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
+			_, err := ParseSchema([]byte(vector.InputJSON))
+			if vector.Valid {
+				if err != nil {
+					t.Fatalf("expected valid schema: %v", err)
+				}
+				return
+			}
+			var xcsError *Error
+			if !errors.As(err, &xcsError) || xcsError.Code != vector.ErrorCode {
+				t.Fatalf("expected %s, got %v", vector.ErrorCode, err)
+			}
+		})
+	}
+}
+
+func runCanonicalizationVectors(t *testing.T, data []byte) {
+	t.Helper()
+	var vectors struct {
+		Cases []struct {
+			ID        string `json:"id"`
 			Name      string `json:"name"`
 			InputJSON string `json:"inputJson"`
 			Canonical string `json:"canonical"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(vectorFile(t, "canonicalization.json"), &vectors); err != nil {
+	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, vector := range vectors.Cases {
-		t.Run(vector.Name, func(t *testing.T) {
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
 			parsed, err := ParseJSON([]byte(vector.InputJSON))
 			if err != nil {
 				t.Fatal(err)
@@ -62,21 +123,39 @@ func TestStrictJSONRejectsUnpairedSurrogates(t *testing.T) {
 	}
 }
 
-func TestSchemaUIDVectors(t *testing.T) {
+func runSchemaUIDVectors(t *testing.T, data []byte) {
+	t.Helper()
 	var vectors struct {
 		Cases []struct {
-			Name              string         `json:"name"`
-			Input             SchemaUIDInput `json:"input"`
-			CanonicalPreimage string         `json:"canonicalPreimage"`
-			UID               string         `json:"uid"`
+			ID                string          `json:"id"`
+			Name              string          `json:"name"`
+			Valid             bool            `json:"valid"`
+			ErrorCode         string          `json:"errorCode"`
+			Input             json.RawMessage `json:"input"`
+			CanonicalPreimage string          `json:"canonicalPreimage"`
+			UID               string          `json:"uid"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(vectorFile(t, "schema-uid.json"), &vectors); err != nil {
+	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, vector := range vectors.Cases {
-		t.Run(vector.Name, func(t *testing.T) {
-			uid, canonical, err := ComputeSchemaUID(vector.Input)
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
+			input, err := ParseSchemaUIDInput(vector.Input)
+			if !vector.Valid {
+				if err == nil {
+					_, _, err = ComputeSchemaUID(input)
+				}
+				var xcsError *Error
+				if !errors.As(err, &xcsError) || xcsError.Code != vector.ErrorCode {
+					t.Fatalf("expected %s, got %v", vector.ErrorCode, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			uid, canonical, err := ComputeSchemaUID(input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,30 +204,31 @@ func TestSchemaUIDInputRequiresPresentNumericFields(t *testing.T) {
 	}
 }
 
-func TestClaimVectors(t *testing.T) {
+func runClaimVectors(t *testing.T, data []byte) {
+	t.Helper()
 	var vectors struct {
 		Schema SchemaDefinition `json:"schema"`
 		Cases  []struct {
+			ID        string          `json:"id"`
 			Name      string          `json:"name"`
 			Valid     bool            `json:"valid"`
 			ErrorCode string          `json:"errorCode"`
 			Claims    json.RawMessage `json:"claims"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(vectorFile(t, "claims.json"), &vectors); err != nil {
+	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidateSchema(vectors.Schema); err != nil {
 		t.Fatal(err)
 	}
 	for _, vector := range vectors.Cases {
-		t.Run(vector.Name, func(t *testing.T) {
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
 			parsed, err := ParseJSON(vector.Claims)
 			if err != nil {
 				t.Fatal(err)
 			}
-			claims := parsed.(map[string]any)
-			err = ValidateClaims(claims, vectors.Schema.Fields)
+			err = ValidateClaims(parsed, vectors.Schema.Fields)
 			if vector.Valid && err != nil {
 				t.Fatalf("expected valid claims: %v", err)
 			}
@@ -220,26 +300,104 @@ func TestSchemaCountsArrayItemDescriptors(t *testing.T) {
 	}
 }
 
-func TestPayloadIntegrityVectors(t *testing.T) {
+func runPayloadIntegrityVectors(t *testing.T, data []byte) {
+	t.Helper()
 	var vectors struct {
 		Cases []struct {
-			Name        string `json:"name"`
-			ContentUTF8 string `json:"contentUtf8"`
-			SHA256      string `json:"sha256"`
-			URI         string `json:"uri"`
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			ContentUTF8   string `json:"contentUtf8"`
+			ContentBase64 string `json:"contentBase64"`
+			ErrorCode     string `json:"errorCode"`
+			SHA256        string `json:"sha256"`
+			URI           string `json:"uri"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(vectorFile(t, "payload-integrity.json"), &vectors); err != nil {
+	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)
 	}
 	for _, vector := range vectors.Cases {
-		t.Run(vector.Name, func(t *testing.T) {
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
+			if vector.ContentBase64 != "" {
+				content, decodeErr := base64.StdEncoding.DecodeString(vector.ContentBase64)
+				if decodeErr != nil {
+					t.Fatal(decodeErr)
+				}
+				_, err := ParseCredentialPayload(content, PayloadContext{})
+				var xcsError *Error
+				if !errors.As(err, &xcsError) || xcsError.Code != vector.ErrorCode {
+					t.Fatalf("expected %s, got %v", vector.ErrorCode, err)
+				}
+				return
+			}
+			if vector.ErrorCode != "" {
+				_, _, _, err := VerifyPayloadIntegrity([]byte(vector.ContentUTF8), vector.URI)
+				var xcsError *Error
+				if !errors.As(err, &xcsError) || xcsError.Code != vector.ErrorCode {
+					t.Fatalf("expected %s, got %v", vector.ErrorCode, err)
+				}
+				return
+			}
 			valid, expected, actual, err := VerifyPayloadIntegrity([]byte(vector.ContentUTF8), vector.URI)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !valid || expected != vector.SHA256 || actual != vector.SHA256 {
 				t.Fatalf("integrity mismatch: valid=%v expected=%s actual=%s", valid, expected, actual)
+			}
+		})
+	}
+}
+
+func TestInspectPayloadURIRejectsInvalidUTF8(t *testing.T) {
+	rawURI := "https://issuer.example/credentials/" + string([]byte{0xff}) +
+		".json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+	_, err := InspectPayloadURI(rawURI)
+	var xcsError *Error
+	if !errors.As(err, &xcsError) || xcsError.Code != "PAYLOAD_URI_INVALID" {
+		t.Fatalf("expected PAYLOAD_URI_INVALID, got %v", err)
+	}
+}
+
+func runPayloadValidationVectors(t *testing.T, data []byte) {
+	t.Helper()
+	var vectors struct {
+		Context struct {
+			Issuer    string           `json:"issuer"`
+			Subject   string           `json:"subject"`
+			SchemaUID string           `json:"schemaUid"`
+			Schema    SchemaDefinition `json:"schema"`
+		} `json:"context"`
+		Cases []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Valid     bool   `json:"valid"`
+			ErrorCode string `json:"errorCode"`
+			InputJSON string `json:"inputJson"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSchema(vectors.Context.Schema); err != nil {
+		t.Fatal(err)
+	}
+	context := PayloadContext{
+		Issuer: vectors.Context.Issuer, Subject: vectors.Context.Subject,
+		SchemaUID: vectors.Context.SchemaUID, Schema: vectors.Context.Schema,
+	}
+	for _, vector := range vectors.Cases {
+		t.Run(vector.ID+" "+vector.Name, func(t *testing.T) {
+			_, err := ParseCredentialPayload([]byte(vector.InputJSON), context)
+			if vector.Valid {
+				if err != nil {
+					t.Fatalf("expected valid payload: %v", err)
+				}
+				return
+			}
+			var xcsError *Error
+			if !errors.As(err, &xcsError) || xcsError.Code != vector.ErrorCode {
+				t.Fatalf("expected %s, got %v", vector.ErrorCode, err)
 			}
 		})
 	}

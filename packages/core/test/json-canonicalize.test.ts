@@ -1,23 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import { canonicalize, parseJsonStrict, XcsError } from '../src/index.js'
-
-interface CanonicalizationVectors {
-  cases: Array<{ name: string; inputJson: string; canonical: string }>
-}
-
-const vectors = JSON.parse(
-  readFileSync(new URL('../../../conformance/v0.1/canonicalization.json', import.meta.url), 'utf8'),
-) as CanonicalizationVectors
+import { canonicalize, parseJsonStrict } from '../src/index.js'
 
 describe('strict JSON and RFC 8785 canonicalization', () => {
-  for (const vector of vectors.cases) {
-    it(vector.name, () => {
-      expect(canonicalize(parseJsonStrict(vector.inputJson))).toBe(vector.canonical)
-    })
-  }
-
   it('rejects duplicate decoded keys', () => {
     expect(() => parseJsonStrict('{"a":1,"\\u0061":2}')).toThrowError(
       expect.objectContaining({ code: 'JSON_DUPLICATE_KEY' }),

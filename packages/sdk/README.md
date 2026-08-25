@@ -29,3 +29,11 @@ Use an IPFS raw CID or a shorter HTTPS base URL until the upstream validator is 
 
 Schema UIDs cannot be predicted before inclusion. `deriveSchemaUid` requires a validated ledger
 hash, ledger index, transaction index, publisher, network ID, and a `tesSUCCESS` result.
+
+`buildSchemaRegistrationPayment` returns `memoByteLength`, the exact number of serialized Memo-object
+bytes counted by `rippled`. Use `measureSchemaRegistrationMemoBytes(canonicalSchema)` when previewing
+an already canonicalized schema; `assertMemoFits` applies the same measurement against the
+1,024-byte XRPL memo limit. This count includes each `Memo` object header, its variable-length field
+prefixes and its object terminator. It excludes the outer `Memos` field header (`F9`) and array
+terminator (`F1`), because `rippled` excludes those two bytes from this limit even though they remain
+present in the transaction serialized by `xrpl.js`.

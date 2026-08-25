@@ -14,6 +14,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isResolvedSchema(
+  value: ResolvedSchema | Record<string, FieldDescriptor>,
+): value is ResolvedSchema {
+  if (!isRecord(value) || !isRecord(value.definition) || !isRecord(value.fields)) return false
+  return (
+    value.definition.xcsVersion === '0.1' &&
+    typeof value.definition.name === 'string' &&
+    typeof value.definition.description === 'string' &&
+    isRecord(value.definition.fields) &&
+    Array.isArray(value.lineage) &&
+    value.lineage.every((uid) => typeof uid === 'string')
+  )
+}
+
 function isCanonicalBase64Url(value: string): boolean {
   if (!BASE64URL.test(value) || value.length % 4 === 1) return false
   const remainder = value.length % 4
@@ -105,10 +119,6 @@ export function validateClaims(
   input: unknown,
   schema: ResolvedSchema | Record<string, FieldDescriptor>,
 ): JsonObject {
-  const resolved = schema as Partial<ResolvedSchema>
-  const fields: Record<string, FieldDescriptor> =
-    resolved.definition !== undefined && resolved.lineage !== undefined
-      ? (resolved.fields as Record<string, FieldDescriptor>)
-      : (schema as Record<string, FieldDescriptor>)
+  const fields = isResolvedSchema(schema) ? schema.fields : schema
   return validateObject(input, fields, '$.claims')
 }

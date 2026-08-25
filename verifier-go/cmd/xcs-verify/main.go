@@ -48,6 +48,18 @@ Usage:
 	os.Exit(2)
 }
 
+func verifyClaims(schemaData []byte, claimsData []byte) error {
+	schema, err := xcs.ParseSchema(schemaData)
+	if err != nil {
+		return err
+	}
+	claims, err := xcs.ParseJSON(claimsData)
+	if err != nil {
+		return err
+	}
+	return xcs.ValidateClaimsAgainstSchema(claims, schema)
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		usage()
@@ -78,19 +90,7 @@ func main() {
 		if len(os.Args) != 4 {
 			usage()
 		}
-		schema, err := xcs.ParseSchema(read(os.Args[2]))
-		if err != nil {
-			fatal(err)
-		}
-		value, err := xcs.ParseJSON(read(os.Args[3]))
-		if err != nil {
-			fatal(err)
-		}
-		claims, ok := value.(map[string]any)
-		if !ok {
-			fatal(fmt.Errorf("claims must be a JSON object"))
-		}
-		if err := xcs.ValidateClaimsAgainstSchema(claims, schema); err != nil {
+		if err := verifyClaims(read(os.Args[2]), read(os.Args[3])); err != nil {
 			fatal(err)
 		}
 		write(map[string]any{"valid": true})

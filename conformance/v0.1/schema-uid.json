@@ -2,7 +2,9 @@
   "version": "0.1",
   "cases": [
     {
+      "id": "schema-uid.course-completion",
       "name": "course completion schema",
+      "valid": true,
       "input": {
         "networkId": 1,
         "ledgerHash": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
@@ -23,6 +25,77 @@
       },
       "canonicalPreimage": "{\"ledgerHash\":\"abababababababababababababababababababababababababababababababab\",\"ledgerIndex\":100,\"networkId\":1,\"publisher\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"purpose\":\"xcs.schema.uid\",\"schema\":{\"description\":\"Attests successful completion of the XRPL developer course.\",\"fields\":{\"achievement\":{\"optional\":true,\"type\":\"string\"},\"completedAt\":{\"type\":\"string\"},\"programId\":{\"type\":\"string\"},\"programName\":{\"type\":\"string\"}},\"name\":\"XRPL Developer Course Completion\",\"xcsVersion\":\"0.1\"},\"transactionIndex\":2,\"version\":\"0.1\"}",
       "uid": "e1e9e4a41ff0a4c846c9218e0cb345a05457abb6f9ba90d5bd9ee18e7d2ca9a3"
+    },
+    {
+      "id": "schema-uid.reject-null-wrapper",
+      "name": "classifies a null wrapper as UID_INPUT_INVALID",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": null
+    },
+    {
+      "id": "schema-uid.reject-array-wrapper",
+      "name": "classifies an array wrapper as UID_INPUT_INVALID",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": []
+    },
+    {
+      "id": "schema-uid.reject-ledger-hash-wrong-type",
+      "name": "classifies a non-string ledger hash as UID_INPUT_INVALID",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": {
+        "networkId": 1,
+        "ledgerHash": 1,
+        "ledgerIndex": 100,
+        "transactionIndex": 2,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
+    },
+    {
+      "id": "schema-uid.reject-publisher-wrong-type",
+      "name": "classifies a non-string publisher as UID_INPUT_INVALID",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": {
+        "networkId": 1,
+        "ledgerHash": "abababababababababababababababababababababababababababababababab",
+        "ledgerIndex": 100,
+        "transactionIndex": 2,
+        "publisher": 1,
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
+    },
+    {
+      "id": "schema-uid.reject-invalid-nested-schema",
+      "name": "preserves SCHEMA_INVALID for an invalid nested schema",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "input": {
+        "networkId": 1,
+        "ledgerHash": "abababababababababababababababababababababababababababababababab",
+        "ledgerIndex": 100,
+        "transactionIndex": 2,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": 1,
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
     }
   ]
 }
