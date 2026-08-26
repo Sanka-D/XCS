@@ -195,6 +195,12 @@ export const schemaEvents = pgTable(
       table.ledgerIndex,
       table.transactionIndex,
     ),
+    index('schema_events_activity_idx').on(
+      table.profileId,
+      table.ledgerIndex,
+      table.transactionIndex,
+      table.transactionHash,
+    ),
     index('schema_events_publisher_idx').on(table.profileId, table.publisher),
     check('schema_events_tx_hash', sql`${table.transactionHash} ~ ${HASH_PATTERN}`),
     check('schema_events_ledger_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
@@ -250,6 +256,16 @@ export const schemas = pgTable(
       table.publisher,
       table.ledgerIndex,
       table.transactionIndex,
+    ),
+    index('schemas_order_idx').on(
+      table.profileId,
+      table.ledgerIndex,
+      table.transactionIndex,
+      table.schemaUid,
+    ),
+    index('schemas_search_idx').using(
+      'gin',
+      sql`to_tsvector('simple', ${table.name} || ' ' || ${table.description})`,
     ),
     check('schemas_uid', sql`${table.schemaUid} ~ ${HASH_PATTERN}`),
     check(
@@ -308,6 +324,12 @@ export const credentialGenerations = pgTable(
       table.subject,
       table.schemaUid,
       table.createdLedgerIndex,
+    ),
+    index('credential_generations_stats_idx').on(
+      table.profileId,
+      table.deletedLedgerIndex,
+      table.accepted,
+      table.expiration,
     ),
     check('credential_generations_id', sql`${table.generationId} ~ ${HASH_PATTERN}`),
     check('credential_generations_object', sql`${table.ledgerObjectId} ~ ${HASH_PATTERN}`),

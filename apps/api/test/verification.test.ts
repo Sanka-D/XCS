@@ -224,7 +224,35 @@ class VerificationRepository implements ApiRepository {
   async listSchemas(): Promise<SchemaRow[]> {
     return []
   }
+  async searchSchemas(): Promise<SchemaRow[]> {
+    return []
+  }
+  async listSchemaRegistrations(): Promise<SchemaEventRow[]> {
+    return []
+  }
+  async getDiscoveryStats(): Promise<Awaited<ReturnType<ApiRepository['getDiscoveryStats']>>> {
+    return {
+      schemas: {
+        total: 0,
+        publishers: 0,
+        minimumLedgerIndex: null,
+        maximumLedgerIndex: null,
+      },
+      credentialGenerations: {
+        total: 0,
+        pending: 0,
+        active: 0,
+        expired: 0,
+        deleted: 0,
+        minimumCreatedLedgerIndex: null,
+        maximumLastLedgerIndex: null,
+      },
+    }
+  }
   async getCredential() {
+    return this.credential
+  }
+  async getCredentialGenerationById() {
     return this.credential
   }
   async getCredentialEvents(
@@ -235,6 +263,21 @@ class VerificationRepository implements ApiRepository {
   async getCredentialEventsByTransaction(
     _input: Parameters<ApiRepository['getCredentialEventsByTransaction']>[0],
   ): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getCredentialEventsByGeneration(): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getTransactionProjectionSummary(): Promise<
+    Awaited<ReturnType<ApiRepository['getTransactionProjectionSummary']>>
+  > {
+    return {
+      registration: undefined,
+      firstCredentialEvent: undefined,
+      credentialEventCount: 0,
+    }
+  }
+  async getCredentialEventsByTransactionPage(): Promise<CredentialEventRow[]> {
     return []
   }
 }

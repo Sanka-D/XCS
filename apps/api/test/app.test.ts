@@ -151,6 +151,19 @@ const registeredSchemaEvidence: SchemaProjectionEvidence = {
   schema: registeredSchemaRow,
   registration: acceptedSchemaRegistration,
 }
+function publicSchemaSearchFixture() {
+  return {
+    schemaUid: registeredSchemaRow.schemaUid,
+    publisher: registeredSchemaRow.publisher,
+    name: registeredSchemaRow.name,
+    description: registeredSchemaRow.description,
+    parentUid: registeredSchemaRow.parentUid,
+    supersedesUid: registeredSchemaRow.supersedesUid,
+    registrationTransactionHash: registeredSchemaRow.registrationTransactionHash,
+    ledgerIndex: registeredSchemaRow.ledgerIndex,
+    transactionIndex: registeredSchemaRow.transactionIndex,
+  }
+}
 const credentialUrl = `/v1/networks/testnet/credentials/${ISSUER}/${SUBJECT}/${UID}`
 const credentialEventsUrl = `${credentialUrl}/events`
 const exactCredentialEventUrl = `${credentialEventsUrl}/${TX_HASH.toUpperCase()}`
@@ -177,7 +190,7 @@ class RouteRepository implements ApiRepository {
   async getLatestCheckpoint(): Promise<LedgerCheckpointRow | undefined> {
     return checkpoint
   }
-  async getSchema(): Promise<SchemaRow | undefined> {
+  async getSchema(_profileId: string, _schemaUid: string): Promise<SchemaRow | undefined> {
     return undefined
   }
   async getSchemaProjectionEvidence(): Promise<SchemaProjectionEvidence[]> {
@@ -191,7 +204,41 @@ class RouteRepository implements ApiRepository {
   async listSchemas(): Promise<SchemaRow[]> {
     return []
   }
+  async searchSchemas(_input: Parameters<ApiRepository['searchSchemas']>[0]): Promise<SchemaRow[]> {
+    return []
+  }
+  async listSchemaRegistrations(
+    _input: Parameters<ApiRepository['listSchemaRegistrations']>[0],
+  ): Promise<SchemaEventRow[]> {
+    return []
+  }
+  async getDiscoveryStats(
+    _input: Parameters<ApiRepository['getDiscoveryStats']>[0],
+  ): Promise<Awaited<ReturnType<ApiRepository['getDiscoveryStats']>>> {
+    return {
+      schemas: {
+        total: 0,
+        publishers: 0,
+        minimumLedgerIndex: null,
+        maximumLedgerIndex: null,
+      },
+      credentialGenerations: {
+        total: 0,
+        pending: 0,
+        active: 0,
+        expired: 0,
+        deleted: 0,
+        minimumCreatedLedgerIndex: null,
+        maximumLastLedgerIndex: null,
+      },
+    }
+  }
   async getCredential(): Promise<CredentialGenerationRow | undefined> {
+    return undefined
+  }
+  async getCredentialGenerationById(
+    _input: Parameters<ApiRepository['getCredentialGenerationById']>[0],
+  ): Promise<CredentialGenerationRow | undefined> {
     return undefined
   }
   async getCredentialEvents(
@@ -201,6 +248,25 @@ class RouteRepository implements ApiRepository {
   }
   async getCredentialEventsByTransaction(
     _input: Parameters<ApiRepository['getCredentialEventsByTransaction']>[0],
+  ): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getCredentialEventsByGeneration(
+    _input: Parameters<ApiRepository['getCredentialEventsByGeneration']>[0],
+  ): Promise<CredentialEventRow[]> {
+    return []
+  }
+  async getTransactionProjectionSummary(
+    _input: Parameters<ApiRepository['getTransactionProjectionSummary']>[0],
+  ): Promise<Awaited<ReturnType<ApiRepository['getTransactionProjectionSummary']>>> {
+    return {
+      registration: undefined,
+      firstCredentialEvent: undefined,
+      credentialEventCount: 0,
+    }
+  }
+  async getCredentialEventsByTransactionPage(
+    _input: Parameters<ApiRepository['getCredentialEventsByTransactionPage']>[0],
   ): Promise<CredentialEventRow[]> {
     return []
   }
@@ -288,6 +354,427 @@ describe('read API', () => {
     ).toHaveProperty('503')
     expect(paths?.['/v1/verify']?.post?.responses).toHaveProperty('503')
     expect(paths?.['/v1/verify']?.post?.responses).toHaveProperty('404')
+  })
+
+  it('returns mutually exclusive discovery statistics at the authoritative checkpoint', async () => {
+    const repository = new RouteRepository()
+    let observedCloseTime: number | undefined
+    repository.getDiscoveryStats = async (input) => {
+      observedCloseTime = input.checkpointCloseTime
+      return {
+        schemas: {
+          total: 3,
+          publishers: 2,
+          minimumLedgerIndex: network.activationLedgerIndex,
+          maximumLedgerIndex: checkpoint.ledgerIndex,
+        },
+        credentialGenerations: {
+          total: 4,
+          pending: 1,
+          active: 1,
+          expired: 1,
+          deleted: 1,
+          minimumCreatedLedgerIndex: network.activationLedgerIndex,
+          maximumLastLedgerIndex: checkpoint.ledgerIndex,
+        },
+      }
+    }
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/stats',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(observedCloseTime).toBe(checkpoint.closeTime)
+    expect(response.json()).toEqual({
+      network: 'testnet',
+      schemas: { total: 3, publishers: 2 },
+      credentialGenerations: {
+        total: 4,
+        pending: 1,
+        active: 1,
+        expired: 1,
+        deleted: 1,
+      },
+      checkpoint: {
+        ledgerIndex: checkpoint.ledgerIndex,
+        ledgerHash: checkpoint.ledgerHash,
+        closeTime: checkpoint.closeTime,
+        transactionRoot: checkpoint.transactionRoot,
+      },
+    })
+  })
+
+  it.each([
+    [
+      'unsafe bigint conversion',
+      {
+        total: Number.MAX_SAFE_INTEGER + 1,
+        pending: 0,
+        active: 0,
+        expired: 0,
+        deleted: 0,
+        minimumCreatedLedgerIndex: network.activationLedgerIndex,
+        maximumLastLedgerIndex: checkpoint.ledgerIndex,
+      },
+    ],
+    [
+      'non-exclusive states',
+      {
+        total: 1,
+        pending: 1,
+        active: 1,
+        expired: 0,
+        deleted: 0,
+        minimumCreatedLedgerIndex: network.activationLedgerIndex,
+        maximumLastLedgerIndex: checkpoint.ledgerIndex,
+      },
+    ],
+  ])('fails closed when discovery aggregates contain %s', async (_label, credentialStats) => {
+    const repository = new RouteRepository()
+    repository.getDiscoveryStats = async () => ({
+      schemas: {
+        total: 0,
+        publishers: 0,
+        minimumLedgerIndex: null,
+        maximumLedgerIndex: null,
+      },
+      credentialGenerations: credentialStats,
+    })
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/stats',
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
+  it('keeps text and address search schema-only and treats wildcard characters as plain text', async () => {
+    const repository = new RouteRepository()
+    const searches: Parameters<ApiRepository['searchSchemas']>[0][] = []
+    repository.searchSchemas = async (input) => {
+      searches.push(input)
+      return input.publisher === undefined ? [registeredSchemaRow] : []
+    }
+    repository.getSchemaProjectionEvidence = async () => [registeredSchemaEvidence]
+    repository.getCredentialGenerationById = async () => {
+      throw new Error('non-hash search must not query Credential generations')
+    }
+    repository.getTransactionProjectionSummary = async () => {
+      throw new Error('non-hash search must not query transaction projections')
+    }
+    const instance = await configuredApp({ repository })
+
+    const text = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/search?q=Course%25_&limit=5',
+    })
+    const address = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/search?q=${ISSUER}`,
+    })
+
+    expect(text.statusCode).toBe(200)
+    expect(text.json()).toEqual({
+      items: [{ type: 'schema', ...publicSchemaSearchFixture() }],
+      hasMore: false,
+    })
+    expect(address.statusCode).toBe(200)
+    expect(searches).toEqual([
+      { profileId: 'testnet', query: 'Course%_', limit: 5 },
+      { profileId: 'testnet', publisher: ISSUER, limit: 20 },
+    ])
+  })
+
+  it('returns only exact hash matches as flat discriminated search results', async () => {
+    const repository = new RouteRepository()
+    const matchingGeneration = { ...generation, generationId: registeredSchemaUid }
+    const matchingEvent = {
+      ...credentialEvent,
+      transactionHash: registeredSchemaUid,
+      generationId: registeredSchemaUid,
+      transactionIndex: 0,
+      eventType: 'created' as const,
+      accepted: false,
+    }
+    const matchingAcceptance = {
+      ...credentialEvent,
+      generationId: registeredSchemaUid,
+    }
+    repository.getSchema = async (_profileId, uid) =>
+      uid === registeredSchemaUid ? registeredSchemaRow : undefined
+    repository.getSchemaProjectionEvidence = async () => [registeredSchemaEvidence]
+    repository.getCredentialGenerationById = async () => matchingGeneration
+    repository.getCredentialEventsByGeneration = async () => [matchingEvent, matchingAcceptance]
+    repository.getTransactionProjectionSummary = async () => ({
+      registration: undefined,
+      firstCredentialEvent: matchingEvent,
+      credentialEventCount: 1,
+    })
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/search?q=${registeredSchemaUid.toUpperCase()}&limit=2`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      items: [
+        { type: 'schema', ...publicSchemaSearchFixture() },
+        {
+          type: 'credential_generation',
+          generationId: registeredSchemaUid,
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: UID,
+          state: 'active',
+          createdLedgerIndex: checkpoint.ledgerIndex,
+          lastLedgerIndex: checkpoint.ledgerIndex,
+        },
+      ],
+      hasMore: true,
+    })
+  })
+
+  it('fails closed when an exact generation search has a contradictory timeline', async () => {
+    const repository = new RouteRepository()
+    const matchingGeneration = { ...generation, generationId: registeredSchemaUid }
+    const createdOnly = {
+      ...credentialEvent,
+      transactionHash: registeredSchemaUid,
+      generationId: registeredSchemaUid,
+      transactionIndex: 0,
+      eventType: 'created' as const,
+      accepted: false,
+    }
+    repository.getCredentialGenerationById = async () => matchingGeneration
+    repository.getCredentialEventsByGeneration = async () => [createdOnly]
+    repository.getTransactionProjectionSummary = async () => ({
+      registration: undefined,
+      firstCredentialEvent: createdOnly,
+      credentialEventCount: 1,
+    })
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/search?q=${registeredSchemaUid}`,
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
+  it.each([
+    ['/v1/networks/testnet/search?q=%25_', 'SEARCH_QUERY_INVALID'],
+    ['/v1/networks/testnet/search?q=%20Course', 'SEARCH_QUERY_INVALID'],
+    ['/v1/networks/testnet/search?q=Course&cursor=unexpected', 'VALIDATION_ERROR'],
+    ['/v1/networks/testnet/search?q=Course&limit=51', 'VALIDATION_ERROR'],
+  ])('strictly validates discovery search %s', async (url, error) => {
+    const instance = await app()
+    const response = await instance.inject({ method: 'GET', url })
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({ error })
+  })
+
+  it('paginates schema-registration activity without exposing memo JSON or Credential events', async () => {
+    const rejectedRegistration: SchemaEventRow = {
+      ...acceptedSchemaRegistration,
+      transactionHash: '9'.repeat(64),
+      transactionIndex: 1,
+      status: 'rejected',
+      reasonCode: 'MEMO_FORMAT_INVALID',
+      schemaUid: null,
+      memoJson: null,
+    }
+    const repository = new RouteRepository()
+    repository.listSchemaRegistrations = async () => [
+      acceptedSchemaRegistration,
+      rejectedRegistration,
+    ]
+    repository.getCredentialEventsByTransactionPage = async () => {
+      throw new Error('schema activity must not read Credential events')
+    }
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/activity?limit=1',
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().items).toHaveLength(1)
+    expect(response.json().items[0]).toMatchObject({
+      transactionHash: TX_HASH,
+      status: 'accepted',
+      schemaUid: registeredSchemaUid,
+    })
+    expect(response.json()).toHaveProperty('nextCursor')
+    expect(response.body).not.toContain('memoJson')
+    expect(response.body).not.toContain('snapshot')
+  })
+
+  it('returns an exact generation with an explicit bounded timeline and expires at the boundary', async () => {
+    const expiringGeneration = { ...generation, expiration: checkpoint.closeTime }
+    const createdEvent: CredentialEventRow = {
+      ...credentialEvent,
+      transactionHash: generation.generationId,
+      transactionIndex: generation.createdTransactionIndex,
+      eventType: 'created',
+      accepted: false,
+      expiration: checkpoint.closeTime,
+    }
+    const acceptedEvent = { ...credentialEvent, expiration: checkpoint.closeTime }
+    const repository = new RouteRepository()
+    let timelineLimit: number | undefined
+    repository.getCredentialGenerationById = async () => expiringGeneration
+    repository.getCredentialEventsByGeneration = async (input) => {
+      timelineLimit = input.limit
+      return [createdEvent, acceptedEvent]
+    }
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/credential-generations/${generation.generationId.toUpperCase()}`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(timelineLimit).toBe(101)
+    expect(response.json()).toMatchObject({
+      generation: { generationId: generation.generationId, expiration: checkpoint.closeTime },
+      state: 'expired',
+      timeline: [
+        { eventType: 'created', transactionHash: generation.generationId },
+        { eventType: 'accepted', transactionHash: TX_HASH },
+      ],
+    })
+    expect(response.body).not.toContain('snapshot')
+    expect(response.body).not.toContain('recordedAt')
+    expect(response.body).not.toContain('profileId')
+  })
+
+  it('fails closed when a deletion event contradicts the generation acceptance flag', async () => {
+    const deletedGeneration: CredentialGenerationRow = {
+      ...generation,
+      deletedLedgerIndex: checkpoint.ledgerIndex,
+      deletionCause: 'issuer_revoked',
+    }
+    const createdEvent: CredentialEventRow = {
+      ...credentialEvent,
+      transactionHash: generation.generationId,
+      transactionIndex: generation.createdTransactionIndex,
+      eventType: 'created',
+      accepted: false,
+    }
+    const deletedEvent: CredentialEventRow = {
+      ...credentialEvent,
+      transactionHash: '8'.repeat(64),
+      transactionIndex: 2,
+      eventType: 'deleted',
+      accepted: false,
+      deletionCause: 'issuer_revoked',
+    }
+    const repository = new RouteRepository()
+    repository.getCredentialGenerationById = async () => deletedGeneration
+    repository.getCredentialEventsByGeneration = async () => [
+      createdEvent,
+      credentialEvent,
+      deletedEvent,
+    ]
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/credential-generations/${generation.generationId}`,
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
+  it('paginates multiple Credential events on an exact transaction', async () => {
+    const first = { ...credentialEvent, nodeIndex: 0 }
+    const second = { ...credentialEvent, nodeIndex: 1 }
+    const repository = new RouteRepository()
+    repository.getTransactionProjectionSummary = async () => ({
+      registration: undefined,
+      firstCredentialEvent: first,
+      credentialEventCount: 2,
+    })
+    repository.getCredentialEventsByTransactionPage = async () => [first, second]
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/transactions/${TX_HASH.toUpperCase()}?limit=1`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      transactionHash: TX_HASH,
+      ledgerIndex: checkpoint.ledgerIndex,
+      ledgerHash: checkpoint.ledgerHash,
+      transactionIndex: credentialEvent.transactionIndex,
+      registration: null,
+      credentialEvents: {
+        items: [{ transactionHash: TX_HASH, nodeIndex: 0 }],
+        nextCursor: '0',
+      },
+    })
+    expect(response.body).not.toContain('snapshot')
+  })
+
+  it('fails closed on a nullable generation id instead of diverging from the public event DTO', async () => {
+    const malformedEvent = { ...credentialEvent, generationId: null }
+    const repository = new RouteRepository()
+    repository.getTransactionProjectionSummary = async () => ({
+      registration: undefined,
+      firstCredentialEvent: malformedEvent,
+      credentialEventCount: 1,
+    })
+    repository.getCredentialEventsByTransactionPage = async () => [malformedEvent]
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/transactions/${TX_HASH}`,
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
+  it('returns authoritative 404s for unknown exact discovery identifiers', async () => {
+    const instance = await app()
+    const [generationResponse, transactionResponse] = await Promise.all([
+      instance.inject({
+        method: 'GET',
+        url: `/v1/networks/testnet/credential-generations/${TX_HASH}`,
+      }),
+      instance.inject({
+        method: 'GET',
+        url: `/v1/networks/testnet/transactions/${TX_HASH}`,
+      }),
+    ])
+    expect(generationResponse.statusCode).toBe(404)
+    expect(generationResponse.json()).toMatchObject({ error: 'CREDENTIAL_GENERATION_NOT_FOUND' })
+    expect(transactionResponse.statusCode).toBe(404)
+    expect(transactionResponse.json()).toMatchObject({ error: 'TRANSACTION_NOT_FOUND' })
+  })
+
+  it('documents explicit success and failure responses for every discovery endpoint', async () => {
+    const instance = await app()
+    await instance.ready()
+    const paths = instance.swagger().paths
+    for (const path of [
+      '/v1/networks/{network}/stats',
+      '/v1/networks/{network}/search',
+      '/v1/networks/{network}/activity',
+      '/v1/networks/{network}/credential-generations/{generationId}',
+      '/v1/networks/{network}/transactions/{transactionHash}',
+    ]) {
+      const responses = paths?.[path]?.get?.responses
+      expect(responses).toHaveProperty('200')
+      expect(responses).toHaveProperty('400')
+      expect(responses).toHaveProperty('404')
+      expect(responses).toHaveProperty('503')
+    }
   })
 
   it('keeps public network and status endpoints available while authoritative reads are halted', async () => {
@@ -834,6 +1321,19 @@ describe('read API', () => {
     expect(operation?.responses).toHaveProperty('200')
   })
 
+  it.each([
+    ['a nullable generation id', { ...credentialEvent, generationId: null }],
+    ['a mismatched subject', { ...credentialEvent, subject: ISSUER }],
+  ])('fails closed when event history contains %s', async (_label, malformedEvent) => {
+    const repository = new RouteRepository()
+    repository.getCredentialEvents = async () => [malformedEvent]
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({ method: 'GET', url: credentialEventsUrl })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
+  })
+
   it('uses PostgreSQL time to reject an expired writer lease in production mode', async () => {
     const repository = new RouteRepository()
     repository.getCredential = async () => generation
@@ -928,6 +1428,38 @@ describe('read API', () => {
       projectionReads += 1
       return []
     }
+    repository.searchSchemas = async () => {
+      projectionReads += 1
+      return []
+    }
+    repository.listSchemaRegistrations = async () => {
+      projectionReads += 1
+      return []
+    }
+    repository.getDiscoveryStats = async () => {
+      projectionReads += 1
+      throw new Error('unexpected aggregate read')
+    }
+    repository.getCredentialGenerationById = async () => {
+      projectionReads += 1
+      return generation
+    }
+    repository.getCredentialEventsByGeneration = async () => {
+      projectionReads += 1
+      return []
+    }
+    repository.getTransactionProjectionSummary = async () => {
+      projectionReads += 1
+      return {
+        registration: undefined,
+        firstCredentialEvent: undefined,
+        credentialEventCount: 0,
+      }
+    }
+    repository.getCredentialEventsByTransactionPage = async () => {
+      projectionReads += 1
+      return []
+    }
     const instance = await configuredApp({ repository })
 
     const responses = await Promise.all([
@@ -937,15 +1469,21 @@ describe('read API', () => {
       instance.inject({ method: 'GET', url: credentialUrl }),
       instance.inject({ method: 'GET', url: credentialEventsUrl }),
       instance.inject({ method: 'GET', url: exactCredentialEventUrl }),
+      instance.inject({ method: 'GET', url: '/v1/networks/testnet/stats' }),
+      instance.inject({ method: 'GET', url: '/v1/networks/testnet/search?q=Course' }),
+      instance.inject({ method: 'GET', url: '/v1/networks/testnet/activity' }),
+      instance.inject({
+        method: 'GET',
+        url: `/v1/networks/testnet/credential-generations/${generation.generationId}`,
+      }),
+      instance.inject({ method: 'GET', url: `/v1/networks/testnet/transactions/${TX_HASH}` }),
       instance.inject({
         method: 'POST',
         url: '/v1/verify',
         payload: { network: 'testnet', issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
       }),
     ])
-    expect(responses.map((response) => response.statusCode)).toEqual([
-      503, 503, 503, 503, 503, 503, 503,
-    ])
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(12).fill(503))
     expect(projectionReads).toBe(0)
   })
 
@@ -1215,6 +1753,107 @@ describe('read API', () => {
     expect((await instance.inject({ method: 'POST', url: '/v1/verify', payload })).statusCode).toBe(
       429,
     )
+  })
+
+  it('rate limits authenticated SSR sessions independently and ignores spoofed client keys', async () => {
+    const internalSsrToken = 'test-internal-ssr-token-000000000001'
+    const trusted = await configuredApp({ globalRateLimit: 1, internalSsrToken })
+    const trustedHeaders = (clientKey: string) => ({
+      'x-xcs-internal-token': internalSsrToken,
+      'x-xcs-client-key': clientKey,
+    })
+    expect(
+      (
+        await trusted.inject({
+          method: 'GET',
+          url: '/health',
+          headers: trustedHeaders('a'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await trusted.inject({
+          method: 'GET',
+          url: '/health',
+          headers: trustedHeaders('b'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await trusted.inject({
+          method: 'GET',
+          url: '/health',
+          headers: trustedHeaders('a'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(429)
+
+    const spoofed = await configuredApp({ globalRateLimit: 1, internalSsrToken })
+    const spoofedHeaders = (clientKey: string) => ({
+      'x-xcs-internal-token': 'wrong-internal-ssr-token-0000000000',
+      'x-xcs-client-key': clientKey,
+    })
+    expect(
+      (
+        await spoofed.inject({
+          method: 'GET',
+          url: '/health',
+          headers: spoofedHeaders('c'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await spoofed.inject({
+          method: 'GET',
+          url: '/health',
+          headers: spoofedHeaders('d'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(429)
+
+    const nonAscii = await configuredApp({ globalRateLimit: 1, internalSsrToken })
+    const nonAsciiHeaders = (clientKey: string) => ({
+      'x-xcs-internal-token': 'é'.repeat(internalSsrToken.length),
+      'x-xcs-client-key': clientKey,
+    })
+    expect(
+      (
+        await nonAscii.inject({
+          method: 'GET',
+          url: '/health',
+          headers: nonAsciiHeaders('e'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await nonAscii.inject({
+          method: 'GET',
+          url: '/health',
+          headers: nonAsciiHeaders('f'.repeat(64)),
+        })
+      ).statusCode,
+    ).toBe(429)
+  })
+
+  it('uses forwarded client IPs only when the immediate proxy is explicitly trusted', async () => {
+    const instance = await configuredApp({
+      globalRateLimit: 1,
+      trustedProxyCidrs: ['127.0.0.1'],
+    })
+    const requestFrom = (address: string) =>
+      instance.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { 'x-forwarded-for': address },
+      })
+
+    expect((await requestFrom('198.51.100.10')).statusCode).toBe(200)
+    expect((await requestFrom('198.51.100.11')).statusCode).toBe(200)
+    expect((await requestFrom('198.51.100.10')).statusCode).toBe(429)
   })
 
   it('keeps demo pinning routes absent unless explicitly configured', async () => {

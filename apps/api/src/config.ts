@@ -1,7 +1,10 @@
 import { isClassicAddress } from '@xcs-protocol/core'
+import { isIP } from 'node:net'
 
 export interface ApiConfig {
   databaseUrl: string
+  internalSsrToken: string
+  trustedProxyCidrs: string[]
   host: string
   port: number
   ipfsGateway: string
@@ -18,6 +21,14 @@ export interface ApiConfig {
         ipHashSecret: string
         networks: string[]
       }
+}
+
+function internalSsrToken(environment: NodeJS.ProcessEnv): string {
+  const value = required(environment, 'XCS_INTERNAL_API_TOKEN')
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(value) || value === 'xcs-development-internal-token-0001') {
+    throw new Error('XCS_INTERNAL_API_TOKEN must be 32 to 256 URL-safe random characters')
+  }
+  return value
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -65,6 +76,22 @@ function list(value: string | undefined, defaults: string[] = []): string[] {
         .filter(Boolean),
     ),
   ]
+}
+
+function trustedProxyCidrs(value: string | undefined): string[] {
+  return list(value).map((entry) => {
+    const [address, prefix, ...rest] = entry.split('/')
+    const version = address === undefined ? 0 : isIP(address)
+    const validPrefix =
+      prefix === undefined ||
+      (/^[0-9]{1,3}$/u.test(prefix) &&
+        Number(prefix) > 0 &&
+        Number(prefix) <= (version === 4 ? 32 : 128))
+    if (version === 0 || rest.length > 0 || !validPrefix) {
+      throw new Error('XCS_TRUSTED_PROXY_CIDRS must contain only explicit IP addresses or CIDRs')
+    }
+    return entry
+  })
 }
 
 function strictBoolean(value: string | undefined, defaultValue: boolean, name: string): boolean {
@@ -123,6 +150,8 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
   }
   return {
     databaseUrl: compatibleRequired(environment, 'XCS_DATABASE_URL', 'DATABASE_URL'),
+    internalSsrToken: internalSsrToken(environment),
+    trustedProxyCidrs: trustedProxyCidrs(environment.XCS_TRUSTED_PROXY_CIDRS),
     host: environment.XCS_API_HOST ?? environment.API_HOST ?? '0.0.0.0',
     port,
     ipfsGateway:

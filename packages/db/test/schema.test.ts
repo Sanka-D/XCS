@@ -73,4 +73,27 @@ describe('database schema', () => {
     expect(migration).toContain('"writer_epoch" bigint NOT NULL')
     expect(migration).toContain('"lease_expires_at" timestamp with time zone')
   })
+
+  it('adds only the discovery indexes in migration 0002', () => {
+    const migration = readFileSync(
+      new URL('../drizzle/0002_discovery_indexes.sql', import.meta.url),
+      'utf8',
+    )
+    expect(migration).toContain('CREATE INDEX "credential_generations_stats_idx"')
+    expect(migration).toContain('CREATE INDEX "schema_events_activity_idx"')
+    expect(migration).toContain('CREATE INDEX "schemas_order_idx"')
+    expect(migration).toContain('CREATE INDEX "schemas_search_idx"')
+    expect(migration).toContain('to_tsvector(\'simple\', "name" || \' \' || "description")')
+    expect(migration).not.toMatch(/\b(?:ALTER|DROP|DELETE|UPDATE|INSERT)\b/u)
+
+    expect(getTableConfig(schemaEvents).indexes.map((item) => item.config.name)).toContain(
+      'schema_events_activity_idx',
+    )
+    expect(getTableConfig(schemas).indexes.map((item) => item.config.name)).toEqual(
+      expect.arrayContaining(['schemas_order_idx', 'schemas_search_idx']),
+    )
+    expect(getTableConfig(credentialGenerations).indexes.map((item) => item.config.name)).toContain(
+      'credential_generations_stats_idx',
+    )
+  })
 })

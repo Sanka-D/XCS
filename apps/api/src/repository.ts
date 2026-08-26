@@ -8,7 +8,21 @@ import {
   schemas,
   type XcsDatabase,
 } from '@xcs-protocol/db'
-import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  countDistinct,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lt,
+  max,
+  min,
+  or,
+  sql,
+} from 'drizzle-orm'
 
 import type { ApiRepository } from './types.js'
 
@@ -145,6 +159,98 @@ export class PostgresApiRepository implements ApiRepository {
       .limit(input.limit + 1)
   }
 
+  searchSchemas(input: Parameters<ApiRepository['searchSchemas']>[0]) {
+    const filters = [eq(schemas.profileId, input.profileId)]
+    if (input.publisher !== undefined) {
+      filters.push(eq(schemas.publisher, input.publisher))
+    } else if (input.query !== undefined) {
+      filters.push(
+        sql`to_tsvector('simple', ${schemas.name} || ' ' || ${schemas.description}) @@ plainto_tsquery('simple', ${input.query})`,
+      )
+    }
+    return this.db
+      .select()
+      .from(schemas)
+      .where(and(...filters))
+      .orderBy(desc(schemas.ledgerIndex), desc(schemas.transactionIndex), desc(schemas.schemaUid))
+      .limit(input.limit + 1)
+  }
+
+  listSchemaRegistrations(input: Parameters<ApiRepository['listSchemaRegistrations']>[0]) {
+    const filters = [eq(schemaEvents.profileId, input.profileId)]
+    if (input.cursor !== undefined) {
+      filters.push(
+        or(
+          lt(schemaEvents.ledgerIndex, input.cursor.ledgerIndex),
+          and(
+            eq(schemaEvents.ledgerIndex, input.cursor.ledgerIndex),
+            lt(schemaEvents.transactionIndex, input.cursor.transactionIndex),
+          ),
+          and(
+            eq(schemaEvents.ledgerIndex, input.cursor.ledgerIndex),
+            eq(schemaEvents.transactionIndex, input.cursor.transactionIndex),
+            lt(schemaEvents.transactionHash, input.cursor.transactionHash),
+          ),
+        )!,
+      )
+    }
+    return this.db
+      .select()
+      .from(schemaEvents)
+      .where(and(...filters))
+      .orderBy(
+        desc(schemaEvents.ledgerIndex),
+        desc(schemaEvents.transactionIndex),
+        desc(schemaEvents.transactionHash),
+      )
+      .limit(input.limit + 1)
+  }
+
+  async getDiscoveryStats(input: Parameters<ApiRepository['getDiscoveryStats']>[0]) {
+    const [schemaStats] = await this.db
+      .select({
+        total: count(),
+        publishers: countDistinct(schemas.publisher),
+        minimumLedgerIndex: min(schemas.ledgerIndex),
+        maximumLedgerIndex: max(schemas.ledgerIndex),
+      })
+      .from(schemas)
+      .where(eq(schemas.profileId, input.profileId))
+    const [credentialStats] = await this.db
+      .select({
+        total: count(),
+        pending: count(
+          sql`CASE WHEN ${credentialGenerations.deletedLedgerIndex} IS NULL
+            AND (${credentialGenerations.expiration} IS NULL OR ${credentialGenerations.expiration} > ${input.checkpointCloseTime})
+            AND ${credentialGenerations.accepted} = false THEN 1 END`,
+        ),
+        active: count(
+          sql`CASE WHEN ${credentialGenerations.deletedLedgerIndex} IS NULL
+            AND (${credentialGenerations.expiration} IS NULL OR ${credentialGenerations.expiration} > ${input.checkpointCloseTime})
+            AND ${credentialGenerations.accepted} = true THEN 1 END`,
+        ),
+        expired: count(
+          sql`CASE WHEN ${credentialGenerations.deletedLedgerIndex} IS NULL
+            AND ${credentialGenerations.expiration} IS NOT NULL
+            AND ${credentialGenerations.expiration} <= ${input.checkpointCloseTime} THEN 1 END`,
+        ),
+        deleted: count(
+          sql`CASE WHEN ${credentialGenerations.deletedLedgerIndex} IS NOT NULL THEN 1 END`,
+        ),
+        minimumCreatedLedgerIndex: min(credentialGenerations.createdLedgerIndex),
+        maximumLastLedgerIndex: max(credentialGenerations.lastLedgerIndex),
+      })
+      .from(credentialGenerations)
+      .where(eq(credentialGenerations.profileId, input.profileId))
+    if (schemaStats === undefined || credentialStats === undefined) {
+      throw new Error('PostgreSQL returned incomplete discovery aggregates')
+    }
+    return {
+      schemas: schemaStats,
+      credentialGenerations: credentialStats,
+    }
+  }
+
   async getCredential(input: Parameters<ApiRepository['getCredential']>[0]) {
     const [row] = await this.db
       .select()
@@ -160,6 +266,22 @@ export class PostgresApiRepository implements ApiRepository {
       .orderBy(
         desc(credentialGenerations.createdLedgerIndex),
         desc(credentialGenerations.createdTransactionIndex),
+      )
+      .limit(1)
+    return row
+  }
+
+  async getCredentialGenerationById(
+    input: Parameters<ApiRepository['getCredentialGenerationById']>[0],
+  ) {
+    const [row] = await this.db
+      .select()
+      .from(credentialGenerations)
+      .where(
+        and(
+          eq(credentialGenerations.profileId, input.profileId),
+          eq(credentialGenerations.generationId, input.generationId),
+        ),
       )
       .limit(1)
     return row
@@ -202,5 +324,77 @@ export class PostgresApiRepository implements ApiRepository {
       )
       .orderBy(asc(credentialEvents.nodeIndex))
       .limit(input.limit)
+  }
+
+  getCredentialEventsByGeneration(
+    input: Parameters<ApiRepository['getCredentialEventsByGeneration']>[0],
+  ) {
+    return this.db
+      .select()
+      .from(credentialEvents)
+      .where(
+        and(
+          eq(credentialEvents.profileId, input.profileId),
+          eq(credentialEvents.generationId, input.generationId),
+        ),
+      )
+      .orderBy(
+        asc(credentialEvents.ledgerIndex),
+        asc(credentialEvents.transactionIndex),
+        asc(credentialEvents.nodeIndex),
+      )
+      .limit(input.limit)
+  }
+
+  async getTransactionProjectionSummary(
+    input: Parameters<ApiRepository['getTransactionProjectionSummary']>[0],
+  ) {
+    const registration = await this.getSchemaRegistrationByTransaction(input)
+    const [firstCredentialEvent] = await this.db
+      .select()
+      .from(credentialEvents)
+      .where(
+        and(
+          eq(credentialEvents.profileId, input.profileId),
+          eq(credentialEvents.transactionHash, input.transactionHash),
+        ),
+      )
+      .orderBy(asc(credentialEvents.nodeIndex))
+      .limit(1)
+    const [eventCount] = await this.db
+      .select({ value: count() })
+      .from(credentialEvents)
+      .where(
+        and(
+          eq(credentialEvents.profileId, input.profileId),
+          eq(credentialEvents.transactionHash, input.transactionHash),
+        ),
+      )
+    if (eventCount === undefined) {
+      throw new Error('PostgreSQL returned an incomplete transaction aggregate')
+    }
+    return {
+      registration,
+      firstCredentialEvent,
+      credentialEventCount: eventCount.value,
+    }
+  }
+
+  getCredentialEventsByTransactionPage(
+    input: Parameters<ApiRepository['getCredentialEventsByTransactionPage']>[0],
+  ) {
+    const filters = [
+      eq(credentialEvents.profileId, input.profileId),
+      eq(credentialEvents.transactionHash, input.transactionHash),
+    ]
+    if (input.afterNodeIndex !== undefined) {
+      filters.push(gt(credentialEvents.nodeIndex, input.afterNodeIndex))
+    }
+    return this.db
+      .select()
+      .from(credentialEvents)
+      .where(and(...filters))
+      .orderBy(asc(credentialEvents.nodeIndex))
+      .limit(input.limit + 1)
   }
 }

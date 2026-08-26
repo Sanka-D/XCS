@@ -12,7 +12,8 @@ import {
   type JsonValue,
   type VerificationReport,
 } from '@xcs-protocol/core'
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
+import { timingSafeEqual } from 'node:crypto'
 
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS, IndexerUnavailableError } from './ledger-freshness.js'
 import {
@@ -20,7 +21,12 @@ import {
   assertIndexerReady,
   publicIndexerStatus,
 } from './indexer-status.js'
-import { decodeSchemaCursor, encodeSchemaCursor } from './pagination.js'
+import {
+  decodeSchemaCursor,
+  decodeSchemaRegistrationCursor,
+  encodeSchemaCursor,
+  encodeSchemaRegistrationCursor,
+} from './pagination.js'
 import { DemoPinningService, PinningError } from './pinning.js'
 import {
   authoritativeResolvedSchema,
@@ -38,10 +44,23 @@ const PROFILE_PATTERN = '^[a-z0-9][a-z0-9._-]{0,127}$'
 const UID_PATTERN = '^[0-9a-f]{64}$'
 const INPUT_HASH_PATTERN = '^[0-9A-Fa-f]{64}$'
 const LOWERCASE_HASH = /^[0-9a-f]{64}$/u
+const HEX_BYTES = /^(?:[0-9A-Fa-f]{2})*$/u
 const REASON_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u
 const ADDRESS_PATTERN = '^r[1-9A-HJ-NP-Za-km-z]{24,34}$'
 const CREDENTIAL_EVENT_HISTORY_LIMIT = 100
+const CREDENTIAL_GENERATION_TIMELINE_LIMIT = 100
 const EXACT_CREDENTIAL_EVENT_QUERY_LIMIT = 2
+const DISCOVERY_SEARCH_DEFAULT_LIMIT = 20
+const DISCOVERY_SEARCH_MAX_LIMIT = 50
+const DISCOVERY_PAGE_DEFAULT_LIMIT = 20
+const DISCOVERY_PAGE_MAX_LIMIT = 100
+const MAX_NODE_INDEX = 2_147_483_647
+const SEARCH_QUERY_CONTENT = /[\p{L}\p{N}]/u
+const SEARCH_QUERY_CONTROL = /[\u0000-\u001f\u007f]/u
+const INTERNAL_SSR_TOKEN = /^[A-Za-z0-9_-]{32,256}$/u
+const INTERNAL_SSR_CLIENT_KEY = /^[0-9a-f]{64}$/u
+const INTERNAL_SSR_TOKEN_HEADER = 'x-xcs-internal-token'
+const INTERNAL_SSR_CLIENT_KEY_HEADER = 'x-xcs-client-key'
 const CREDENTIAL_DELETION_CAUSES = new Set([
   'issuer_revoked',
   'subject_rejected',
@@ -123,9 +142,7 @@ const publicCredentialEventSchema = {
   properties: {
     transactionHash: { type: 'string', pattern: UID_PATTERN },
     nodeIndex: { type: 'integer', minimum: 0 },
-    generationId: {
-      anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }],
-    },
+    generationId: { type: 'string', pattern: UID_PATTERN },
     ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
     ledgerHash: { type: 'string', pattern: UID_PATTERN },
     transactionIndex: { type: 'integer', minimum: 0 },
@@ -206,6 +223,284 @@ const exactSchemaRegistrationResponseSchema = {
   },
 } as const
 
+const publicCheckpointSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['ledgerIndex', 'ledgerHash', 'closeTime', 'transactionRoot'],
+  properties: {
+    ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    ledgerHash: { type: 'string', pattern: UID_PATTERN },
+    closeTime: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    transactionRoot: { type: 'string', pattern: UID_PATTERN },
+  },
+} as const
+
+const publicSchemaSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'schemaUid',
+    'publisher',
+    'name',
+    'description',
+    'parentUid',
+    'supersedesUid',
+    'registrationTransactionHash',
+    'ledgerIndex',
+    'transactionIndex',
+  ],
+  properties: {
+    schemaUid: { type: 'string', pattern: UID_PATTERN },
+    publisher: { type: 'string', pattern: ADDRESS_PATTERN },
+    name: { type: 'string' },
+    description: { type: 'string' },
+    parentUid: { anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }] },
+    supersedesUid: { anyOf: [{ type: 'string', pattern: UID_PATTERN }, { type: 'null' }] },
+    registrationTransactionHash: { type: 'string', pattern: UID_PATTERN },
+    ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    transactionIndex: { type: 'integer', minimum: 0 },
+  },
+} as const
+
+const credentialStateSchema = {
+  type: 'string',
+  enum: ['pending', 'active', 'expired', 'deleted'],
+} as const
+
+const publicCredentialGenerationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'generationId',
+    'ledgerObjectId',
+    'issuer',
+    'subject',
+    'schemaUid',
+    'uriHex',
+    'expiration',
+    'accepted',
+    'createdLedgerIndex',
+    'createdTransactionIndex',
+    'lastLedgerIndex',
+    'deletedLedgerIndex',
+    'deletionCause',
+  ],
+  properties: {
+    generationId: { type: 'string', pattern: UID_PATTERN },
+    ledgerObjectId: { type: 'string', pattern: UID_PATTERN },
+    issuer: { type: 'string', pattern: ADDRESS_PATTERN },
+    subject: { type: 'string', pattern: ADDRESS_PATTERN },
+    schemaUid: { type: 'string', pattern: UID_PATTERN },
+    uriHex: { anyOf: [{ type: 'string', pattern: '^(?:[0-9A-Fa-f]{2})*$' }, { type: 'null' }] },
+    expiration: {
+      anyOf: [{ type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, { type: 'null' }],
+    },
+    accepted: { type: 'boolean' },
+    createdLedgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    createdTransactionIndex: { type: 'integer', minimum: 0 },
+    lastLedgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    deletedLedgerIndex: {
+      anyOf: [{ type: 'integer', minimum: 0, maximum: 4_294_967_295 }, { type: 'null' }],
+    },
+    deletionCause: {
+      anyOf: [
+        {
+          type: 'string',
+          enum: [
+            'issuer_revoked',
+            'subject_rejected',
+            'subject_removed',
+            'expired_cleanup',
+            'account_deleted',
+            'self_deleted',
+          ],
+        },
+        { type: 'null' },
+      ],
+    },
+  },
+} as const
+
+const publicCredentialGenerationSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'generationId',
+    'issuer',
+    'subject',
+    'schemaUid',
+    'state',
+    'createdLedgerIndex',
+    'lastLedgerIndex',
+  ],
+  properties: {
+    generationId: { type: 'string', pattern: UID_PATTERN },
+    issuer: { type: 'string', pattern: ADDRESS_PATTERN },
+    subject: { type: 'string', pattern: ADDRESS_PATTERN },
+    schemaUid: { type: 'string', pattern: UID_PATTERN },
+    state: credentialStateSchema,
+    createdLedgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    lastLedgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+  },
+} as const
+
+const publicTransactionSummarySchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'transactionHash',
+    'ledgerIndex',
+    'ledgerHash',
+    'transactionIndex',
+    'registrationStatus',
+    'credentialEventCount',
+  ],
+  properties: {
+    transactionHash: { type: 'string', pattern: UID_PATTERN },
+    ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    ledgerHash: { type: 'string', pattern: UID_PATTERN },
+    transactionIndex: { type: 'integer', minimum: 0 },
+    registrationStatus: {
+      anyOf: [{ type: 'string', enum: ['accepted', 'rejected'] }, { type: 'null' }],
+    },
+    credentialEventCount: { type: 'integer', minimum: 0 },
+  },
+} as const
+
+const discoveryStatsResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['network', 'schemas', 'credentialGenerations', 'checkpoint'],
+  properties: {
+    network: { type: 'string', pattern: PROFILE_PATTERN },
+    schemas: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['total', 'publishers'],
+      properties: {
+        total: { type: 'integer', minimum: 0 },
+        publishers: { type: 'integer', minimum: 0 },
+      },
+    },
+    credentialGenerations: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['total', 'pending', 'active', 'expired', 'deleted'],
+      properties: {
+        total: { type: 'integer', minimum: 0 },
+        pending: { type: 'integer', minimum: 0 },
+        active: { type: 'integer', minimum: 0 },
+        expired: { type: 'integer', minimum: 0 },
+        deleted: { type: 'integer', minimum: 0 },
+      },
+    },
+    checkpoint: publicCheckpointSchema,
+  },
+} as const
+
+const discoverySearchResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items', 'hasMore'],
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        anyOf: [
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', ...publicSchemaSummarySchema.required],
+            properties: {
+              type: { type: 'string', const: 'schema' },
+              ...publicSchemaSummarySchema.properties,
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', ...publicCredentialGenerationSummarySchema.required],
+            properties: {
+              type: { type: 'string', const: 'credential_generation' },
+              ...publicCredentialGenerationSummarySchema.properties,
+            },
+          },
+          {
+            type: 'object',
+            additionalProperties: false,
+            required: ['type', ...publicTransactionSummarySchema.required],
+            properties: {
+              type: { type: 'string', const: 'transaction' },
+              ...publicTransactionSummarySchema.properties,
+            },
+          },
+        ],
+      },
+    },
+    hasMore: { type: 'boolean' },
+  },
+} as const
+
+const publicSchemaActivityItemSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['transactionHash', ...publicSchemaRegistrationSchema.required],
+  properties: {
+    transactionHash: { type: 'string', pattern: UID_PATTERN },
+    ...publicSchemaRegistrationSchema.properties,
+  },
+} as const
+
+const discoveryActivityResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items'],
+  properties: {
+    items: { type: 'array', items: publicSchemaActivityItemSchema },
+    nextCursor: { type: 'string' },
+  },
+} as const
+
+const credentialGenerationResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['generation', 'state', 'timeline'],
+  properties: {
+    generation: publicCredentialGenerationSchema,
+    state: credentialStateSchema,
+    timeline: { type: 'array', items: publicCredentialEventSchema },
+  },
+} as const
+
+const transactionResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'transactionHash',
+    'ledgerIndex',
+    'ledgerHash',
+    'transactionIndex',
+    'registration',
+    'credentialEvents',
+  ],
+  properties: {
+    transactionHash: { type: 'string', pattern: UID_PATTERN },
+    ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
+    ledgerHash: { type: 'string', pattern: UID_PATTERN },
+    transactionIndex: { type: 'integer', minimum: 0 },
+    registration: { anyOf: [publicSchemaRegistrationSchema, { type: 'null' }] },
+    credentialEvents: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['items'],
+      properties: {
+        items: { type: 'array', items: publicCredentialEventSchema },
+        nextCursor: { type: 'string', pattern: '^[0-9]+$' },
+      },
+    },
+  },
+} as const
+
 function publicNetwork(row: Awaited<ReturnType<ApiRepository['listNetworks']>>[number]) {
   return {
     profileId: row.profileId,
@@ -234,6 +529,159 @@ function credentialState(
   return generation.accepted ? 'active' : 'pending'
 }
 
+function invalidIndexerEvidence(
+  message = 'The indexed evidence is incomplete or inconsistent.',
+): never {
+  throw new IndexerUnavailableError('INDEXER_EVIDENCE_INVALID', message)
+}
+
+function publicSchemaSummary(row: NonNullable<Awaited<ReturnType<ApiRepository['getSchema']>>>) {
+  return {
+    schemaUid: row.schemaUid,
+    publisher: row.publisher,
+    name: row.name,
+    description: row.description,
+    parentUid: row.parentUid,
+    supersedesUid: row.supersedesUid,
+    registrationTransactionHash: row.registrationTransactionHash,
+    ledgerIndex: row.ledgerIndex,
+    transactionIndex: row.transactionIndex,
+  }
+}
+
+function publicCredentialGeneration(
+  generation: NonNullable<Awaited<ReturnType<ApiRepository['getCredential']>>>,
+  expected: {
+    readonly profileId: string
+    readonly activationLedgerIndex: number
+    readonly checkpointLedgerIndex: number
+  },
+) {
+  const validDeletionShape =
+    (generation.deletedLedgerIndex === null && generation.deletionCause === null) ||
+    (generation.deletedLedgerIndex !== null &&
+      typeof generation.deletionCause === 'string' &&
+      CREDENTIAL_DELETION_CAUSES.has(generation.deletionCause) &&
+      generation.deletedLedgerIndex === generation.lastLedgerIndex)
+  if (
+    generation.profileId !== expected.profileId ||
+    !LOWERCASE_HASH.test(generation.generationId) ||
+    !LOWERCASE_HASH.test(generation.ledgerObjectId) ||
+    !LOWERCASE_HASH.test(generation.schemaUid) ||
+    !isClassicAddress(generation.issuer) ||
+    !isClassicAddress(generation.subject) ||
+    (generation.uriHex !== null && !HEX_BYTES.test(generation.uriHex)) ||
+    (generation.expiration !== null &&
+      (!Number.isSafeInteger(generation.expiration) || generation.expiration < 0)) ||
+    typeof generation.accepted !== 'boolean' ||
+    !Number.isSafeInteger(generation.createdLedgerIndex) ||
+    generation.createdLedgerIndex < expected.activationLedgerIndex ||
+    generation.createdLedgerIndex > expected.checkpointLedgerIndex ||
+    !Number.isSafeInteger(generation.createdTransactionIndex) ||
+    generation.createdTransactionIndex < 0 ||
+    generation.createdTransactionIndex > MAX_NODE_INDEX ||
+    !Number.isSafeInteger(generation.lastLedgerIndex) ||
+    generation.lastLedgerIndex < generation.createdLedgerIndex ||
+    generation.lastLedgerIndex > expected.checkpointLedgerIndex ||
+    (generation.deletedLedgerIndex !== null &&
+      (!Number.isSafeInteger(generation.deletedLedgerIndex) ||
+        generation.deletedLedgerIndex < generation.createdLedgerIndex ||
+        generation.deletedLedgerIndex > expected.checkpointLedgerIndex)) ||
+    !validDeletionShape
+  ) {
+    return invalidIndexerEvidence(
+      'The indexed credential generation is incomplete or inconsistent.',
+    )
+  }
+  return {
+    generationId: generation.generationId,
+    ledgerObjectId: generation.ledgerObjectId,
+    issuer: generation.issuer,
+    subject: generation.subject,
+    schemaUid: generation.schemaUid,
+    uriHex: generation.uriHex,
+    expiration: generation.expiration,
+    accepted: generation.accepted,
+    createdLedgerIndex: generation.createdLedgerIndex,
+    createdTransactionIndex: generation.createdTransactionIndex,
+    lastLedgerIndex: generation.lastLedgerIndex,
+    deletedLedgerIndex: generation.deletedLedgerIndex,
+    deletionCause: generation.deletionCause,
+  }
+}
+
+function publicDiscoveryStats(stats: Awaited<ReturnType<ApiRepository['getDiscoveryStats']>>): {
+  schemas: { total: number; publishers: number }
+  credentialGenerations: {
+    total: number
+    pending: number
+    active: number
+    expired: number
+    deleted: number
+  }
+  projectionLedgerIndexes: number[]
+} {
+  const schemaCounts = [stats.schemas.total, stats.schemas.publishers]
+  const credentialCounts = [
+    stats.credentialGenerations.total,
+    stats.credentialGenerations.pending,
+    stats.credentialGenerations.active,
+    stats.credentialGenerations.expired,
+    stats.credentialGenerations.deleted,
+  ]
+  const validCounts = [...schemaCounts, ...credentialCounts].every(
+    (value) => Number.isSafeInteger(value) && value >= 0,
+  )
+  const schemaLedgerShape =
+    stats.schemas.total === 0
+      ? stats.schemas.minimumLedgerIndex === null && stats.schemas.maximumLedgerIndex === null
+      : Number.isSafeInteger(stats.schemas.minimumLedgerIndex) &&
+        Number.isSafeInteger(stats.schemas.maximumLedgerIndex) &&
+        stats.schemas.minimumLedgerIndex! <= stats.schemas.maximumLedgerIndex!
+  const credentialLedgerShape =
+    stats.credentialGenerations.total === 0
+      ? stats.credentialGenerations.minimumCreatedLedgerIndex === null &&
+        stats.credentialGenerations.maximumLastLedgerIndex === null
+      : Number.isSafeInteger(stats.credentialGenerations.minimumCreatedLedgerIndex) &&
+        Number.isSafeInteger(stats.credentialGenerations.maximumLastLedgerIndex) &&
+        stats.credentialGenerations.minimumCreatedLedgerIndex! <=
+          stats.credentialGenerations.maximumLastLedgerIndex!
+  if (
+    !validCounts ||
+    stats.schemas.publishers > stats.schemas.total ||
+    stats.credentialGenerations.pending +
+      stats.credentialGenerations.active +
+      stats.credentialGenerations.expired +
+      stats.credentialGenerations.deleted !==
+      stats.credentialGenerations.total ||
+    !schemaLedgerShape ||
+    !credentialLedgerShape
+  ) {
+    return invalidIndexerEvidence(
+      'The indexed discovery aggregates are incomplete or inconsistent.',
+    )
+  }
+  return {
+    schemas: {
+      total: stats.schemas.total,
+      publishers: stats.schemas.publishers,
+    },
+    credentialGenerations: {
+      total: stats.credentialGenerations.total,
+      pending: stats.credentialGenerations.pending,
+      active: stats.credentialGenerations.active,
+      expired: stats.credentialGenerations.expired,
+      deleted: stats.credentialGenerations.deleted,
+    },
+    projectionLedgerIndexes: [
+      stats.schemas.minimumLedgerIndex,
+      stats.schemas.maximumLedgerIndex,
+      stats.credentialGenerations.minimumCreatedLedgerIndex,
+      stats.credentialGenerations.maximumLastLedgerIndex,
+    ].filter((value): value is number => value !== null),
+  }
+}
+
 function publicCredentialEvent(
   row: Awaited<ReturnType<ApiRepository['getCredentialEvents']>>[number],
   expected: {
@@ -242,6 +690,10 @@ function publicCredentialEvent(
     readonly subject: string
     readonly schemaUid: string
     readonly activationLedgerIndex: number
+    readonly generationId?: string
+    readonly ledgerIndex?: number
+    readonly ledgerHash?: string
+    readonly transactionIndex?: number
   },
 ) {
   const validEventShape =
@@ -249,20 +701,30 @@ function publicCredentialEvent(
     row.issuer === expected.issuer &&
     row.subject === expected.subject &&
     row.schemaUid === expected.schemaUid &&
+    (expected.generationId === undefined || row.generationId === expected.generationId) &&
+    (expected.ledgerIndex === undefined || row.ledgerIndex === expected.ledgerIndex) &&
+    (expected.ledgerHash === undefined || row.ledgerHash === expected.ledgerHash) &&
+    (expected.transactionIndex === undefined ||
+      row.transactionIndex === expected.transactionIndex) &&
     LOWERCASE_HASH.test(row.transactionHash) &&
     typeof row.generationId === 'string' &&
     LOWERCASE_HASH.test(row.generationId) &&
+    LOWERCASE_HASH.test(row.ledgerObjectId) &&
     LOWERCASE_HASH.test(row.ledgerHash) &&
     LOWERCASE_HASH.test(row.schemaUid) &&
     isClassicAddress(row.issuer) &&
     isClassicAddress(row.subject) &&
     Number.isSafeInteger(row.nodeIndex) &&
     row.nodeIndex >= 0 &&
+    row.nodeIndex <= MAX_NODE_INDEX &&
     Number.isSafeInteger(row.ledgerIndex) &&
     row.ledgerIndex >= expected.activationLedgerIndex &&
     row.ledgerIndex <= 4_294_967_295 &&
     Number.isSafeInteger(row.transactionIndex) &&
     row.transactionIndex >= 0 &&
+    row.transactionIndex <= MAX_NODE_INDEX &&
+    (row.uriHex === null || HEX_BYTES.test(row.uriHex)) &&
+    (row.expiration === null || (Number.isSafeInteger(row.expiration) && row.expiration >= 0)) &&
     (row.eventType === 'created' || row.eventType === 'accepted' || row.eventType === 'deleted') &&
     (row.eventType === 'deleted'
       ? typeof row.deletionCause === 'string' && CREDENTIAL_DELETION_CAUSES.has(row.deletionCause)
@@ -374,6 +836,121 @@ function publicSchemaRegistration(
   return invalidSchemaRegistrationEvidence()
 }
 
+function publicTransactionProjection(
+  projection: Awaited<ReturnType<ApiRepository['getTransactionProjectionSummary']>>,
+  network: { readonly networkId: number; readonly activationLedgerIndex: number },
+  expectedTransactionHash: string,
+) {
+  if (
+    !Number.isSafeInteger(projection.credentialEventCount) ||
+    projection.credentialEventCount < 0 ||
+    (projection.credentialEventCount === 0) !== (projection.firstCredentialEvent === undefined)
+  ) {
+    return invalidIndexerEvidence('The indexed transaction summary is incomplete or inconsistent.')
+  }
+  const registration =
+    projection.registration === undefined
+      ? null
+      : publicSchemaRegistration(projection.registration, network, expectedTransactionHash)
+  const firstCredentialEvent =
+    projection.firstCredentialEvent === undefined
+      ? null
+      : publicCredentialEvent(projection.firstCredentialEvent, {
+          transactionHash: expectedTransactionHash,
+          issuer: projection.firstCredentialEvent.issuer,
+          subject: projection.firstCredentialEvent.subject,
+          schemaUid: projection.firstCredentialEvent.schemaUid,
+          activationLedgerIndex: network.activationLedgerIndex,
+        })
+  if (registration === null && firstCredentialEvent === null) return null
+
+  const coordinate = registration ?? firstCredentialEvent!
+  if (
+    registration !== null &&
+    firstCredentialEvent !== null &&
+    (registration.ledgerIndex !== firstCredentialEvent.ledgerIndex ||
+      registration.ledgerHash !== firstCredentialEvent.ledgerHash ||
+      registration.transactionIndex !== firstCredentialEvent.transactionIndex)
+  ) {
+    return invalidIndexerEvidence('The indexed transaction coordinates are inconsistent.')
+  }
+  return {
+    transactionHash: expectedTransactionHash,
+    ledgerIndex: coordinate.ledgerIndex,
+    ledgerHash: coordinate.ledgerHash,
+    transactionIndex: coordinate.transactionIndex,
+    registration,
+    registrationStatus: registration?.status ?? null,
+    credentialEventCount: projection.credentialEventCount,
+  }
+}
+
+function publicCredentialTimeline(
+  rows: readonly Awaited<ReturnType<ApiRepository['getCredentialEventsByGeneration']>>[number][],
+  generation: NonNullable<Awaited<ReturnType<ApiRepository['getCredentialGenerationById']>>>,
+  activationLedgerIndex: number,
+) {
+  if (rows.length === 0 || rows.length > CREDENTIAL_GENERATION_TIMELINE_LIMIT) {
+    return invalidIndexerEvidence('The indexed credential timeline is incomplete or inconsistent.')
+  }
+  const items = rows.map((row) =>
+    publicCredentialEvent(row, {
+      transactionHash: row.transactionHash,
+      issuer: generation.issuer,
+      subject: generation.subject,
+      schemaUid: generation.schemaUid,
+      generationId: generation.generationId,
+      activationLedgerIndex,
+    }),
+  )
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
+    const previous = rows[index - 1]
+    if (
+      row.ledgerObjectId !== generation.ledgerObjectId ||
+      row.uriHex !== generation.uriHex ||
+      row.expiration !== generation.expiration ||
+      (previous !== undefined &&
+        (row.ledgerIndex < previous.ledgerIndex ||
+          (row.ledgerIndex === previous.ledgerIndex &&
+            row.transactionIndex < previous.transactionIndex) ||
+          (row.ledgerIndex === previous.ledgerIndex &&
+            row.transactionIndex === previous.transactionIndex &&
+            row.nodeIndex <= previous.nodeIndex)))
+    ) {
+      return invalidIndexerEvidence(
+        'The indexed credential timeline is incomplete or inconsistent.',
+      )
+    }
+  }
+  const created = rows.filter((row) => row.eventType === 'created')
+  const accepted = rows.filter((row) => row.eventType === 'accepted')
+  const deleted = rows.filter((row) => row.eventType === 'deleted')
+  const first = rows[0]!
+  const last = rows.at(-1)!
+  if (
+    created.length !== 1 ||
+    first.eventType !== 'created' ||
+    first.transactionHash !== generation.generationId ||
+    first.ledgerIndex !== generation.createdLedgerIndex ||
+    first.transactionIndex !== generation.createdTransactionIndex ||
+    accepted.length > 1 ||
+    deleted.length > 1 ||
+    deleted.some((row) => row.accepted !== generation.accepted) ||
+    last.ledgerIndex !== generation.lastLedgerIndex ||
+    generation.accepted !== (first.accepted || accepted.length === 1) ||
+    (generation.deletedLedgerIndex === null
+      ? deleted.length !== 0
+      : deleted.length !== 1 ||
+        last.eventType !== 'deleted' ||
+        last.ledgerIndex !== generation.deletedLedgerIndex ||
+        last.deletionCause !== generation.deletionCause)
+  ) {
+    return invalidIndexerEvidence('The indexed credential timeline is incomplete or inconsistent.')
+  }
+  return items
+}
+
 export interface CreateApiOptions {
   repository: ApiRepository
   resolver: PayloadResolver
@@ -381,10 +958,41 @@ export interface CreateApiOptions {
   logger?: boolean
   allowedOrigins?: string[]
   globalRateLimit?: number
+  internalSsrToken?: string
+  trustedProxyCidrs?: string[]
   verifyRateLimit?: number
   pinningService?: DemoPinningService
   readinessMaxLedgerAgeSeconds?: number
   now?: () => Date
+}
+
+function singleHeader(request: FastifyRequest, name: string): string | undefined {
+  const value = request.headers[name]
+  return typeof value === 'string' ? value : undefined
+}
+
+function tokensMatch(expected: string, presented: string | undefined): boolean {
+  if (presented === undefined) return false
+  const expectedBytes = Buffer.from(expected, 'utf8')
+  const presentedBytes = Buffer.from(presented, 'utf8')
+  return (
+    expectedBytes.length === presentedBytes.length && timingSafeEqual(expectedBytes, presentedBytes)
+  )
+}
+
+function rateLimitKey(request: FastifyRequest, internalSsrToken: string | undefined): string {
+  if (internalSsrToken !== undefined) {
+    const presentedToken = singleHeader(request, INTERNAL_SSR_TOKEN_HEADER)
+    const clientKey = singleHeader(request, INTERNAL_SSR_CLIENT_KEY_HEADER)
+    if (
+      tokensMatch(internalSsrToken, presentedToken) &&
+      clientKey !== undefined &&
+      INTERNAL_SSR_CLIENT_KEY.test(clientKey)
+    ) {
+      return `ssr:${clientKey}`
+    }
+  }
+  return `ip:${request.ip}`
 }
 
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024
@@ -394,9 +1002,19 @@ const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024
 const VERIFY_BODY_LIMIT_BYTES = DEFAULT_BODY_LIMIT_BYTES + 64 * 1024
 
 export async function createApi(options: CreateApiOptions): Promise<FastifyInstance> {
+  if (
+    options.internalSsrToken !== undefined &&
+    !INTERNAL_SSR_TOKEN.test(options.internalSsrToken)
+  ) {
+    throw new Error('internalSsrToken must be 32 to 256 URL-safe random characters')
+  }
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: DEFAULT_BODY_LIMIT_BYTES,
+    trustProxy:
+      options.trustedProxyCidrs === undefined || options.trustedProxyCidrs.length === 0
+        ? false
+        : options.trustedProxyCidrs,
     ajv: {
       customOptions: {
         removeAdditional: false,
@@ -415,6 +1033,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     global: true,
     max: options.globalRateLimit ?? 100,
     timeWindow: '1 minute',
+    keyGenerator: (request) => rateLimitKey(request, options.internalSsrToken),
   })
 
   await app.register(swagger, {
@@ -581,6 +1200,532 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           .send({ error: 'INDEXER_STATUS_NOT_FOUND', message: 'Indexer status not found' })
       }
       return publicIndexerStatus(status)
+    },
+  )
+
+  app.get<{ Params: { network: string } }>(
+    '/v1/networks/:network/stats',
+    {
+      schema: {
+        params: networkParamsSchema,
+        response: {
+          200: discoveryStatsResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) =>
+      options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const checkpoint = await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          [],
+          network.activationLedgerIndex,
+        )
+        const stats = publicDiscoveryStats(
+          await repository.getDiscoveryStats({
+            profileId: request.params.network,
+            checkpointCloseTime: checkpoint.closeTime,
+          }),
+        )
+        assertAuthoritativeLedgerEvidence({
+          expectedProfileId: request.params.network,
+          status,
+          checkpoint,
+          now,
+          maxLedgerAgeSeconds,
+          minimumLedgerIndex: network.activationLedgerIndex,
+          projectionLedgerIndexes: stats.projectionLedgerIndexes,
+        })
+        return {
+          network: request.params.network,
+          schemas: stats.schemas,
+          credentialGenerations: stats.credentialGenerations,
+          checkpoint: {
+            ledgerIndex: checkpoint.ledgerIndex,
+            ledgerHash: checkpoint.ledgerHash,
+            closeTime: checkpoint.closeTime,
+            transactionRoot: checkpoint.transactionRoot,
+          },
+        }
+      }),
+  )
+
+  app.get<{
+    Params: { network: string }
+    Querystring: { q: string; limit?: string }
+  }>(
+    '/v1/networks/:network/search',
+    {
+      schema: {
+        params: networkParamsSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['q'],
+          properties: {
+            q: { type: 'string', minLength: 2, maxLength: 128 },
+            limit: { type: 'string', pattern: '^(?:[1-9]|[1-4][0-9]|50)$' },
+          },
+        },
+        response: {
+          200: discoverySearchResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const query = request.query.q
+      if (
+        query !== query.trim() ||
+        SEARCH_QUERY_CONTROL.test(query) ||
+        !SEARCH_QUERY_CONTENT.test(query)
+      ) {
+        return reply.code(400).send({
+          error: 'SEARCH_QUERY_INVALID',
+          message: 'q must be trimmed text containing at least one letter or number',
+        })
+      }
+      const limit = Number(request.query.limit ?? DISCOVERY_SEARCH_DEFAULT_LIMIT)
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > DISCOVERY_SEARCH_MAX_LIMIT) {
+        return reply.code(400).send({ error: 'LIMIT_INVALID', message: 'Invalid limit' })
+      }
+      const hashCandidate = query.toLowerCase()
+      const normalizedHash = LOWERCASE_HASH.test(hashCandidate) ? hashCandidate : undefined
+      const publisher = normalizedHash === undefined && isClassicAddress(query) ? query : undefined
+
+      return options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+
+        if (normalizedHash !== undefined) {
+          const [schema, generation, transactionProjection] = await Promise.all([
+            repository.getSchema(request.params.network, normalizedHash),
+            repository.getCredentialGenerationById({
+              profileId: request.params.network,
+              generationId: normalizedHash,
+            }),
+            repository.getTransactionProjectionSummary({
+              profileId: request.params.network,
+              transactionHash: normalizedHash,
+            }),
+          ])
+          const generationTimeline =
+            generation === undefined
+              ? []
+              : await repository.getCredentialEventsByGeneration({
+                  profileId: request.params.network,
+                  generationId: normalizedHash,
+                  limit: CREDENTIAL_GENERATION_TIMELINE_LIMIT + 1,
+                })
+          const schemaEvidence =
+            schema === undefined
+              ? []
+              : await repository.getSchemaProjectionEvidence({
+                  profileId: request.params.network,
+                  schemaUids: schemaProjectionEvidenceUids([schema], request.params.network),
+                })
+          const checkpoint = await requireAuthoritativeCheckpoint(
+            repository,
+            request.params.network,
+            status,
+            now,
+            [
+              ...schemaEvidence.map((item) => item.schema.ledgerIndex),
+              ...(generation === undefined
+                ? []
+                : [generation.createdLedgerIndex, generation.lastLedgerIndex]),
+              ...generationTimeline.map((row) => row.ledgerIndex),
+              ...(transactionProjection.registration === undefined
+                ? []
+                : [transactionProjection.registration.ledgerIndex]),
+              ...(transactionProjection.firstCredentialEvent === undefined
+                ? []
+                : [transactionProjection.firstCredentialEvent.ledgerIndex]),
+            ],
+            network.activationLedgerIndex,
+          )
+          const items: Array<Record<string, unknown>> = []
+          if (schema !== undefined) {
+            authoritativeResolvedSchema(schema, schemaEvidence, {
+              profileId: request.params.network,
+              schemaUid: schema.schemaUid,
+              networkId: network.networkId,
+              activationLedgerIndex: network.activationLedgerIndex,
+            })
+            items.push({ type: 'schema', ...publicSchemaSummary(schema) })
+          }
+          if (generation !== undefined) {
+            const publicGeneration = publicCredentialGeneration(generation, {
+              profileId: request.params.network,
+              activationLedgerIndex: network.activationLedgerIndex,
+              checkpointLedgerIndex: checkpoint.ledgerIndex,
+            })
+            publicCredentialTimeline(generationTimeline, generation, network.activationLedgerIndex)
+            items.push({
+              type: 'credential_generation',
+              generationId: publicGeneration.generationId,
+              issuer: publicGeneration.issuer,
+              subject: publicGeneration.subject,
+              schemaUid: publicGeneration.schemaUid,
+              state: credentialState(generation, checkpoint.closeTime),
+              createdLedgerIndex: publicGeneration.createdLedgerIndex,
+              lastLedgerIndex: publicGeneration.lastLedgerIndex,
+            })
+          }
+          const transaction = publicTransactionProjection(
+            transactionProjection,
+            network,
+            normalizedHash,
+          )
+          if (transaction !== null) {
+            items.push({
+              type: 'transaction',
+              transactionHash: transaction.transactionHash,
+              ledgerIndex: transaction.ledgerIndex,
+              ledgerHash: transaction.ledgerHash,
+              transactionIndex: transaction.transactionIndex,
+              registrationStatus: transaction.registrationStatus,
+              credentialEventCount: transaction.credentialEventCount,
+            })
+          }
+          return { items: items.slice(0, limit), hasMore: items.length > limit }
+        }
+
+        const rows = await repository.searchSchemas({
+          profileId: request.params.network,
+          ...(publisher === undefined ? { query } : { publisher }),
+          limit,
+        })
+        if (rows.length > limit + 1) {
+          return invalidIndexerEvidence('The indexed schema search page exceeds its query bound.')
+        }
+        const schemaEvidence = await repository.getSchemaProjectionEvidence({
+          profileId: request.params.network,
+          schemaUids: schemaProjectionEvidenceUids(rows, request.params.network),
+        })
+        await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          schemaEvidence.map((item) => item.schema.ledgerIndex),
+          network.activationLedgerIndex,
+        )
+        for (const row of rows) {
+          authoritativeResolvedSchema(row, schemaEvidence, {
+            profileId: request.params.network,
+            schemaUid: row.schemaUid,
+            networkId: network.networkId,
+            activationLedgerIndex: network.activationLedgerIndex,
+          })
+        }
+        return {
+          items: rows.slice(0, limit).map((row) => ({
+            type: 'schema' as const,
+            ...publicSchemaSummary(row),
+          })),
+          hasMore: rows.length > limit,
+        }
+      })
+    },
+  )
+
+  app.get<{
+    Params: { network: string }
+    Querystring: { cursor?: string; limit?: string }
+  }>(
+    '/v1/networks/:network/activity',
+    {
+      schema: {
+        params: networkParamsSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            cursor: { type: 'string', minLength: 1, maxLength: 512 },
+            limit: { type: 'string', pattern: '^(?:[1-9]|[1-9][0-9]|100)$' },
+          },
+        },
+        response: {
+          200: discoveryActivityResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      let cursor
+      try {
+        cursor =
+          request.query.cursor === undefined
+            ? undefined
+            : decodeSchemaRegistrationCursor(request.query.cursor)
+      } catch {
+        return reply.code(400).send({ error: 'CURSOR_INVALID', message: 'Invalid cursor' })
+      }
+      const limit = Number(request.query.limit ?? DISCOVERY_PAGE_DEFAULT_LIMIT)
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > DISCOVERY_PAGE_MAX_LIMIT) {
+        return reply.code(400).send({ error: 'LIMIT_INVALID', message: 'Invalid limit' })
+      }
+      return options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const rows = await repository.listSchemaRegistrations({
+          profileId: request.params.network,
+          ...(cursor === undefined ? {} : { cursor }),
+          limit,
+        })
+        if (rows.length > limit + 1) {
+          return invalidIndexerEvidence('The indexed schema activity page exceeds its query bound.')
+        }
+        await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          rows.map((row) => row.ledgerIndex),
+          network.activationLedgerIndex,
+        )
+        const registrations = rows.map((row) => ({
+          transactionHash: row.transactionHash,
+          ...publicSchemaRegistration(row, network, row.transactionHash),
+        }))
+        const hasNext = registrations.length > limit
+        const items = hasNext ? registrations.slice(0, limit) : registrations
+        const last = items.at(-1)
+        return {
+          items,
+          ...(hasNext && last !== undefined
+            ? {
+                nextCursor: encodeSchemaRegistrationCursor({
+                  ledgerIndex: last.ledgerIndex,
+                  transactionIndex: last.transactionIndex,
+                  transactionHash: last.transactionHash,
+                }),
+              }
+            : {}),
+        }
+      })
+    },
+  )
+
+  app.get<{ Params: { network: string; generationId: string } }>(
+    '/v1/networks/:network/credential-generations/:generationId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['network', 'generationId'],
+          properties: {
+            network: { type: 'string', pattern: PROFILE_PATTERN },
+            generationId: { type: 'string', pattern: INPUT_HASH_PATTERN },
+          },
+        },
+        response: {
+          200: credentialGenerationResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const generationId = request.params.generationId.toLowerCase()
+      return options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const generation = await repository.getCredentialGenerationById({
+          profileId: request.params.network,
+          generationId,
+        })
+        const timeline =
+          generation === undefined
+            ? []
+            : await repository.getCredentialEventsByGeneration({
+                profileId: request.params.network,
+                generationId,
+                limit: CREDENTIAL_GENERATION_TIMELINE_LIMIT + 1,
+              })
+        const checkpoint = await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          [
+            ...(generation === undefined
+              ? []
+              : [generation.createdLedgerIndex, generation.lastLedgerIndex]),
+            ...timeline.map((row) => row.ledgerIndex),
+          ],
+          network.activationLedgerIndex,
+        )
+        if (generation === undefined) {
+          return reply.code(404).send({
+            error: 'CREDENTIAL_GENERATION_NOT_FOUND',
+            message: 'Credential generation not found',
+          })
+        }
+        const publicGeneration = publicCredentialGeneration(generation, {
+          profileId: request.params.network,
+          activationLedgerIndex: network.activationLedgerIndex,
+          checkpointLedgerIndex: checkpoint.ledgerIndex,
+        })
+        return {
+          generation: publicGeneration,
+          state: credentialState(generation, checkpoint.closeTime),
+          timeline: publicCredentialTimeline(timeline, generation, network.activationLedgerIndex),
+        }
+      })
+    },
+  )
+
+  app.get<{
+    Params: { network: string; transactionHash: string }
+    Querystring: { cursor?: string; limit?: string }
+  }>(
+    '/v1/networks/:network/transactions/:transactionHash',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['network', 'transactionHash'],
+          properties: {
+            network: { type: 'string', pattern: PROFILE_PATTERN },
+            transactionHash: { type: 'string', pattern: INPUT_HASH_PATTERN },
+          },
+        },
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            cursor: { type: 'string', pattern: '^(?:0|[1-9][0-9]{0,9})$' },
+            limit: { type: 'string', pattern: '^(?:[1-9]|[1-9][0-9]|100)$' },
+          },
+        },
+        response: {
+          200: transactionResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const transactionHash = request.params.transactionHash.toLowerCase()
+      const afterNodeIndex =
+        request.query.cursor === undefined ? undefined : Number(request.query.cursor)
+      if (
+        afterNodeIndex !== undefined &&
+        (!Number.isSafeInteger(afterNodeIndex) ||
+          afterNodeIndex < 0 ||
+          afterNodeIndex > MAX_NODE_INDEX)
+      ) {
+        return reply.code(400).send({ error: 'CURSOR_INVALID', message: 'Invalid cursor' })
+      }
+      const limit = Number(request.query.limit ?? DISCOVERY_PAGE_DEFAULT_LIMIT)
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > DISCOVERY_PAGE_MAX_LIMIT) {
+        return reply.code(400).send({ error: 'LIMIT_INVALID', message: 'Invalid limit' })
+      }
+      return options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const projection = await repository.getTransactionProjectionSummary({
+          profileId: request.params.network,
+          transactionHash,
+        })
+        const rows =
+          projection.credentialEventCount === 0
+            ? []
+            : await repository.getCredentialEventsByTransactionPage({
+                profileId: request.params.network,
+                transactionHash,
+                ...(afterNodeIndex === undefined ? {} : { afterNodeIndex }),
+                limit,
+              })
+        if (rows.length > limit + 1) {
+          return invalidIndexerEvidence(
+            'The indexed transaction event page exceeds its query bound.',
+          )
+        }
+        await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          [
+            ...(projection.registration === undefined ? [] : [projection.registration.ledgerIndex]),
+            ...(projection.firstCredentialEvent === undefined
+              ? []
+              : [projection.firstCredentialEvent.ledgerIndex]),
+            ...rows.map((row) => row.ledgerIndex),
+          ],
+          network.activationLedgerIndex,
+        )
+        const transaction = publicTransactionProjection(projection, network, transactionHash)
+        if (transaction === null) {
+          return reply
+            .code(404)
+            .send({ error: 'TRANSACTION_NOT_FOUND', message: 'Transaction not found' })
+        }
+        const publicEvents = rows.map((row) =>
+          publicCredentialEvent(row, {
+            transactionHash,
+            issuer: row.issuer,
+            subject: row.subject,
+            schemaUid: row.schemaUid,
+            activationLedgerIndex: network.activationLedgerIndex,
+            ledgerIndex: transaction.ledgerIndex,
+            ledgerHash: transaction.ledgerHash,
+            transactionIndex: transaction.transactionIndex,
+          }),
+        )
+        const hasNext = publicEvents.length > limit
+        const items = hasNext ? publicEvents.slice(0, limit) : publicEvents
+        const last = items.at(-1)
+        return {
+          transactionHash,
+          ledgerIndex: transaction.ledgerIndex,
+          ledgerHash: transaction.ledgerHash,
+          transactionIndex: transaction.transactionIndex,
+          registration: transaction.registration,
+          credentialEvents: {
+            items,
+            ...(hasNext && last !== undefined ? { nextCursor: String(last.nodeIndex) } : {}),
+          },
+        }
+      })
     },
   )
 
@@ -900,6 +2045,15 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           return reply.code(413).send({
             error: 'CREDENTIAL_EVENT_HISTORY_LIMIT_EXCEEDED',
             message: `Credential event history exceeds ${CREDENTIAL_EVENT_HISTORY_LIMIT} items`,
+          })
+        }
+        for (const item of items) {
+          publicCredentialEvent(item, {
+            transactionHash: item.transactionHash,
+            issuer: request.params.issuer,
+            subject: request.params.subject,
+            schemaUid: request.params.schemaUid,
+            activationLedgerIndex: network.activationLedgerIndex,
           })
         }
         return {

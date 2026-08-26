@@ -443,7 +443,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await closeAndDropTemporaryDatabases()
   }, 60_000)
 
-  it('applies 0000 then 0001 to a fresh database and is migration-idempotent', async () => {
+  it('applies migrations 0000 through 0002 to a fresh database and is migration-idempotent', async () => {
     const database = temporaryDatabases[0]
     if (database === undefined) throw new Error('First temporary database was not created')
 
@@ -461,10 +461,28 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     const [statusTable] = await database.client.sql<{ exists: boolean }[]>`
       SELECT to_regclass('public.indexer_status') IS NOT NULL AS exists
     `
+    const discoveryIndexes = await database.client.sql<{ indexName: string }[]>`
+      SELECT indexname AS "indexName"
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname IN (
+          'credential_generations_stats_idx',
+          'schema_events_activity_idx',
+          'schemas_order_idx',
+          'schemas_search_idx'
+        )
+      ORDER BY indexname
+    `
 
-    expect(migrationCount?.count).toBe(2)
+    expect(migrationCount?.count).toBe(3)
     expect(columns.map((row) => row.columnName)).toContain('transaction_root')
     expect(statusTable?.exists).toBe(true)
+    expect(discoveryIndexes.map((row) => row.indexName)).toEqual([
+      'credential_generations_stats_idx',
+      'schema_events_activity_idx',
+      'schemas_order_idx',
+      'schemas_search_idx',
+    ])
   })
 
   it('provisions idempotent least-privilege indexer and API roles', async () => {

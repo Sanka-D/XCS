@@ -21,6 +21,36 @@ export interface SchemaPage {
   nextCursor?: string
 }
 
+export interface SchemaRegistrationCursor {
+  ledgerIndex: number
+  transactionIndex: number
+  transactionHash: string
+}
+
+export interface DiscoveryStats {
+  schemas: {
+    total: number
+    publishers: number
+    minimumLedgerIndex: number | null
+    maximumLedgerIndex: number | null
+  }
+  credentialGenerations: {
+    total: number
+    pending: number
+    active: number
+    expired: number
+    deleted: number
+    minimumCreatedLedgerIndex: number | null
+    maximumLastLedgerIndex: number | null
+  }
+}
+
+export interface TransactionProjectionSummary {
+  registration: SchemaEventRow | undefined
+  firstCredentialEvent: CredentialEventRow | undefined
+  credentialEventCount: number
+}
+
 export interface SchemaProjectionEvidence {
   schema: SchemaRow
   registration: SchemaEventRow
@@ -49,11 +79,30 @@ export interface ApiRepository {
     cursor?: SchemaCursor
     limit: number
   }): Promise<SchemaRow[]>
+  searchSchemas(input: {
+    profileId: string
+    query?: string
+    publisher?: string
+    limit: number
+  }): Promise<SchemaRow[]>
+  listSchemaRegistrations(input: {
+    profileId: string
+    cursor?: SchemaRegistrationCursor
+    limit: number
+  }): Promise<SchemaEventRow[]>
+  getDiscoveryStats(input: {
+    profileId: string
+    checkpointCloseTime: number
+  }): Promise<DiscoveryStats>
   getCredential(input: {
     profileId: string
     issuer: string
     subject: string
     schemaUid: string
+  }): Promise<CredentialGenerationRow | undefined>
+  getCredentialGenerationById(input: {
+    profileId: string
+    generationId: string
   }): Promise<CredentialGenerationRow | undefined>
   getCredentialEvents(input: {
     profileId: string
@@ -68,6 +117,21 @@ export interface ApiRepository {
     issuer: string
     subject: string
     schemaUid: string
+    limit: number
+  }): Promise<CredentialEventRow[]>
+  getCredentialEventsByGeneration(input: {
+    profileId: string
+    generationId: string
+    limit: number
+  }): Promise<CredentialEventRow[]>
+  getTransactionProjectionSummary(input: {
+    profileId: string
+    transactionHash: string
+  }): Promise<TransactionProjectionSummary>
+  getCredentialEventsByTransactionPage(input: {
+    profileId: string
+    transactionHash: string
+    afterNodeIndex?: number
     limit: number
   }): Promise<CredentialEventRow[]>
 }

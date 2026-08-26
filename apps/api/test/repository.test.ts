@@ -1,4 +1,6 @@
 import {
+  credentialEvents,
+  credentialGenerations,
   schemaEvents,
   schemas,
   type SchemaEventRow,
@@ -102,5 +104,57 @@ describe('PostgresApiRepository authority reads', () => {
     expect(from).toHaveBeenCalledWith(schemas)
     expect(innerJoin.mock.calls[0]?.[0]).toBe(schemaEvents)
     expect(where).toHaveBeenCalledOnce()
+  })
+
+  it('bounds schema search, schema activity, and transaction event pages with one lookahead row', async () => {
+    const limits: number[] = []
+    const tables: unknown[] = []
+    const select = vi.fn(() => ({
+      from: (table: unknown) => {
+        tables.push(table)
+        return {
+          where: () => ({
+            orderBy: () => ({
+              limit: async (value: number) => {
+                limits.push(value)
+                return []
+              },
+            }),
+          }),
+        }
+      },
+    }))
+    const repository = new PostgresApiRepository({ select } as unknown as XcsDatabase)
+
+    await repository.searchSchemas({ profileId: 'testnet', query: 'course%_', limit: 5 })
+    await repository.listSchemaRegistrations({ profileId: 'testnet', limit: 3 })
+    await repository.getCredentialEventsByTransactionPage({
+      profileId: 'testnet',
+      transactionHash: schemaRegistration.transactionHash,
+      afterNodeIndex: 4,
+      limit: 2,
+    })
+
+    expect(tables).toEqual([schemas, schemaEvents, credentialEvents])
+    expect(limits).toEqual([6, 4, 3])
+  })
+
+  it('looks up a Credential generation only by profile and exact generation id', async () => {
+    const limit = vi.fn(async () => [])
+    const where = vi.fn(() => ({ limit }))
+    const from = vi.fn(() => ({ where }))
+    const select = vi.fn(() => ({ from }))
+    const repository = new PostgresApiRepository({ select } as unknown as XcsDatabase)
+
+    await expect(
+      repository.getCredentialGenerationById({
+        profileId: 'testnet',
+        generationId: 'd'.repeat(64),
+      }),
+    ).resolves.toBeUndefined()
+
+    expect(from).toHaveBeenCalledWith(credentialGenerations)
+    expect(where).toHaveBeenCalledOnce()
+    expect(limit).toHaveBeenCalledWith(1)
   })
 })

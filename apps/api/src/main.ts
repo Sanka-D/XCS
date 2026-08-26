@@ -32,6 +32,8 @@ const app = await createApi({
     untrusted: config.untrustedIssuers,
   }),
   allowedOrigins: config.allowedOrigins,
+  internalSsrToken: config.internalSsrToken,
+  trustedProxyCidrs: config.trustedProxyCidrs,
   readinessMaxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
   ...(pinningService === undefined ? {} : { pinningService }),
   logger: true,
