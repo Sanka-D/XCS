@@ -298,6 +298,11 @@
     "payloadConsentIntro": "The next step contacts {host} directly from this browser. That host can observe your IP address and request time.",
     "payloadConsent": "I explicitly consent to fetching this public payload from the displayed host.",
     "payloadUnavailable": "The payload cannot be safely reviewed. Acceptance is blocked, but a pending credential may still be rejected.",
+    "issuerUnknown": "XCS has no trust decision for this issuer. Unknown does not mean trusted or untrusted.",
+    "issuerAcknowledgement": "I independently recognize the displayed issuer address and choose to accept this exact credential generation.",
+    "issuerAcknowledgementRequired": "Confirm your own trust decision for this exact unknown issuer generation before accepting.",
+    "issuerAcknowledgementStale": "The issuer trust context changed. Review it and confirm your decision again.",
+    "issuerUntrusted": "This verifier's local policy marks the issuer as untrusted. Acceptance is blocked.",
     "rejectSafety": "Rejecting deletes this pending object without endorsing its issuer or claims.",
     "submitted": "Validated subject action: "
   },

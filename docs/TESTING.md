@@ -20,7 +20,8 @@ go vet ./...
 go build ./...
 ```
 
-The deterministic browser gate requires Chromium once, then runs without Testnet or wallet keys:
+The deterministic browser gate requires Chromium once, then runs without Testnet, PostgreSQL or
+wallet keys:
 
 ```bash
 pnpm --filter @xcs-protocol/web exec playwright install chromium
@@ -35,8 +36,10 @@ pnpm test:e2e
 3. Indexer fixture tests consume captured public-ledger bundles produced only after exact agreement
    between both configured `rippled` sources.
 4. Testnet E2E requires a real network profile and externally controlled funded wallets.
-5. The deterministic Playwright browser gate uses an explicitly development-only fake wallet and
-   XRPL client. Real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
+5. The deterministic Playwright browser gate uses explicitly development-only issuer and subject
+   wallets plus a fake XRPL client. It proves exact application transitions and indexed business
+   evidence, including the subject's payload consent and separate trust-neutral acknowledgement;
+   real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
 
 Never use a production seed in tests. A Testnet reset invalidates the activation profile and
 requires a new fixture/profile rather than editing historical expected UIDs.

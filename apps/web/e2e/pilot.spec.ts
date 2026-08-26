@@ -1,8 +1,10 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Download, type Page } from '@playwright/test'
 import {
   canonicalize,
   computeSchemaUid,
+  createHttpsPayloadUri,
   encodeUtf8,
+  encodeUtf8Hex,
   sha256Hex,
   validateSchema,
   type JsonValue,
@@ -14,6 +16,8 @@ const API_PREFIX = '/__e2e-api'
 const PROFILE_ID = 'xrpl-testnet-xcs-browser-e2e'
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
+const ISSUER_WALLET_ID = 'xcs-browser-e2e'
+const SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
 const LEDGER_HASH = 'cd'.repeat(32)
 const SCHEMA: SchemaDefinition = {
   xcsVersion: '0.1',
@@ -51,6 +55,14 @@ const PROFILE: NetworkProfile = {
 interface ApiMockOptions {
   readonly schemaDigestHex?: string
   readonly credentialEvidence?: () => 'confirmed' | 'mismatch'
+  readonly credentialLifecycle?: BrowserCredentialLifecycle
+  readonly credentialUri?: string
+}
+
+interface BrowserCredentialLifecycle {
+  generationId: string | null
+  state: 'pending' | 'active'
+  acceptedTransactionHash: string | null
 }
 
 const browserErrors = new WeakMap<Page, string[]>()
@@ -75,6 +87,30 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
   await page.route(`**${API_PREFIX}/v1/**`, async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.slice(API_PREFIX.length)
+    if (route.request().method() === 'POST' && path === '/v1/verify') {
+      const body = route.request().postDataJSON() as Record<string, unknown>
+      const lifecycle = options.credentialLifecycle
+      if (
+        lifecycle?.generationId === null ||
+        body.network !== PROFILE_ID ||
+        body.issuer !== ISSUER ||
+        body.subject !== SUBJECT ||
+        body.schemaUid !== SCHEMA_UID
+      ) {
+        await route.fulfill({ status: 400, json: { error: 'BROWSER_E2E_VERIFY_INPUT_INVALID' } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          onChain: lifecycle?.state ?? 'pending',
+          schema: 'valid',
+          payload: Object.hasOwn(body, 'payload') ? 'valid' : 'not_checked',
+          issuerTrust: 'unknown',
+          ...(lifecycle?.generationId ? { generationId: lifecycle.generationId } : {}),
+        },
+      })
+      return
+    }
     if (route.request().method() !== 'GET') {
       await route.fulfill({ status: 405, json: { error: 'BROWSER_E2E_METHOD_NOT_ALLOWED' } })
       return
@@ -167,6 +203,26 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
       })
       return
     }
+    const credentialPath = `/v1/networks/${PROFILE_ID}/credentials/${ISSUER}/${SUBJECT}/${SCHEMA_UID}`
+    if (path === credentialPath) {
+      const lifecycle = options.credentialLifecycle
+      if (!lifecycle?.generationId || !options.credentialUri) {
+        await route.fulfill({ status: 404, json: { error: 'CREDENTIAL_NOT_FOUND' } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          generationId: lifecycle.generationId,
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          uriHex: encodeUtf8Hex(options.credentialUri),
+          expiration: null,
+          state: lifecycle.state,
+        },
+      })
+      return
+    }
     const credentialEventMatch = path.match(
       new RegExp(
         `^/v1/networks/${PROFILE_ID}/credentials/${ISSUER}/${SUBJECT}/${SCHEMA_UID}/events/([0-9a-f]{64})$`,
@@ -175,7 +231,22 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
     )
     if (credentialEventMatch) {
       const txHash = credentialEventMatch[1]!
-      const generationId = options.credentialEvidence?.() === 'confirmed' ? txHash : '34'.repeat(32)
+      const lifecycle = options.credentialLifecycle
+      const acceptanceEvent =
+        lifecycle !== undefined &&
+        lifecycle.generationId !== null &&
+        lifecycle.generationId !== txHash
+      const evidenceConfirmed = options.credentialEvidence?.() === 'confirmed'
+      const generationId = acceptanceEvent
+        ? lifecycle.generationId!
+        : evidenceConfirmed
+          ? txHash
+          : '34'.repeat(32)
+      if (!acceptanceEvent && evidenceConfirmed && lifecycle) lifecycle.generationId = txHash
+      if (acceptanceEvent && lifecycle) {
+        lifecycle.state = 'active'
+        lifecycle.acceptedTransactionHash = txHash
+      }
       await route.fulfill({
         json: {
           transactionHash: txHash,
@@ -189,8 +260,8 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
             ledgerIndex: 100_001,
             ledgerHash: LEDGER_HASH,
             transactionIndex: 2,
-            eventType: 'created',
-            accepted: false,
+            eventType: acceptanceEvent ? 'accepted' : 'created',
+            accepted: acceptanceEvent,
             deletionCause: null,
           },
         },
@@ -204,11 +275,25 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
   })
 }
 
-async function connectSyntheticWallet(page: Page): Promise<void> {
+async function connectSyntheticWallet(
+  page: Page,
+  actor: 'issuer' | 'subject' = 'issuer',
+): Promise<void> {
+  const walletId = actor === 'issuer' ? ISSUER_WALLET_ID : SUBJECT_WALLET_ID
+  const account = actor === 'issuer' ? ISSUER : SUBJECT
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('wallet-toggle').click()
-  await page.getByRole('button', { name: 'XCS deterministic E2E wallet' }).click()
-  await expect(page.getByTestId('wallet-toggle')).toContainText('rHb9CJ')
+  await page.locator(`[data-wallet-id="${walletId}"]`).click()
+  await expect(page.getByTestId('wallet-toggle')).toContainText(account.slice(0, 6))
+}
+
+async function downloadText(download: Download): Promise<string> {
+  const stream = await download.createReadStream()
+  const chunks: Buffer[] = []
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 test('discovers a schema from aggregate stats and global search', async ({ page }) => {
@@ -256,11 +341,10 @@ test('registers a schema through XRPL validation and exact indexed XCS finality'
   )
 })
 
-test('issues a credential, withholds success on mismatched evidence, then reconfirms', async ({
+test('issues, reconfirms, then accepts a credential with exact indexed evidence', async ({
   page,
 }) => {
   let evidence: 'confirmed' | 'mismatch' = 'mismatch'
-  await installApiMock(page, { credentialEvidence: () => evidence })
   const canonicalPayload = canonicalize({
     xcsVersion: '0.1',
     issuer: ISSUER,
@@ -268,7 +352,20 @@ test('issues a credential, withholds success on mismatched evidence, then reconf
     schema: SCHEMA_UID,
     claims: CLAIMS,
   } as JsonValue)
+  const credentialUri = createHttpsPayloadUri(PAYLOAD_URL, canonicalPayload)
+  const credentialLifecycle: BrowserCredentialLifecycle = {
+    generationId: null,
+    state: 'pending',
+    acceptedTransactionHash: null,
+  }
+  await installApiMock(page, {
+    credentialEvidence: () => evidence,
+    credentialLifecycle,
+    credentialUri,
+  })
+  let payloadRequestCount = 0
   await page.route(PAYLOAD_URL, async (route) => {
+    payloadRequestCount += 1
     await route.fulfill({
       body: canonicalPayload,
       contentType: 'application/json',
@@ -301,4 +398,103 @@ test('issues a credential, withholds success on mismatched evidence, then reconf
   await operation.getByTestId('operation-reconfirm').click()
   await expect(operation.getByTestId('operation-xcs-result')).toContainText('confirmed')
   await expect(operation).toContainText('Generation ID')
+  const payloadRequestsAfterIssuance = payloadRequestCount
+
+  await page.getByTestId('wallet-toggle').click()
+  await operation.getByRole('link', { name: /Acceptation du sujet|Subject acceptance/u }).click()
+  await expect(page).toHaveURL(
+    new RegExp(
+      `/accept\\?profile=${PROFILE_ID}&issuer=${ISSUER}&schema=${SCHEMA_UID}&generation=[0-9a-f]{64}$`,
+      'u',
+    ),
+  )
+  await connectSyntheticWallet(page, 'subject')
+
+  await page
+    .getByRole('button', { name: /Charger, relire et préparer|Load, review and prepare/u })
+    .click()
+  await expect(
+    page.getByRole('heading', {
+      name: /Relecture du credential exact|Exact credential review/u,
+    }),
+  ).toBeVisible()
+  expect(payloadRequestCount).toBe(payloadRequestsAfterIssuance)
+
+  const payloadConsent = page.getByLabel(
+    /Je consens explicitement au chargement|I explicitly consent to fetching/u,
+  )
+  const trustAcknowledgement = page
+    .getByTestId('issuer-trust-acknowledgement')
+    .getByRole('checkbox')
+  await expect(payloadConsent).not.toBeChecked()
+  await expect(trustAcknowledgement).not.toBeChecked()
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  await payloadConsent.check()
+  await page
+    .getByRole('button', { name: /Charger le payload et préparer|Fetch payload and prepare/u })
+    .click()
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  await expect(page.getByTestId('transaction-sign')).toHaveCount(0)
+  await expect(
+    page.getByText(/Confirmez votre propre décision de confiance|Confirm your own trust decision/u),
+  ).toBeVisible()
+  await trustAcknowledgement.check()
+  await page
+    .getByRole('button', { name: /Charger le payload et préparer|Fetch payload and prepare/u })
+    .click()
+
+  const preview = page.getByTestId('transaction-preview')
+  await expect(preview).toContainText('CredentialAccept')
+  await expect(preview).toContainText(SUBJECT)
+  await expect(preview).toContainText(ISSUER)
+  await expect(preview).toContainText(SCHEMA_UID.toUpperCase())
+  expect(payloadRequestCount).toBeGreaterThan(payloadRequestsAfterIssuance)
+  const payloadRequestsBeforeSign = payloadRequestCount
+  await page.getByTestId('transaction-sign').click()
+
+  await expect(page.getByTestId('xrpl-finality')).toContainText('tesSUCCESS')
+  await expect(page.getByTestId('xcs-confirmed')).toBeVisible()
+  expect(payloadRequestCount).toBe(payloadRequestsBeforeSign + 1)
+  expect(credentialLifecycle.state).toBe('active')
+  expect(credentialLifecycle.acceptedTransactionHash).toMatch(/^[0-9a-f]{64}$/u)
+
+  await page.goto('/operations')
+  const acceptanceOperation = page
+    .getByTestId('operation-card')
+    .filter({ hasText: 'CredentialAccept' })
+    .first()
+  await expect(acceptanceOperation.getByTestId('operation-xcs-result')).toContainText('confirmed')
+  const downloadPromise = page.waitForEvent('download')
+  await page
+    .getByRole('button', { name: /Exporter les reçus minimisés|Export sanitized receipts/u })
+    .click()
+  const exportedReceipts = await downloadText(await downloadPromise)
+  expect(exportedReceipts).not.toContain('"claims"')
+  expect(exportedReceipts).not.toContain('"txBlob"')
+  expect(exportedReceipts).not.toContain('"issuerTrust"')
+  expect(exportedReceipts).not.toContain(canonicalPayload)
+  const receiptExport = JSON.parse(exportedReceipts) as {
+    receipts: Array<Record<string, unknown>>
+  }
+  const acceptanceReceipt = receiptExport.receipts.find(
+    (receipt) => receipt.transactionType === 'CredentialAccept',
+  )
+  expect(acceptanceReceipt).toMatchObject({
+    account: SUBJECT,
+    transactionType: 'CredentialAccept',
+    businessConfirmation: 'confirmed',
+    business: {
+      action: 'credential-accept',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: SCHEMA_UID,
+      generationId: credentialLifecycle.generationId,
+    },
+    businessEvidence: {
+      transactionHash: credentialLifecycle.acceptedTransactionHash,
+      generationId: credentialLifecycle.generationId,
+      eventType: 'accepted',
+      accepted: true,
+    },
+  })
 })

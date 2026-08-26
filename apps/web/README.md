@@ -113,7 +113,12 @@ allow the web origin through CORS and return `application/json` (or a `+json` me
 first displays only indexed metadata, the URI and its host. The subject must explicitly consent
 before the browser contacts that host. Consent stays in memory and is bound to the displayed
 generation, exact URI and hostname; metadata is re-read and must still match before every payload
-request. Rejection never fetches payload bytes. Local hostnames
+request. Issuer trust remains a separate decision: an explicitly `untrusted` issuer is blocked, a
+`trusted` issuer needs no additional action, and the Commons-default `unknown` result requires a
+second explicit subject acknowledgement bound in memory to the displayed issuer, generation and
+trust status. Changing the wallet account, profile, link generation or trust status invalidates that
+acknowledgement, which is checked again before the wallet is opened and is never journaled. Rejection
+never fetches payload bytes. Local hostnames
 (`localhost`, `.local`, `.internal`, `.lan`) and all IP literals are rejected before fetch.
 This browser-only filter cannot pin DNS: a public hostname can still resolve or rebind to a private
 address before the request. Deployments that accept untrusted issuers should therefore restrict

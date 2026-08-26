@@ -8,9 +8,11 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  assertCredentialAcceptanceReviewCurrent,
   assertCredentialGenerationCurrent,
   credentialActionBlockReason,
   credentialRevocationBlockReason,
+  createIssuerTrustAcknowledgementToken,
   createPayloadFetchConsentToken,
   inspectCredentialOperationEvent,
   loadCredentialReview,
@@ -98,6 +100,134 @@ describe('exact credential review', () => {
     })
 
     expect(credentialActionBlockReason(review, 'accept')).toBe('CREDENTIAL_ISSUER_NOT_TRUSTED')
+  })
+
+  it('requires a generation-bound subject acknowledgement for an unknown issuer', async () => {
+    const review = await loadCredentialReview({
+      credential,
+      report: { ...report, issuerTrust: 'unknown' },
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      schema,
+      fetchPayload: true,
+      fetchImpl: async () =>
+        new Response(canonical, { headers: { 'content-type': 'application/json' } }),
+    })
+
+    expect(credentialActionBlockReason(review, 'accept')).toBe(
+      'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED',
+    )
+    const acknowledgement = createIssuerTrustAcknowledgementToken(review, 'profile-a')
+    expect(acknowledgement).toEqual({
+      profileId: 'profile-a',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      generationId: GENERATION,
+      issuerTrust: 'unknown',
+    })
+    expect(
+      credentialActionBlockReason(review, 'accept', acknowledgement, 'profile-a'),
+    ).toBeUndefined()
+  })
+
+  it('invalidates an unknown-issuer acknowledgement when issuer, generation or trust changes', async () => {
+    const review = await loadCredentialReview({
+      credential,
+      report: { ...report, issuerTrust: 'unknown' },
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      schema,
+      fetchPayload: true,
+      fetchImpl: async () =>
+        new Response(canonical, { headers: { 'content-type': 'application/json' } }),
+    })
+    const acknowledgement = createIssuerTrustAcknowledgementToken(review, 'profile-a')
+
+    expect(
+      credentialActionBlockReason(
+        { ...review, generationId: '56'.repeat(32) },
+        'accept',
+        acknowledgement,
+        'profile-a',
+      ),
+    ).toBe('CREDENTIAL_ISSUER_TRUST_ACK_STALE')
+    expect(
+      credentialActionBlockReason(
+        { ...review, issuer: SUBJECT },
+        'accept',
+        acknowledgement,
+        'profile-a',
+      ),
+    ).toBe('CREDENTIAL_ISSUER_TRUST_ACK_STALE')
+    expect(
+      credentialActionBlockReason(
+        { ...review, subject: ISSUER },
+        'accept',
+        acknowledgement,
+        'profile-a',
+      ),
+    ).toBe('CREDENTIAL_ISSUER_TRUST_ACK_STALE')
+    expect(credentialActionBlockReason(review, 'accept', acknowledgement, 'profile-b')).toBe(
+      'CREDENTIAL_ISSUER_TRUST_ACK_STALE',
+    )
+    expect(
+      credentialActionBlockReason(
+        { ...review, report: { ...review.report, issuerTrust: 'trusted' } },
+        'accept',
+        acknowledgement,
+        'profile-a',
+      ),
+    ).toBe('CREDENTIAL_ISSUER_TRUST_ACK_STALE')
+    expect(
+      credentialActionBlockReason(
+        { ...review, report: { ...review.report, issuerTrust: 'untrusted' } },
+        'accept',
+        acknowledgement,
+        'profile-a',
+      ),
+    ).toBe('CREDENTIAL_ISSUER_NOT_TRUSTED')
+    expect(
+      credentialActionBlockReason(
+        { ...review, report: { ...review.report, issuerTrust: 'trusted' } },
+        'accept',
+      ),
+    ).toBeUndefined()
+  })
+
+  it('rejects a trust or profile change observed after the wallet returns', async () => {
+    const review = await loadCredentialReview({
+      credential,
+      report: { ...report, issuerTrust: 'unknown' },
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      schema,
+      fetchPayload: true,
+      fetchImpl: async () =>
+        new Response(canonical, { headers: { 'content-type': 'application/json' } }),
+    })
+    const acknowledgement = createIssuerTrustAcknowledgementToken(review, 'profile-a')
+
+    expect(() =>
+      assertCredentialAcceptanceReviewCurrent(
+        review,
+        { ...review, report: { ...review.report, issuerTrust: 'untrusted' } },
+        'profile-a',
+        'profile-a',
+        acknowledgement,
+      ),
+    ).toThrow('CREDENTIAL_ISSUER_TRUST_CHANGED_AFTER_SIGNATURE')
+    expect(() =>
+      assertCredentialAcceptanceReviewCurrent(
+        review,
+        review,
+        'profile-a',
+        'profile-b',
+        acknowledgement,
+      ),
+    ).toThrow('NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE')
   })
 
   it('keeps a pending credential rejectable when its payload cannot be reviewed', async () => {

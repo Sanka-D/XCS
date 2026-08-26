@@ -8,7 +8,11 @@ import {
 import { buildCredentialAccept } from '@xcs-protocol/sdk'
 import { describe, expect, it } from 'vitest'
 
-import { credentialActionBlockReason, loadCredentialReview } from '../app/utils/credentialReview'
+import {
+  createIssuerTrustAcknowledgementToken,
+  credentialActionBlockReason,
+  loadCredentialReview,
+} from '../app/utils/credentialReview'
 import { toSanitizedOperationReceipt, type StoredOperation } from '../app/utils/operationJournal'
 import { verifyHttpsPayloadPublication } from '../app/utils/payloadPublication'
 
@@ -58,7 +62,7 @@ describe('pilot flow without a wallet extension', () => {
         onChain: 'pending',
         schema: 'valid',
         payload: 'valid',
-        issuerTrust: 'trusted',
+        issuerTrust: 'unknown',
         generationId,
       },
       issuer,
@@ -69,7 +73,17 @@ describe('pilot flow without a wallet extension', () => {
       fetchImpl,
     })
 
-    expect(credentialActionBlockReason(review, 'accept')).toBeUndefined()
+    expect(credentialActionBlockReason(review, 'accept')).toBe(
+      'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED',
+    )
+    expect(
+      credentialActionBlockReason(
+        review,
+        'accept',
+        createIssuerTrustAcknowledgementToken(review, 'xrpl-testnet-xcs-v0.1'),
+        'xrpl-testnet-xcs-v0.1',
+      ),
+    ).toBeUndefined()
     expect(buildCredentialAccept({ issuer, subject, schemaUid })).toMatchObject({
       TransactionType: 'CredentialAccept',
       Account: subject,

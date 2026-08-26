@@ -64,6 +64,15 @@ export interface PayloadFetchConsentToken {
   readonly hostname: string
 }
 
+/** In-memory proof that the subject made a trust decision for one exact unknown issuer generation. */
+export interface IssuerTrustAcknowledgementToken {
+  readonly profileId: string
+  readonly issuer: string
+  readonly subject: string
+  readonly generationId: string
+  readonly issuerTrust: 'unknown'
+}
+
 interface LoadCredentialReviewOptions {
   readonly credential: unknown
   readonly report: unknown
@@ -250,6 +259,86 @@ export function createPayloadFetchConsentToken(
   }
 }
 
+export function createIssuerTrustAcknowledgementToken(
+  review: Pick<CredentialReview, 'issuer' | 'subject' | 'generationId' | 'report'>,
+  profileId: string,
+): IssuerTrustAcknowledgementToken {
+  if (review.report.issuerTrust !== 'unknown') {
+    throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_NOT_REQUIRED')
+  }
+  if (profileId.length === 0) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_PROFILE_REQUIRED')
+  return {
+    profileId,
+    issuer: review.issuer,
+    subject: review.subject,
+    generationId: review.generationId.toLowerCase(),
+    issuerTrust: 'unknown',
+  }
+}
+
+function credentialIssuerTrustBlockReason(
+  review: Pick<CredentialReview, 'issuer' | 'subject' | 'generationId' | 'report'>,
+  acknowledgement?: IssuerTrustAcknowledgementToken,
+  profileId?: string,
+): string | undefined {
+  if (review.report.issuerTrust === 'untrusted') return 'CREDENTIAL_ISSUER_NOT_TRUSTED'
+  if (review.report.issuerTrust === 'trusted') {
+    return acknowledgement === undefined ? undefined : 'CREDENTIAL_ISSUER_TRUST_ACK_STALE'
+  }
+  if (acknowledgement === undefined) return 'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED'
+  if (
+    acknowledgement.issuerTrust !== review.report.issuerTrust ||
+    acknowledgement.profileId !== profileId ||
+    acknowledgement.issuer !== review.issuer ||
+    acknowledgement.subject !== review.subject ||
+    acknowledgement.generationId.toLowerCase() !== review.generationId.toLowerCase()
+  ) {
+    return 'CREDENTIAL_ISSUER_TRUST_ACK_STALE'
+  }
+  return undefined
+}
+
+/** Revalidates the exact trust decision after the wallet returns, before persistence or submit. */
+export function assertCredentialAcceptanceReviewCurrent(
+  expected: Pick<
+    CredentialReview,
+    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'report'
+  >,
+  current: Pick<
+    CredentialReview,
+    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'report'
+  >,
+  expectedProfileId: string,
+  currentProfileId: string,
+  acknowledgement?: IssuerTrustAcknowledgementToken,
+): void {
+  if (currentProfileId !== expectedProfileId) {
+    throw new Error('NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE')
+  }
+  if (
+    current.issuer !== expected.issuer ||
+    current.subject !== expected.subject ||
+    current.schemaUid.toLowerCase() !== expected.schemaUid.toLowerCase()
+  ) {
+    throw new Error('CREDENTIAL_REVIEW_CHANGED_AFTER_SIGNATURE')
+  }
+  if (current.generationId.toLowerCase() !== expected.generationId.toLowerCase()) {
+    throw new Error('CREDENTIAL_GENERATION_CHANGED_AFTER_SIGNATURE')
+  }
+  if (
+    current.state !== expected.state ||
+    current.report.onChain !== expected.report.onChain ||
+    current.state !== 'pending'
+  ) {
+    throw new Error('CREDENTIAL_STATE_CHANGED_AFTER_SIGNATURE')
+  }
+  if (current.report.issuerTrust !== expected.report.issuerTrust) {
+    throw new Error('CREDENTIAL_ISSUER_TRUST_CHANGED_AFTER_SIGNATURE')
+  }
+  const reason = credentialIssuerTrustBlockReason(current, acknowledgement, currentProfileId)
+  if (reason !== undefined) throw new Error(reason)
+}
+
 export function assertPayloadFetchConsentCurrent(
   review: Pick<CredentialReview, 'generationId' | 'uri'>,
   consent: PayloadFetchConsentToken,
@@ -397,6 +486,8 @@ export async function waitForCredentialOperationEvent(
 export function credentialActionBlockReason(
   review: CredentialReview,
   action: CredentialSubjectAction,
+  issuerTrustAcknowledgement?: IssuerTrustAcknowledgementToken,
+  profileId?: string,
 ): string | undefined {
   if (review.state !== 'pending' || review.report.onChain !== 'pending') {
     return 'CREDENTIAL_MUST_BE_PENDING'
@@ -409,8 +500,7 @@ export function credentialActionBlockReason(
   }
   if (review.report.schema !== 'valid') return 'CREDENTIAL_SCHEMA_NOT_VALID'
   if (review.report.payload !== 'valid') return 'CREDENTIAL_PAYLOAD_NOT_VALID'
-  if (review.report.issuerTrust !== 'trusted') return 'CREDENTIAL_ISSUER_NOT_TRUSTED'
-  return undefined
+  return credentialIssuerTrustBlockReason(review, issuerTrustAcknowledgement, profileId)
 }
 
 export function credentialRevocationBlockReason(

@@ -12,6 +12,11 @@ import { hashes, Wallet, type Client, type Payment, type SubmittableTransaction 
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  assertCredentialAcceptanceReviewCurrent,
+  createIssuerTrustAcknowledgementToken,
+  type CredentialReview,
+} from '../app/utils/credentialReview'
+import {
   applyJournalEntry,
   canAbandonOperation,
   canRetryOperation,
@@ -221,6 +226,59 @@ describe('wallet sign-only normalization', () => {
       'journal:submitted',
       'journal:validated',
     ])
+  })
+
+  it('never persists or submits when issuer trust changes during the wallet dialog', async () => {
+    const { transaction, signed } = signedPayment()
+    const issuer = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+    const subject = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
+    const generationId = '34'.repeat(32)
+    const review: CredentialReview = {
+      generationId,
+      issuer,
+      subject,
+      schemaUid: '12'.repeat(32),
+      uri: 'https://issuer.example/c.json',
+      expiration: null,
+      state: 'pending',
+      claims: { programId: 'course-1' },
+      report: {
+        onChain: 'pending',
+        schema: 'valid',
+        payload: 'valid',
+        issuerTrust: 'unknown',
+        generationId,
+      },
+    }
+    const acknowledgement = createIssuerTrustAcknowledgementToken(review, 'profile-a')
+    const persistSigned = vi.fn()
+    const submit = vi.fn()
+    const entries: SubmissionJournalEntry[] = []
+    const client = { isConnected: () => true, submit } as unknown as Client
+
+    await expect(
+      signPreparedAndSubmit(
+        client,
+        transaction,
+        createWalletSigner({ sign: async () => ({ hash: '', tx_blob: signed.tx_blob }) }),
+        {
+          journal: { append: async (entry) => void entries.push(entry) },
+          onValidatedSignature: async () => {
+            assertCredentialAcceptanceReviewCurrent(
+              review,
+              { ...review, report: { ...review.report, issuerTrust: 'untrusted' } },
+              'profile-a',
+              'profile-a',
+              acknowledgement,
+            )
+            await persistSigned()
+          },
+        },
+      ),
+    ).rejects.toThrow('CREDENTIAL_ISSUER_TRUST_CHANGED_AFTER_SIGNATURE')
+    expect(persistSigned).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    expect(entries.map((entry) => entry.stage)).toEqual(['prepared', 'failed'])
   })
 })
 

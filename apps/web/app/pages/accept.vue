@@ -4,12 +4,15 @@ import type { CredentialAccept, CredentialDelete } from 'xrpl'
 import type { ApiSchemaDetail } from '~/composables/useXcsApi'
 import type { WalletSubmissionResult } from '~/composables/useWallet'
 import {
+  assertCredentialAcceptanceReviewCurrent,
   assertPayloadFetchConsentCurrent,
+  createIssuerTrustAcknowledgementToken,
   createPayloadFetchConsentToken,
   credentialActionBlockReason,
   loadCredentialReview,
   type CredentialReview,
   type CredentialSubjectAction,
+  type IssuerTrustAcknowledgementToken,
   type PayloadFetchConsentToken,
 } from '~/utils/credentialReview'
 import {
@@ -20,6 +23,7 @@ import {
 import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
 
 const route = useRoute()
+const { t } = useI18n()
 const { account, busy: walletBusy, prepare, signAndSubmit } = useWallet()
 const { getActiveNetworkProfile, getCredential, getSchema, verify } = useXcsApi()
 const issuer = ref(singleRouteQueryValue(route.query.issuer))
@@ -29,17 +33,38 @@ const linkedGenerationId = ref(singleRouteQueryValue(route.query.generation))
 const action = ref<CredentialSubjectAction>('accept')
 const transaction = shallowRef<CredentialAccept | CredentialDelete | null>(null)
 const review = shallowRef<CredentialReview | null>(null)
+const reviewProfileId = ref<string | null>(null)
 const schemaDetail = shallowRef<ApiSchemaDetail | null>(null)
 const payloadConsent = ref(false)
 const payloadConsentToken = shallowRef<PayloadFetchConsentToken | null>(null)
+const issuerTrustAcknowledgementToken = shallowRef<IssuerTrustAcknowledgementToken | null>(null)
 const reviewBusy = ref(false)
 const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const blockReason = computed(() => {
   if (!review.value) return undefined
-  if (action.value === 'accept' && review.value.claims === undefined) return undefined
-  return credentialActionBlockReason(review.value, action.value)
+  if (action.value === 'accept' && review.value.claims === undefined) {
+    return review.value.report.issuerTrust === 'untrusted'
+      ? 'CREDENTIAL_ISSUER_NOT_TRUSTED'
+      : undefined
+  }
+  return credentialActionBlockReason(
+    review.value,
+    action.value,
+    issuerTrustAcknowledgementToken.value ?? undefined,
+    reviewProfileId.value ?? undefined,
+  )
+})
+const blockReasonMessage = computed(() => {
+  if (blockReason.value === 'CREDENTIAL_ISSUER_NOT_TRUSTED') return t('accept.issuerUntrusted')
+  if (blockReason.value === 'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED') {
+    return t('accept.issuerAcknowledgementRequired')
+  }
+  if (blockReason.value === 'CREDENTIAL_ISSUER_TRUST_ACK_STALE') {
+    return t('accept.issuerAcknowledgementStale')
+  }
+  return blockReason.value
 })
 const payloadHost = computed(() => {
   if (!review.value?.uri) return null
@@ -64,9 +89,11 @@ function invalidatePreview() {
   previewRevision += 1
   transaction.value = null
   review.value = null
+  reviewProfileId.value = null
   schemaDetail.value = null
   payloadConsent.value = false
   payloadConsentToken.value = null
+  issuerTrustAcknowledgementToken.value = null
   result.value = null
 }
 
@@ -104,12 +131,65 @@ function setPayloadConsent(granted: boolean) {
   }
 }
 
+function setIssuerTrustAcknowledgement(granted: boolean) {
+  if (!granted) {
+    issuerTrustAcknowledgementToken.value = null
+    if (transaction.value === null) return
+    previewRevision += 1
+    transaction.value = null
+    result.value = null
+    return
+  }
+
+  try {
+    if (!review.value) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED')
+    if (!reviewProfileId.value) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_PROFILE_REQUIRED')
+    issuerTrustAcknowledgementToken.value = createIssuerTrustAcknowledgementToken(
+      review.value,
+      reviewProfileId.value,
+    )
+    message.value = ''
+  } catch (error) {
+    issuerTrustAcknowledgementToken.value = null
+    message.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 function clearStalePayloadConsent(error: unknown): void {
   if (!(error instanceof Error) || error.message !== 'CREDENTIAL_PAYLOAD_CONSENT_STALE') return
   payloadConsent.value = false
   payloadConsentToken.value = null
+  issuerTrustAcknowledgementToken.value = null
   review.value = null
+  reviewProfileId.value = null
   schemaDetail.value = null
+  previewRevision += 1
+  transaction.value = null
+  result.value = null
+}
+
+function clearInvalidIssuerTrustAcknowledgement(error: unknown): void {
+  if (
+    !(error instanceof Error) ||
+    ![
+      'CREDENTIAL_ISSUER_NOT_TRUSTED',
+      'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED',
+      'CREDENTIAL_ISSUER_TRUST_ACK_STALE',
+      'CREDENTIAL_ISSUER_TRUST_CHANGED_AFTER_SIGNATURE',
+      'CREDENTIAL_GENERATION_CHANGED_BEFORE_SIGNATURE',
+      'CREDENTIAL_GENERATION_CHANGED_AFTER_SIGNATURE',
+      'CREDENTIAL_REVIEW_CHANGED_AFTER_SIGNATURE',
+      'CREDENTIAL_STATE_CHANGED_AFTER_SIGNATURE',
+      'CREDENTIAL_LINK_GENERATION_MISMATCH',
+      'NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE',
+    ].includes(error.message)
+  ) {
+    return
+  }
+  issuerTrustAcknowledgementToken.value = null
+  previewRevision += 1
+  transaction.value = null
+  result.value = null
 }
 
 async function fetchExactReview(input: {
@@ -198,6 +278,8 @@ async function buildPreview() {
   const normalizedSchemaUid = schemaUid.value.toLowerCase()
   const selectedAction = action.value
   const consent = selectedAction === 'accept' ? payloadConsentToken.value : null
+  const trustAcknowledgement =
+    selectedAction === 'accept' ? issuerTrustAcknowledgementToken.value : null
   try {
     const profile = await getActiveNetworkProfile()
     assertLinkProfile(linkedProfileId.value || undefined, profile.profileId)
@@ -212,12 +294,18 @@ async function buildPreview() {
     if (revision !== previewRevision) throw new Error('CREDENTIAL_REVIEW_CHANGED_DURING_LOAD')
 
     review.value = loaded.credentialReview
+    reviewProfileId.value = profile.profileId
     schemaDetail.value = loaded.schema
     if (selectedAction === 'accept' && !consent) {
       message.value = payloadHostBlockReason.value ?? 'CREDENTIAL_PAYLOAD_CONSENT_REQUIRED'
       return
     }
-    const reason = credentialActionBlockReason(loaded.credentialReview, selectedAction)
+    const reason = credentialActionBlockReason(
+      loaded.credentialReview,
+      selectedAction,
+      trustAcknowledgement ?? undefined,
+      profile.profileId,
+    )
     if (reason) throw new Error(reason)
 
     const raw =
@@ -238,6 +326,7 @@ async function buildPreview() {
     transaction.value = prepared
   } catch (error) {
     clearStalePayloadConsent(error)
+    clearInvalidIssuerTrustAcknowledgement(error)
     transaction.value = null
     message.value = error instanceof Error ? error.message : String(error)
   } finally {
@@ -253,6 +342,7 @@ async function submit() {
   const expectedSchemaUid = schemaUid.value.toLowerCase()
   const expectedAction = action.value
   const expectedPayloadConsent = payloadConsentToken.value
+  const expectedIssuerTrustAcknowledgement = issuerTrustAcknowledgementToken.value
   const expectedLinkedProfileId = linkedProfileId.value
   const expectedLinkedGenerationId = linkedGenerationId.value
   const expectedRevision = previewRevision
@@ -273,6 +363,7 @@ async function submit() {
         schemaUid.value.toLowerCase() !== expectedSchemaUid ||
         action.value !== expectedAction ||
         payloadConsentToken.value !== expectedPayloadConsent ||
+        issuerTrustAcknowledgementToken.value !== expectedIssuerTrustAcknowledgement ||
         linkedProfileId.value !== expectedLinkedProfileId ||
         linkedGenerationId.value !== expectedLinkedGenerationId
       ) {
@@ -299,10 +390,42 @@ async function submit() {
     if (loaded.credentialReview.generationId !== expectedReview.generationId) {
       throw new Error('CREDENTIAL_GENERATION_CHANGED_BEFORE_SIGNATURE')
     }
-    const reason = credentialActionBlockReason(loaded.credentialReview, expectedAction)
-    if (reason) throw new Error(reason)
     review.value = loaded.credentialReview
+    reviewProfileId.value = profile.profileId
     schemaDetail.value = loaded.schema
+    const reason = credentialActionBlockReason(
+      loaded.credentialReview,
+      expectedAction,
+      expectedIssuerTrustAcknowledgement ?? undefined,
+      profile.profileId,
+    )
+    if (reason) throw new Error(reason)
+
+    const revalidateAcceptanceAfterSignature =
+      expectedAction === 'accept'
+        ? async () => {
+            assertCurrent()
+            const latestProfile = await getActiveNetworkProfile()
+            assertLinkProfile(expectedLinkedProfileId || undefined, latestProfile.profileId)
+            const latest = await fetchExactReview({
+              issuer: expectedIssuer,
+              subject: expectedSubject,
+              schemaUid: expectedSchemaUid,
+              profileId: latestProfile.profileId,
+              ...(expectedLinkedGenerationId
+                ? { expectedGenerationId: expectedLinkedGenerationId }
+                : {}),
+            })
+            assertCurrent()
+            assertCredentialAcceptanceReviewCurrent(
+              loaded.credentialReview,
+              latest.credentialReview,
+              profile.profileId,
+              latestProfile.profileId,
+              expectedIssuerTrustAcknowledgement ?? undefined,
+            )
+          }
+        : undefined
 
     const response = await signAndSubmit(
       preparedTransaction,
@@ -317,7 +440,7 @@ async function submit() {
           : {}),
       },
       assertCurrent,
-      undefined,
+      revalidateAcceptanceAfterSignature,
       (validated) => {
         result.value = { ...validated }
       },
@@ -326,6 +449,7 @@ async function submit() {
     transaction.value = null
   } catch (error) {
     clearStalePayloadConsent(error)
+    clearInvalidIssuerTrustAcknowledgement(error)
     message.value = error instanceof Error ? error.message : String(error)
   } finally {
     reviewBusy.value = false
@@ -427,6 +551,22 @@ async function submit() {
           {{ $t('accept.payloadConsent') }}
         </label>
       </div>
+      <div
+        v-if="action === 'accept' && review.report.issuerTrust === 'unknown'"
+        class="warning-box"
+        data-testid="issuer-trust-acknowledgement"
+      >
+        <p>{{ $t('accept.issuerUnknown') }}</p>
+        <label>
+          <input
+            type="checkbox"
+            :checked="issuerTrustAcknowledgementToken !== null"
+            :disabled="busy"
+            @change="setIssuerTrustAcknowledgement(($event.target as HTMLInputElement).checked)"
+          />
+          {{ $t('accept.issuerAcknowledgement') }}
+        </label>
+      </div>
       <template v-if="action === 'accept'">
         <h2>{{ $t('accept.publicClaims') }}</h2>
         <pre v-if="review.claims">{{ JSON.stringify(review.claims, null, 2) }}</pre>
@@ -437,7 +577,7 @@ async function submit() {
           {{ review.payloadByteLength }} bytes · <code>{{ review.payloadDigestHex }}</code>
         </p>
       </template>
-      <div v-if="blockReason" class="error-box">{{ blockReason }}</div>
+      <div v-if="blockReasonMessage" class="error-box">{{ blockReasonMessage }}</div>
       <div v-else-if="action === 'delete'" class="warning-box">
         {{ $t('accept.rejectSafety') }}
       </div>

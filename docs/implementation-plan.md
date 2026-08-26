@@ -67,10 +67,12 @@ the two providers are independent, live PostgreSQL execution, real Crossmark/Gem
 captured ledger fixtures, and two-entity pilot evidence remain external gates.
 
 The browser Playwright journey is deterministic and synthetic: it replaces the wallet, RPC, API and
-payload host with fakes and currently covers schema registration plus issuance. It is useful CI
-evidence for application state transitions, but it is not evidence for browser-extension
-compatibility, issuer-hosted CORS behavior, a live Commons deployment or validated Testnet pilot
-transactions.
+payload host with fakes and covers schema registration, issuance, and subject acceptance through
+separate issuer and subject accounts. The acceptance path keeps payload consent distinct from the
+subject's generation-bound acknowledgement of an issuer whose trust status is `unknown`, then
+requires exact indexed `accepted` evidence. It is useful CI evidence for application state
+transitions, but it is not evidence for browser-extension compatibility, issuer-hosted CORS
+behavior, a live Commons deployment or validated Testnet pilot transactions.
 
 ## Scope boundaries for v0.1
 

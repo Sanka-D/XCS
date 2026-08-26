@@ -9,6 +9,8 @@ import type {
 
 export const BROWSER_E2E_WALLET_ID = 'xcs-browser-e2e'
 export const BROWSER_E2E_ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+export const BROWSER_E2E_SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
+export const BROWSER_E2E_SUBJECT_ACCOUNT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
 
 const NETWORK_ID = 1
 const LEDGER_INDEX = 100_001
@@ -21,6 +23,19 @@ const SYNTHETIC_PUBLIC_KEY = `02${'11'.repeat(32)}`
 const SYNTHETIC_SIGNATURE = 'AA'
 
 type WalletListener = (payload?: unknown) => void
+
+const BROWSER_E2E_WALLETS = [
+  {
+    id: BROWSER_E2E_WALLET_ID,
+    name: 'XCS deterministic E2E wallet',
+    address: BROWSER_E2E_ACCOUNT,
+  },
+  {
+    id: BROWSER_E2E_SUBJECT_WALLET_ID,
+    name: 'XCS deterministic E2E subject wallet',
+    address: BROWSER_E2E_SUBJECT_ACCOUNT,
+  },
+] as const
 
 class BrowserE2eWalletManager {
   private readonly listeners = new Map<string, Set<WalletListener>>()
@@ -42,22 +57,21 @@ class BrowserE2eWalletManager {
   }
 
   public async getAvailableWallets(): Promise<WalletAdapter[]> {
-    return [
-      {
-        id: BROWSER_E2E_WALLET_ID,
-        name: 'XCS deterministic E2E wallet',
-        isAvailable: async () => true,
-      },
-    ]
+    return BROWSER_E2E_WALLETS.map(({ id, name }) => ({
+      id,
+      name,
+      isAvailable: async () => true,
+    }))
   }
 
   public async connect(walletId: string, options?: { network?: string }): Promise<AccountInfo> {
-    if (walletId !== BROWSER_E2E_WALLET_ID) throw new Error('BROWSER_E2E_WALLET_UNKNOWN')
+    const wallet = BROWSER_E2E_WALLETS.find((candidate) => candidate.id === walletId)
+    if (!wallet) throw new Error('BROWSER_E2E_WALLET_UNKNOWN')
     if (options?.network !== undefined && options.network !== 'testnet') {
       throw new Error('BROWSER_E2E_TESTNET_REQUIRED')
     }
     this.currentAccount = {
-      address: BROWSER_E2E_ACCOUNT,
+      address: wallet.address,
       network: {
         id: 'testnet',
         name: 'XRPL Testnet (deterministic E2E)',

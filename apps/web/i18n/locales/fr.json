@@ -301,6 +301,11 @@
     "payloadConsentIntro": "L’étape suivante contacte {host} directement depuis ce navigateur. Cet hôte peut observer votre adresse IP et l’heure de la requête.",
     "payloadConsent": "Je consens explicitement au chargement de ce payload public depuis l’hôte affiché.",
     "payloadUnavailable": "Le payload ne peut pas être relu de façon sûre. L’acceptation est bloquée, mais un credential pending peut toujours être rejeté.",
+    "issuerUnknown": "XCS ne prend aucune décision de confiance sur cet émetteur. Inconnu ne signifie ni fiable ni non fiable.",
+    "issuerAcknowledgement": "Je reconnais indépendamment l’adresse de l’émetteur affichée et choisis d’accepter cette génération exacte du credential.",
+    "issuerAcknowledgementRequired": "Confirmez votre propre décision de confiance pour cette génération exacte d’un émetteur inconnu avant de l’accepter.",
+    "issuerAcknowledgementStale": "Le contexte de confiance de l’émetteur a changé. Relisez-le et confirmez de nouveau votre décision.",
+    "issuerUntrusted": "La politique locale de ce vérificateur marque l’émetteur comme non fiable. L’acceptation est bloquée.",
     "rejectSafety": "Le rejet supprime cet objet pending sans approuver son émetteur ni ses claims.",
     "submitted": "Action sujet validée : "
   },
