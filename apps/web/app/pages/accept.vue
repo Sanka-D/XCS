@@ -5,11 +5,14 @@ import type { ApiSchemaDetail } from '~/composables/useXcsApi'
 import type { WalletSubmissionResult } from '~/composables/useWallet'
 import {
   assertCredentialAcceptanceReviewCurrent,
+  assertCredentialSubjectMutationReviewCurrent,
   assertPayloadFetchConsentCurrent,
   createIssuerTrustAcknowledgementToken,
   createPayloadFetchConsentToken,
   credentialActionBlockReason,
+  loadCredentialMutationReview,
   loadCredentialReview,
+  type CredentialMutationReview,
   type CredentialReview,
   type CredentialSubjectAction,
   type IssuerTrustAcknowledgementToken,
@@ -30,9 +33,25 @@ const issuer = ref(singleRouteQueryValue(route.query.issuer))
 const schemaUid = ref(singleRouteQueryValue(route.query.schema))
 const linkedProfileId = ref(singleRouteQueryValue(route.query.profile))
 const linkedGenerationId = ref(singleRouteQueryValue(route.query.generation))
-const action = ref<CredentialSubjectAction>('accept')
+const linkedAction = ref(singleRouteQueryValue(route.query.action))
+
+function linkedSubjectAction(value: string): CredentialSubjectAction {
+  return value === 'reject' || value === 'remove' ? value : 'accept'
+}
+
+function assertLinkedActionValid(value: string): void {
+  if (value !== '' && value !== 'accept' && value !== 'reject' && value !== 'remove') {
+    throw new Error('CREDENTIAL_LINK_ACTION_INVALID')
+  }
+}
+
+const action = ref<CredentialSubjectAction>(linkedSubjectAction(linkedAction.value))
 const transaction = shallowRef<CredentialAccept | CredentialDelete | null>(null)
-const review = shallowRef<CredentialReview | null>(null)
+const review = shallowRef<CredentialReview | CredentialMutationReview | null>(null)
+const acceptanceReview = computed<CredentialReview | null>(() => {
+  const current = review.value
+  return current && 'report' in current ? current : null
+})
 const reviewProfileId = ref<string | null>(null)
 const schemaDetail = shallowRef<ApiSchemaDetail | null>(null)
 const payloadConsent = ref(false)
@@ -44,8 +63,8 @@ const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const blockReason = computed(() => {
   if (!review.value) return undefined
-  if (action.value === 'accept' && review.value.claims === undefined) {
-    return review.value.report.issuerTrust === 'untrusted'
+  if (action.value === 'accept' && acceptanceReview.value?.claims === undefined) {
+    return acceptanceReview.value?.report.issuerTrust === 'untrusted'
       ? 'CREDENTIAL_ISSUER_NOT_TRUSTED'
       : undefined
   }
@@ -97,15 +116,26 @@ function invalidatePreview() {
   result.value = null
 }
 
-watch([issuer, schemaUid, action, linkedProfileId, linkedGenerationId], invalidatePreview)
+watch(
+  [issuer, schemaUid, action, linkedProfileId, linkedGenerationId, linkedAction],
+  invalidatePreview,
+)
 watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
 watch(
-  () => [route.query.issuer, route.query.schema, route.query.profile, route.query.generation],
-  ([nextIssuer, nextSchema, nextProfile, nextGeneration]) => {
+  () => [
+    route.query.issuer,
+    route.query.schema,
+    route.query.profile,
+    route.query.generation,
+    route.query.action,
+  ],
+  ([nextIssuer, nextSchema, nextProfile, nextGeneration, nextAction]) => {
     issuer.value = singleRouteQueryValue(nextIssuer)
     schemaUid.value = singleRouteQueryValue(nextSchema)
     linkedProfileId.value = singleRouteQueryValue(nextProfile)
     linkedGenerationId.value = singleRouteQueryValue(nextGeneration)
+    linkedAction.value = singleRouteQueryValue(nextAction)
+    action.value = linkedSubjectAction(linkedAction.value)
   },
 )
 
@@ -120,8 +150,8 @@ function setPayloadConsent(granted: boolean) {
   }
 
   try {
-    if (!review.value) throw new Error('CREDENTIAL_PAYLOAD_CONSENT_REQUIRED')
-    payloadConsentToken.value = createPayloadFetchConsentToken(review.value)
+    if (!acceptanceReview.value) throw new Error('CREDENTIAL_PAYLOAD_CONSENT_REQUIRED')
+    payloadConsentToken.value = createPayloadFetchConsentToken(acceptanceReview.value)
     payloadConsent.value = true
     message.value = ''
   } catch (error) {
@@ -142,10 +172,10 @@ function setIssuerTrustAcknowledgement(granted: boolean) {
   }
 
   try {
-    if (!review.value) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED')
+    if (!acceptanceReview.value) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED')
     if (!reviewProfileId.value) throw new Error('CREDENTIAL_ISSUER_TRUST_ACK_PROFILE_REQUIRED')
     issuerTrustAcknowledgementToken.value = createIssuerTrustAcknowledgementToken(
-      review.value,
+      acceptanceReview.value,
       reviewProfileId.value,
     )
     message.value = ''
@@ -264,6 +294,25 @@ async function fetchExactReview(input: {
   }
 }
 
+async function fetchExactMutationReview(input: {
+  issuer: string
+  subject: string
+  schemaUid: string
+  profileId: string
+  expectedGenerationId?: string | undefined
+}): Promise<CredentialMutationReview> {
+  const credentialReview = loadCredentialMutationReview(
+    await getCredential(input.issuer, input.subject, input.schemaUid, input.profileId),
+    {
+      issuer: input.issuer,
+      subject: input.subject,
+      schemaUid: input.schemaUid,
+    },
+  )
+  assertLinkGeneration(input.expectedGenerationId, credentialReview.generationId)
+  return credentialReview
+}
+
 async function buildPreview() {
   previewRevision += 1
   transaction.value = null
@@ -281,16 +330,32 @@ async function buildPreview() {
   const trustAcknowledgement =
     selectedAction === 'accept' ? issuerTrustAcknowledgementToken.value : null
   try {
+    assertLinkedActionValid(linkedAction.value)
     const profile = await getActiveNetworkProfile()
     assertLinkProfile(linkedProfileId.value || undefined, profile.profileId)
-    const loaded = await fetchExactReview({
-      issuer: issuerAddress,
-      subject: subjectAddress,
-      schemaUid: normalizedSchemaUid,
-      profileId: profile.profileId,
-      ...(linkedGenerationId.value ? { expectedGenerationId: linkedGenerationId.value } : {}),
-      ...(consent ? { payloadConsent: consent } : {}),
-    })
+    const linkedGeneration = linkedGenerationId.value
+      ? { expectedGenerationId: linkedGenerationId.value }
+      : {}
+    const loaded =
+      selectedAction === 'accept'
+        ? await fetchExactReview({
+            issuer: issuerAddress,
+            subject: subjectAddress,
+            schemaUid: normalizedSchemaUid,
+            profileId: profile.profileId,
+            ...linkedGeneration,
+            ...(consent ? { payloadConsent: consent } : {}),
+          })
+        : {
+            credentialReview: await fetchExactMutationReview({
+              issuer: issuerAddress,
+              subject: subjectAddress,
+              schemaUid: normalizedSchemaUid,
+              profileId: profile.profileId,
+              ...linkedGeneration,
+            }),
+            schema: null,
+          }
     if (revision !== previewRevision) throw new Error('CREDENTIAL_REVIEW_CHANGED_DURING_LOAD')
 
     review.value = loaded.credentialReview
@@ -345,6 +410,7 @@ async function submit() {
   const expectedIssuerTrustAcknowledgement = issuerTrustAcknowledgementToken.value
   const expectedLinkedProfileId = linkedProfileId.value
   const expectedLinkedGenerationId = linkedGenerationId.value
+  const expectedLinkedAction = linkedAction.value
   const expectedRevision = previewRevision
   if (!preparedTransaction || !expectedReview || !expectedSubject) {
     message.value = 'TRANSACTION_PREVIEW_REQUIRED'
@@ -365,30 +431,68 @@ async function submit() {
         payloadConsentToken.value !== expectedPayloadConsent ||
         issuerTrustAcknowledgementToken.value !== expectedIssuerTrustAcknowledgement ||
         linkedProfileId.value !== expectedLinkedProfileId ||
-        linkedGenerationId.value !== expectedLinkedGenerationId
+        linkedGenerationId.value !== expectedLinkedGenerationId ||
+        linkedAction.value !== expectedLinkedAction
       ) {
         throw new Error('CREDENTIAL_REVIEW_CHANGED_BEFORE_SIGNATURE')
       }
     }
     assertCurrent()
+    assertLinkedActionValid(expectedLinkedAction)
     const profile = await getActiveNetworkProfile()
     assertLinkProfile(expectedLinkedProfileId || undefined, profile.profileId)
-    const loaded = await fetchExactReview({
-      issuer: expectedIssuer,
-      subject: expectedSubject,
-      schemaUid: expectedSchemaUid,
-      profileId: profile.profileId,
-      ...(expectedLinkedGenerationId ? { expectedGenerationId: expectedLinkedGenerationId } : {}),
-      ...(expectedAction === 'accept' && expectedPayloadConsent
-        ? { payloadConsent: expectedPayloadConsent }
-        : {}),
-    })
-    if (expectedAction === 'accept' && !expectedPayloadConsent) {
-      throw new Error('CREDENTIAL_PAYLOAD_CONSENT_REQUIRED')
-    }
+    const linkedGeneration = expectedLinkedGenerationId
+      ? { expectedGenerationId: expectedLinkedGenerationId }
+      : {}
+    const loaded =
+      expectedAction === 'accept'
+        ? await (async () => {
+            if (!expectedPayloadConsent) throw new Error('CREDENTIAL_PAYLOAD_CONSENT_REQUIRED')
+            return fetchExactReview({
+              issuer: expectedIssuer,
+              subject: expectedSubject,
+              schemaUid: expectedSchemaUid,
+              profileId: profile.profileId,
+              ...linkedGeneration,
+              payloadConsent: expectedPayloadConsent,
+            })
+          })()
+        : {
+            credentialReview: await fetchExactMutationReview({
+              issuer: expectedIssuer,
+              subject: expectedSubject,
+              schemaUid: expectedSchemaUid,
+              profileId: profile.profileId,
+              ...linkedGeneration,
+            }),
+            schema: null,
+          }
     assertCurrent()
     if (loaded.credentialReview.generationId !== expectedReview.generationId) {
       throw new Error('CREDENTIAL_GENERATION_CHANGED_BEFORE_SIGNATURE')
+    }
+    if (expectedAction === 'accept') {
+      if (!('report' in expectedReview) || !('report' in loaded.credentialReview)) {
+        throw new Error('CREDENTIAL_ACCEPTANCE_REVIEW_REQUIRED')
+      }
+      assertCredentialAcceptanceReviewCurrent(
+        expectedReview,
+        loaded.credentialReview,
+        profile.profileId,
+        profile.profileId,
+        expectedIssuerTrustAcknowledgement ?? undefined,
+      )
+    } else {
+      if ('report' in expectedReview || 'report' in loaded.credentialReview) {
+        throw new Error('CREDENTIAL_MUTATION_REVIEW_REQUIRED')
+      }
+      assertCredentialSubjectMutationReviewCurrent(
+        expectedReview,
+        loaded.credentialReview,
+        profile.profileId,
+        profile.profileId,
+        expectedAction,
+      )
     }
     review.value = loaded.credentialReview
     reviewProfileId.value = profile.profileId
@@ -401,46 +505,71 @@ async function submit() {
     )
     if (reason) throw new Error(reason)
 
-    const revalidateAcceptanceAfterSignature =
-      expectedAction === 'accept'
-        ? async () => {
-            assertCurrent()
-            const latestProfile = await getActiveNetworkProfile()
-            assertLinkProfile(expectedLinkedProfileId || undefined, latestProfile.profileId)
-            const latest = await fetchExactReview({
-              issuer: expectedIssuer,
-              subject: expectedSubject,
-              schemaUid: expectedSchemaUid,
-              profileId: latestProfile.profileId,
-              ...(expectedLinkedGenerationId
-                ? { expectedGenerationId: expectedLinkedGenerationId }
-                : {}),
-            })
-            assertCurrent()
-            assertCredentialAcceptanceReviewCurrent(
-              loaded.credentialReview,
-              latest.credentialReview,
-              profile.profileId,
-              latestProfile.profileId,
-              expectedIssuerTrustAcknowledgement ?? undefined,
-            )
-          }
-        : undefined
+    const revalidateSubjectActionAfterSignature = async () => {
+      assertCurrent()
+      const latestProfile = await getActiveNetworkProfile()
+      assertLinkProfile(expectedLinkedProfileId || undefined, latestProfile.profileId)
+      if (expectedAction === 'accept') {
+        if (!('report' in loaded.credentialReview)) {
+          throw new Error('CREDENTIAL_ACCEPTANCE_REVIEW_REQUIRED')
+        }
+        const latest = await fetchExactReview({
+          issuer: expectedIssuer,
+          subject: expectedSubject,
+          schemaUid: expectedSchemaUid,
+          profileId: latestProfile.profileId,
+          ...linkedGeneration,
+        })
+        assertCurrent()
+        assertCredentialAcceptanceReviewCurrent(
+          loaded.credentialReview,
+          latest.credentialReview,
+          profile.profileId,
+          latestProfile.profileId,
+          expectedIssuerTrustAcknowledgement ?? undefined,
+        )
+      } else {
+        if ('report' in loaded.credentialReview) {
+          throw new Error('CREDENTIAL_MUTATION_REVIEW_REQUIRED')
+        }
+        const latest = await fetchExactMutationReview({
+          issuer: expectedIssuer,
+          subject: expectedSubject,
+          schemaUid: expectedSchemaUid,
+          profileId: latestProfile.profileId,
+          ...linkedGeneration,
+        })
+        assertCurrent()
+        assertCredentialSubjectMutationReviewCurrent(
+          loaded.credentialReview,
+          latest,
+          profile.profileId,
+          latestProfile.profileId,
+          expectedAction,
+        )
+      }
+    }
 
     const response = await signAndSubmit(
       preparedTransaction,
       {
-        action: expectedAction === 'accept' ? 'credential-accept' : 'credential-reject',
+        action:
+          expectedAction === 'accept'
+            ? 'credential-accept'
+            : expectedAction === 'reject'
+              ? 'credential-reject'
+              : 'credential-remove',
         issuer: expectedIssuer,
         subject: expectedSubject,
         schemaUid: expectedSchemaUid,
         generationId: loaded.credentialReview.generationId,
-        ...(loaded.credentialReview.payloadDigestHex
+        ...('payloadDigestHex' in loaded.credentialReview &&
+        loaded.credentialReview.payloadDigestHex
           ? { payloadDigestHex: loaded.credentialReview.payloadDigestHex }
           : {}),
       },
       assertCurrent,
-      revalidateAcceptanceAfterSignature,
+      revalidateSubjectActionAfterSignature,
       (validated) => {
         result.value = { ...validated }
       },
@@ -468,7 +597,8 @@ async function submit() {
       <label for="subject-action">{{ $t('accept.action') }}</label>
       <select id="subject-action" v-model="action" :disabled="busy">
         <option value="accept">{{ $t('accept.acceptAction') }}</option>
-        <option value="delete">{{ $t('accept.rejectAction') }}</option>
+        <option value="reject">{{ $t('accept.rejectAction') }}</option>
+        <option value="remove">{{ $t('accept.removeAction') }}</option>
       </select>
       <label for="issuer">Issuer</label>
       <input id="issuer" v-model.trim="issuer" placeholder="r…" :disabled="busy" />
@@ -517,28 +647,34 @@ async function submit() {
         <dd>
           <code>{{ review.generationId }}</code>
         </dd>
+        <dt>{{ $t('accept.state') }}</dt>
+        <dd><StatusPill :value="review.state" /></dd>
+        <dt>{{ $t('accept.acceptedFlag') }}</dt>
+        <dd>
+          <code>{{ review.accepted }}</code>
+        </dd>
       </dl>
 
-      <div class="verification-grid">
+      <div v-if="acceptanceReview" class="verification-grid">
         <article>
           <span>{{ $t('verify.onChain') }}</span
-          ><StatusPill :value="review.report.onChain" />
+          ><StatusPill :value="acceptanceReview.report.onChain" />
         </article>
         <article>
           <span>{{ $t('verify.schema') }}</span
-          ><StatusPill :value="review.report.schema" />
+          ><StatusPill :value="acceptanceReview.report.schema" />
         </article>
         <article>
           <span>{{ $t('verify.payload') }}</span
-          ><StatusPill :value="review.report.payload" />
+          ><StatusPill :value="acceptanceReview.report.payload" />
         </article>
         <article>
           <span>{{ $t('verify.trust') }}</span
-          ><StatusPill :value="review.report.issuerTrust" />
+          ><StatusPill :value="acceptanceReview.report.issuerTrust" />
         </article>
       </div>
 
-      <div v-if="action === 'accept' && !review.claims" class="warning-box">
+      <div v-if="action === 'accept' && !acceptanceReview?.claims" class="warning-box">
         <p>{{ $t('accept.payloadConsentIntro', { host: payloadHost ?? '—' }) }}</p>
         <div v-if="payloadHostBlockReason" class="error-box">{{ payloadHostBlockReason }}</div>
         <label v-else>
@@ -552,7 +688,7 @@ async function submit() {
         </label>
       </div>
       <div
-        v-if="action === 'accept' && review.report.issuerTrust === 'unknown'"
+        v-if="action === 'accept' && acceptanceReview?.report.issuerTrust === 'unknown'"
         class="warning-box"
         data-testid="issuer-trust-acknowledgement"
       >
@@ -569,17 +705,24 @@ async function submit() {
       </div>
       <template v-if="action === 'accept'">
         <h2>{{ $t('accept.publicClaims') }}</h2>
-        <pre v-if="review.claims">{{ JSON.stringify(review.claims, null, 2) }}</pre>
-        <div v-else-if="review.payloadReviewError" class="error-box">
-          {{ $t('accept.payloadUnavailable') }} <code>{{ review.payloadReviewError }}</code>
+        <pre v-if="acceptanceReview?.claims">{{
+          JSON.stringify(acceptanceReview.claims, null, 2)
+        }}</pre>
+        <div v-else-if="acceptanceReview?.payloadReviewError" class="error-box">
+          {{ $t('accept.payloadUnavailable') }}
+          <code>{{ acceptanceReview.payloadReviewError }}</code>
         </div>
-        <p v-if="review.payloadDigestHex" class="muted">
-          {{ review.payloadByteLength }} bytes · <code>{{ review.payloadDigestHex }}</code>
+        <p v-if="acceptanceReview?.payloadDigestHex" class="muted">
+          {{ acceptanceReview.payloadByteLength }} bytes ·
+          <code>{{ acceptanceReview.payloadDigestHex }}</code>
         </p>
       </template>
       <div v-if="blockReasonMessage" class="error-box">{{ blockReasonMessage }}</div>
-      <div v-else-if="action === 'delete'" class="warning-box">
+      <div v-else-if="action === 'reject'" class="warning-box">
         {{ $t('accept.rejectSafety') }}
+      </div>
+      <div v-else-if="action === 'remove'" class="warning-box">
+        {{ $t('accept.removeSafety') }}
       </div>
     </article>
 
@@ -592,5 +735,13 @@ async function submit() {
       :business-confirmation="result.businessConfirmation"
       :business-evidence="result.businessEvidence"
     />
+    <NuxtLinkLocale
+      v-if="result?.businessEvidence?.generationId"
+      class="button secondary"
+      data-testid="subject-result-permalink"
+      :to="`/credentials/${result.businessEvidence.generationId}`"
+    >
+      {{ $t('accept.openPermalink') }}
+    </NuxtLinkLocale>
   </section>
 </template>

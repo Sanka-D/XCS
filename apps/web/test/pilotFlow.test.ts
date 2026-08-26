@@ -56,6 +56,7 @@ describe('pilot flow without a wallet extension', () => {
         schemaUid,
         uriHex: encodeUtf8Hex(uri),
         expiration: null,
+        accepted: false,
         state: 'pending',
       },
       report: {

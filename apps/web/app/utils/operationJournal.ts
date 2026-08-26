@@ -60,7 +60,8 @@ export type OperationBusinessContext =
       readonly expiration?: string | undefined
     }
   | {
-      readonly action: 'credential-accept' | 'credential-reject' | 'credential-revoke'
+      readonly action:
+        'credential-accept' | 'credential-reject' | 'credential-remove' | 'credential-revoke'
       readonly issuer: string
       readonly subject: string
       readonly schemaUid: string
@@ -113,6 +114,7 @@ const CREDENTIAL_ACTIONS = new Set([
   'credential-issue',
   'credential-accept',
   'credential-reject',
+  'credential-remove',
   'credential-revoke',
 ])
 const TRANSACTION_HASH = /^[0-9a-f]{64}$/i
@@ -222,7 +224,8 @@ export function validateOperationBusinessContext(input: unknown): OperationBusin
     }
   }
   return {
-    action: action as 'credential-accept' | 'credential-reject' | 'credential-revoke',
+    action: action as
+      'credential-accept' | 'credential-reject' | 'credential-remove' | 'credential-revoke',
     issuer: candidate.issuer,
     subject: candidate.subject,
     schemaUid,
@@ -269,11 +272,15 @@ export function isGenerationBoundBusinessContext(
   input: OperationBusinessContext | undefined,
 ): input is Extract<
   OperationBusinessContext,
-  { readonly action: 'credential-accept' | 'credential-reject' | 'credential-revoke' }
+  {
+    readonly action:
+      'credential-accept' | 'credential-reject' | 'credential-remove' | 'credential-revoke'
+  }
 > {
   return (
     input?.action === 'credential-accept' ||
     input?.action === 'credential-reject' ||
+    input?.action === 'credential-remove' ||
     input?.action === 'credential-revoke'
   )
 }
@@ -396,17 +403,22 @@ function evidenceSupportsBusinessResult(
         : 'deleted'
   const expectedDeletionCause =
     business.action === 'credential-reject'
-      ? business.issuer === business.subject
-        ? 'issuer_revoked'
-        : 'subject_rejected'
-      : business.action === 'credential-revoke'
-        ? 'issuer_revoked'
-        : null
+      ? 'subject_rejected'
+      : business.action === 'credential-remove'
+        ? business.issuer === business.subject
+          ? 'issuer_revoked'
+          : 'subject_removed'
+        : business.action === 'credential-revoke'
+          ? 'issuer_revoked'
+          : null
   return (
     evidence.eventType === expectedEventType &&
     (business.action === 'credential-issue'
       ? evidence.accepted === (business.issuer === business.subject)
-      : business.action !== 'credential-accept' || evidence.accepted === true) &&
+      : business.action === 'credential-reject'
+        ? evidence.accepted === false
+        : (business.action !== 'credential-accept' && business.action !== 'credential-remove') ||
+          evidence.accepted === true) &&
     (business.action === 'credential-issue'
       ? evidence.generationId === transactionHash
       : evidence.generationId === business.generationId) &&
@@ -571,7 +583,16 @@ export function canReconfirmOperation(operation: StoredOperation): boolean {
         operation.transactionType === 'CredentialDelete' && operation.account === business.subject
       )
     }
-    return operation.transactionType === 'CredentialDelete' && operation.account === business.issuer
+    if (business.action === 'credential-remove') {
+      return (
+        operation.transactionType === 'CredentialDelete' && operation.account === business.subject
+      )
+    }
+    return (
+      business.action === 'credential-revoke' &&
+      operation.transactionType === 'CredentialDelete' &&
+      operation.account === business.issuer
+    )
   } catch {
     return false
   }

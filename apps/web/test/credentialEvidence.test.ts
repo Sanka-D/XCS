@@ -52,6 +52,7 @@ const review: CredentialReview = {
   schemaUid: '12'.repeat(32),
   uri: `https://issuer.example/diploma.json#xcs-sha256=${'ab'.repeat(32)}`,
   expiration: null,
+  accepted: true,
   state: 'active',
   report: {
     onChain: 'active',
@@ -144,6 +145,7 @@ describe('exact Credential evidence', () => {
       schemaUid: review.schemaUid,
       uriHex: encodeUtf8Hex(review.uri!),
       expiration: null,
+      accepted: true,
       state: 'deleted',
     }
     const input = {

@@ -116,6 +116,11 @@ function operationVerifyLink(operation: StoredOperation): string | null {
   })
 }
 
+function operationCredentialLink(operation: StoredOperation): string | null {
+  const generationId = operationBusinessEvidence(operation)?.generationId
+  return generationId ? `/credentials/${generationId}` : null
+}
+
 onMounted(refresh)
 </script>
 
@@ -305,6 +310,14 @@ onMounted(refresh)
             {{ $t('operations.verifyLink') }}
           </NuxtLinkLocale>
         </div>
+        <NuxtLinkLocale
+          v-if="operationCredentialLink(operation)"
+          class="button secondary"
+          data-testid="operation-credential-link"
+          :to="operationCredentialLink(operation) ?? '/'"
+        >
+          {{ $t('operations.credentialLink') }}
+        </NuxtLinkLocale>
         <p v-if="operation.message" class="muted">{{ operation.message }}</p>
       </article>
     </div>

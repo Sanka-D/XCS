@@ -273,5 +273,43 @@ export default defineEventHandler((event) => {
     }
   }
 
+  if (path === `networks/${PROFILE_ID}/credentials/${ISSUER}/${SUBJECT}/${SCHEMA_UID}`) {
+    return {
+      generationId: GENERATION_ID,
+      ledgerObjectId: '90'.repeat(32),
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: SCHEMA_UID,
+      uriHex: encodeUtf8Hex(CREDENTIAL_URI),
+      expiration: null,
+      accepted: true,
+      createdLedgerIndex: 100_001,
+      createdTransactionIndex: 2,
+      lastLedgerIndex: 100_002,
+      deletedLedgerIndex: null,
+      deletionCause: null,
+      state: 'active',
+    }
+  }
+
+  if (path === `networks/${PROFILE_ID}/credentials/${ISSUER}/${ISSUER}/${SCHEMA_UID}`) {
+    return {
+      generationId: NO_URI_GENERATION_ID,
+      ledgerObjectId: '92'.repeat(32),
+      issuer: ISSUER,
+      subject: ISSUER,
+      schemaUid: SCHEMA_UID,
+      uriHex: null,
+      expiration: null,
+      accepted: true,
+      createdLedgerIndex: 100_003,
+      createdTransactionIndex: 2,
+      lastLedgerIndex: 100_003,
+      deletedLedgerIndex: null,
+      deletionCause: null,
+      state: 'active',
+    }
+  }
+
   return notFound()
 })

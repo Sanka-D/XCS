@@ -55,7 +55,11 @@ The adapters still require real browser-extension testing for each native Creden
 The required Playwright gate exercises schema registration and credential issuance in Chromium,
 including the two distinct finality stages. Issuance first receives deliberately mismatched indexed
 evidence, withholds XCS success, then proves that `/operations` can re-confirm the exact event
-without signing or submitting again. It also exercises the Developers quickstart against the
+without signing or submitting again. The same deterministic journey accepts the pending Credential,
+removes the resulting active generation through the subject wallet, opens its exact deleted
+permalink and exports the sanitized `subject_removed` receipt. A separate case proves that rejecting
+an unaccepted pending generation contacts neither the payload host nor `/v1/verify`. It also
+exercises the Developers quickstart against the
 deterministic exact-generation API, checks that local-payload verification never sets
 `resolvePayload`, and proves that a replaced generation fails before a payload can be submitted.
 
@@ -181,7 +185,11 @@ request. Issuer trust remains a separate decision: an explicitly `untrusted` iss
 second explicit subject acknowledgement bound in memory to the displayed issuer, generation and
 trust status. Changing the wallet account, profile, link generation or trust status invalidates that
 acknowledgement, which is checked again before the wallet is opened and is never journaled. Rejection
-never fetches payload bytes. Local hostnames
+and subject removal read only the authoritative exact tuple: they never fetch payload bytes or ask
+`/v1/verify` for payload/trust dimensions. They re-read the profile, tuple, generation, state and
+normative `accepted` flag after the wallet returns, before persisting or submitting the signed blob.
+An unaccepted Credential can be accepted only while `pending` and rejected while `pending` or
+`expired`; an accepted Credential can be removed while `active` or `expired`. Local hostnames
 (`localhost`, `.local`, `.internal`, `.lan`) and all IP literals are rejected before fetch.
 This browser-only filter cannot pin DNS: a public hostname can still resolve or rebind to a private
 address before the request. Deployments that accept untrusted issuers should therefore restrict
@@ -208,9 +216,12 @@ displayed host; the browser then re-reads the profile, exact generation, tuple a
 single issuer-host fetch, verifies the locally parsed payload through `/v1/verify`, and renders fields
 in resolved-schema order. Claims remain in memory and are never journaled, cached or included in
 receipt exports. A replaced generation remains readable, but cannot reuse the current tuple
-generation's verification report or enable payload loading. A deleted generation that is still the
-current generation for its tuple may still be checked after consent; its deleted lifecycle state
-remains visible alongside the payload evidence.
+generation's verification report, enable payload loading or expose a lifecycle-action button. A
+current unaccepted `pending` permalink links to accept/reject; an unaccepted `expired` permalink
+links to reject; and a current accepted `active` or `expired` permalink links to subject removal.
+Deleted generations expose no lifecycle CTA. A deleted generation that is still the current
+generation for its tuple may still be checked after consent; its deleted lifecycle state remains
+visible alongside the payload evidence.
 
 ## Durable submission journal
 
@@ -228,7 +239,9 @@ A transaction has two separately displayed outcomes: XRPL must first report `val
 `TransactionResult: tesSUCCESS`, then the authoritative indexer must expose its exact schema
 registration or Credential event. The journal and v0.2 receipt keep the latter as
 `businessConfirmation: pending|confirmed|rejected|mismatch|timeout`, with ledger hash/index,
-transaction index, UID/generation or protocol rejection reason where applicable. An XRPL-valid
+transaction index, UID/generation, deletion cause or protocol rejection reason where applicable.
+`credential-remove` remains receipt version `0.2`: the allowlisted export shape is unchanged and
+this alpha adds only a lifecycle-action enum value before public package release. An XRPL-valid
 transaction is never represented as XCS-confirmed when it lacks a positive validated ledger index,
 when indexing times out, or when the indexed event reports a different transaction hash or ledger
 index. A timeout is recoverable by rechecking the indexer only; it never causes a rebroadcast.
@@ -262,7 +275,10 @@ For any complete operation already validated with `tesSUCCESS`, `/operations` ca
 `GET /v1/networks/:network/schema-registrations/:transactionHash` proof and requires its publisher
 and canonical digest before accepting the returned UID. Credential issuance and lifecycle actions
 use `GET /v1/networks/:network/credentials/:issuer/:subject/:schemaUid/events/:transactionHash` and
-verify tuple, hash, event type and generation. A confirmed issuance produces an acceptance link
+verify tuple, hash, ledger coordinates, event type, generation, accepted flag and deletion cause.
+Subject removal requires `deleted` plus `subject_removed`; for a self-issued Credential the
+protocol-required projected cause is `issuer_revoked`. Rejection requires `subject_rejected` for a
+distinct issuer/subject tuple. A confirmed issuance produces an acceptance link
 bound to profile, issuer, schema and generation (the subject still comes from the connected wallet),
 plus a full verification link. Reconfirmation never reads a signed blob, connects to XRPL or
 rebroadcasts the transaction.

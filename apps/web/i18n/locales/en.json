@@ -44,7 +44,9 @@
     "reconfirm": "The XRPL transaction will not be submitted again. Re-check its indexed proof from Operations.",
     "proofLedger": "Proof ledger",
     "proofLedgerHash": "Proof ledger hash",
-    "proofTransactionIndex": "Proof transaction index"
+    "proofTransactionIndex": "Proof transaction index",
+    "proofEvent": "Indexed event",
+    "proofDeletionCause": "Indexed deletion cause"
   },
   "home": {
     "eyebrow": "Interoperable XRPL credentials",
@@ -230,6 +232,9 @@
     "copyLink": "Copy exact link",
     "linkCopied": "Link copied.",
     "copyFailed": "The browser could not copy this link.",
+    "managePending": "Accept or reject this generation",
+    "rejectExpired": "Reject this unaccepted expired generation",
+    "removeCredential": "Remove this generation from my account",
     "timeline": "Indexed lifecycle",
     "timelineEmpty": "No lifecycle event is available.",
     "events": {
@@ -356,18 +361,21 @@
   },
   "accept": {
     "title": "Accept or remove a credential",
-    "description": "Only the subject can accept. The subject or issuer can later delete the object according to XRPL rules.",
+    "description": "The subject accepts an unaccepted pending credential, rejects an unaccepted pending or expired credential, and removes an accepted active or expired credential.",
     "notTruth": "Acceptance means retaining the Credential on your account; it does not certify that its claims are true.",
     "action": "Action",
     "prepare": "Prepare transaction",
     "review": "Load, review and prepare",
     "fetchAndPrepare": "Fetch payload and prepare",
     "acceptAction": "Accept the pending credential",
-    "rejectAction": "Reject the pending credential",
+    "rejectAction": "Reject the unaccepted pending or expired credential",
+    "removeAction": "Remove the accepted active or expired credential",
     "exactCredential": "Exact credential review",
     "expiration": "Expiration",
     "noExpiration": "No expiration",
     "generation": "Generation ID",
+    "state": "Re-read indexed state",
+    "acceptedFlag": "Re-read accepted flag",
     "publicClaims": "Public claims",
     "payloadConsentIntro": "The next step contacts {host} directly from this browser. That host can observe your IP address and request time.",
     "payloadConsent": "I explicitly consent to fetching this public payload from the displayed host.",
@@ -377,7 +385,9 @@
     "issuerAcknowledgementRequired": "Confirm your own trust decision for this exact unknown issuer generation before accepting.",
     "issuerAcknowledgementStale": "The issuer trust context changed. Review it and confirm your decision again.",
     "issuerUntrusted": "This verifier's local policy marks the issuer as untrusted. Acceptance is blocked.",
-    "rejectSafety": "Rejecting deletes this pending object without endorsing its issuer or claims.",
+    "rejectSafety": "Rejecting deletes this unaccepted pending or expired object without endorsing its issuer or claims. This action loads neither payload nor trust status.",
+    "removeSafety": "Removing deletes this accepted active or expired generation from the subject account. No payload or trust status is loaded; XCS success then requires indexed deleted evidence with subject_removed (issuer_revoked for a self-issued credential).",
+    "openPermalink": "Open this generation’s exact evidence",
     "submitted": "Validated subject action: "
   },
   "revoke": {
@@ -434,6 +444,7 @@
     "proofTransactionIndex": "Indexed proof transaction index",
     "reason": "Protocol reason",
     "acceptLink": "Subject acceptance",
+    "credentialLink": "Exact generation evidence",
     "verifyLink": "Verification"
   },
   "footer": {

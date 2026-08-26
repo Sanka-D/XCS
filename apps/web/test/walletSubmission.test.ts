@@ -240,6 +240,7 @@ describe('wallet sign-only normalization', () => {
       schemaUid: '12'.repeat(32),
       uri: 'https://issuer.example/c.json',
       expiration: null,
+      accepted: false,
       state: 'pending',
       claims: { programId: 'course-1' },
       report: {
@@ -328,6 +329,9 @@ describe('operation journal state', () => {
     }
     expect(operationBusinessKey(profileId, { action: 'credential-accept', ...tuple })).toBe(
       operationBusinessKey(profileId, { action: 'credential-revoke', ...tuple }),
+    )
+    expect(operationBusinessKey(profileId, { action: 'credential-remove', ...tuple })).toBe(
+      operationBusinessKey(profileId, { action: 'credential-accept', ...tuple }),
     )
     expect(
       operationBusinessKey(profileId, {
@@ -553,6 +557,55 @@ describe('operation journal state', () => {
         generationId: txHash.toLowerCase(),
         eventType: 'created',
       },
+    })
+    expect(JSON.stringify(receipt)).not.toContain('DO_NOT_EXPORT')
+    expect(JSON.stringify(receipt)).not.toContain('claims')
+  })
+
+  it('exports a sanitized v0.2 subject-removal receipt with exact indexed evidence', () => {
+    const issuer = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+    const subject = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
+    const schemaUid = '12'.repeat(32)
+    const generationId = '34'.repeat(32)
+    const txHash = 'AB'.repeat(32)
+    const receipt = toSanitizedOperationReceipt(
+      storedOperation({
+        account: subject,
+        transactionType: 'CredentialDelete',
+        stage: 'validated',
+        txHash,
+        engineResult: 'tesSUCCESS',
+        ledgerIndex: 101,
+        businessConfirmation: 'confirmed',
+        business: {
+          action: 'credential-remove',
+          issuer,
+          subject,
+          schemaUid,
+          generationId,
+          claims: { secret: 'DO_NOT_EXPORT' },
+        } as never,
+        businessEvidence: {
+          transactionHash: txHash,
+          ledgerIndex: 101,
+          ledgerHash: 'CD'.repeat(32),
+          transactionIndex: 2,
+          schemaUid,
+          generationId,
+          eventType: 'deleted',
+          accepted: true,
+          deletionCause: 'subject_removed',
+        },
+      }),
+    )
+
+    expect(receipt).toMatchObject({
+      receiptVersion: '0.2',
+      account: subject,
+      transactionType: 'CredentialDelete',
+      businessConfirmation: 'confirmed',
+      business: { action: 'credential-remove', issuer, subject, schemaUid, generationId },
+      businessEvidence: { eventType: 'deleted', accepted: true, deletionCause: 'subject_removed' },
     })
     expect(JSON.stringify(receipt)).not.toContain('DO_NOT_EXPORT')
     expect(JSON.stringify(receipt)).not.toContain('claims')

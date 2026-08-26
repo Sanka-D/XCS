@@ -191,16 +191,21 @@ function inspectCredentialEvent(
     const expectedEventType = business.action === 'credential-accept' ? 'accepted' : 'deleted'
     const expectedDeletionCause =
       business.action === 'credential-reject'
-        ? business.issuer === business.subject
-          ? 'issuer_revoked'
-          : 'subject_rejected'
-        : business.action === 'credential-revoke'
-          ? 'issuer_revoked'
-          : undefined
+        ? 'subject_rejected'
+        : business.action === 'credential-remove'
+          ? business.issuer === business.subject
+            ? 'issuer_revoked'
+            : 'subject_removed'
+          : business.action === 'credential-revoke'
+            ? 'issuer_revoked'
+            : undefined
     confirmed =
       generationId === business.generationId &&
       event.eventType === expectedEventType &&
-      (business.action !== 'credential-accept' || event.accepted === true) &&
+      (business.action === 'credential-reject'
+        ? event.accepted === false
+        : (business.action !== 'credential-accept' && business.action !== 'credential-remove') ||
+          event.accepted === true) &&
       (expectedDeletionCause === undefined || event.deletionCause === expectedDeletionCause)
   }
   if (!confirmed) return { state: 'mismatch' }

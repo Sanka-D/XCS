@@ -44,7 +44,9 @@
     "reconfirm": "La transaction XRPL ne sera pas soumise à nouveau. Revérifiez uniquement sa preuve depuis Opérations.",
     "proofLedger": "Ledger de preuve",
     "proofLedgerHash": "Hash du ledger de preuve",
-    "proofTransactionIndex": "Index de transaction de la preuve"
+    "proofTransactionIndex": "Index de transaction de la preuve",
+    "proofEvent": "Événement indexé",
+    "proofDeletionCause": "Cause de suppression indexée"
   },
   "home": {
     "eyebrow": "Des credentials XRPL interopérables",
@@ -233,6 +235,9 @@
     "copyLink": "Copier le lien exact",
     "linkCopied": "Lien copié.",
     "copyFailed": "Le navigateur n’a pas pu copier ce lien.",
+    "managePending": "Accepter ou rejeter cette génération",
+    "rejectExpired": "Rejeter cette génération expirée non acceptée",
+    "removeCredential": "Retirer cette génération de mon compte",
     "timeline": "Cycle de vie indexé",
     "timelineEmpty": "Aucun événement de cycle de vie n’est disponible.",
     "events": {
@@ -359,18 +364,21 @@
   },
   "accept": {
     "title": "Accepter ou retirer un credential",
-    "description": "Seul le sujet peut accepter. Le sujet ou l’émetteur peut ensuite supprimer l’objet selon les règles XRPL.",
+    "description": "Le sujet accepte un credential pending non accepté, rejette un credential non accepté pending ou expired, et retire un credential accepté active ou expired.",
     "notTruth": "Accepter signifie conserver le Credential sur votre compte ; cela ne certifie pas que ses claims sont vrais.",
     "action": "Action",
     "prepare": "Préparer la transaction",
     "review": "Charger, relire et préparer",
     "fetchAndPrepare": "Charger le payload et préparer",
     "acceptAction": "Accepter le credential pending",
-    "rejectAction": "Rejeter le credential pending",
+    "rejectAction": "Rejeter le credential pending ou expired non accepté",
+    "removeAction": "Retirer le credential active ou expired accepté",
     "exactCredential": "Relecture du credential exact",
     "expiration": "Expiration",
     "noExpiration": "Sans expiration",
     "generation": "Identifiant de génération",
+    "state": "État indexé relu",
+    "acceptedFlag": "Flag accepted relu",
     "publicClaims": "Claims publics",
     "payloadConsentIntro": "L’étape suivante contacte {host} directement depuis ce navigateur. Cet hôte peut observer votre adresse IP et l’heure de la requête.",
     "payloadConsent": "Je consens explicitement au chargement de ce payload public depuis l’hôte affiché.",
@@ -380,7 +388,9 @@
     "issuerAcknowledgementRequired": "Confirmez votre propre décision de confiance pour cette génération exacte d’un émetteur inconnu avant de l’accepter.",
     "issuerAcknowledgementStale": "Le contexte de confiance de l’émetteur a changé. Relisez-le et confirmez de nouveau votre décision.",
     "issuerUntrusted": "La politique locale de ce vérificateur marque l’émetteur comme non fiable. L’acceptation est bloquée.",
-    "rejectSafety": "Le rejet supprime cet objet pending sans approuver son émetteur ni ses claims.",
+    "rejectSafety": "Le rejet supprime cet objet non accepté pending ou expired sans approuver son émetteur ni ses claims. Aucun payload ni statut de confiance n’est chargé pour cette action.",
+    "removeSafety": "Le retrait supprime cette génération acceptée active ou expired du compte du sujet. Aucun payload ni statut de confiance n’est chargé ; la réussite XCS exige ensuite la preuve indexée deleted avec la cause subject_removed (issuer_revoked pour un credential auto-émis).",
+    "openPermalink": "Ouvrir la preuve exacte de cette génération",
     "submitted": "Action sujet validée : "
   },
   "revoke": {
@@ -437,6 +447,7 @@
     "proofTransactionIndex": "Index de transaction de la preuve indexée",
     "reason": "Raison protocolaire",
     "acceptLink": "Acceptation du sujet",
+    "credentialLink": "Preuve exacte de la génération",
     "verifyLink": "Vérification"
   },
   "footer": {

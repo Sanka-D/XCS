@@ -67,6 +67,18 @@ defineProps<{
           <code>{{ businessEvidence.generationId }}</code>
         </dd>
       </template>
+      <template v-if="businessEvidence.eventType">
+        <dt>{{ $t('finality.proofEvent') }}</dt>
+        <dd>
+          <code>{{ businessEvidence.eventType }}</code>
+        </dd>
+      </template>
+      <template v-if="businessEvidence.deletionCause">
+        <dt>{{ $t('finality.proofDeletionCause') }}</dt>
+        <dd>
+          <code>{{ businessEvidence.deletionCause }}</code>
+        </dd>
+      </template>
     </dl>
   </section>
 </template>

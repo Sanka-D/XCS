@@ -5,6 +5,7 @@ import {
   assertLinkProfile,
   buildCredentialAcceptLink,
   buildCredentialVerifyLink,
+  credentialPermalinkSubjectAction,
   singleRouteQueryValue,
 } from '../app/utils/operationLinks'
 
@@ -29,6 +30,21 @@ describe('credential operation links', () => {
     expect(link).not.toContain('subject=')
   })
 
+  it('binds an exact subject-removal link without trusting a subject query parameter', () => {
+    const link = buildCredentialAcceptLink({
+      profileId: 'xrpl-testnet-xcs-v0.1',
+      issuer: ISSUER,
+      schemaUid: SCHEMA_UID,
+      generationId: GENERATION_ID,
+      action: 'remove',
+    })
+
+    expect(link).toBe(
+      `/accept?profile=xrpl-testnet-xcs-v0.1&issuer=${ISSUER}&schema=${SCHEMA_UID}&generation=${GENERATION_ID}&action=remove`,
+    )
+    expect(link).not.toContain('subject=')
+  })
+
   it('binds all exact lookup coordinates in a verification link', () => {
     const link = buildCredentialVerifyLink({
       profileId: 'profile with spaces',
@@ -41,6 +57,44 @@ describe('credential operation links', () => {
     expect(link).toBe(
       `/verify?profile=profile+with+spaces&issuer=${ISSUER}&subject=${SUBJECT}&schema=${SCHEMA_UID}&generation=${GENERATION_ID}`,
     )
+  })
+
+  it('derives permalink CTAs from current generation state and accepted flag', () => {
+    expect(
+      credentialPermalinkSubjectAction({
+        currentGeneration: true,
+        accepted: false,
+        state: 'pending',
+      }),
+    ).toBe('accept')
+    expect(
+      credentialPermalinkSubjectAction({
+        currentGeneration: true,
+        accepted: false,
+        state: 'expired',
+      }),
+    ).toBe('reject')
+    expect(
+      credentialPermalinkSubjectAction({
+        currentGeneration: true,
+        accepted: true,
+        state: 'expired',
+      }),
+    ).toBe('remove')
+    expect(
+      credentialPermalinkSubjectAction({
+        currentGeneration: true,
+        accepted: true,
+        state: 'deleted',
+      }),
+    ).toBeNull()
+    expect(
+      credentialPermalinkSubjectAction({
+        currentGeneration: false,
+        accepted: true,
+        state: 'active',
+      }),
+    ).toBeNull()
   })
 
   it('fails closed when a linked profile or generation differs', () => {

@@ -10,11 +10,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   assertCredentialAcceptanceReviewCurrent,
   assertCredentialGenerationCurrent,
+  assertCredentialSubjectMutationReviewCurrent,
   credentialActionBlockReason,
   credentialRevocationBlockReason,
   createIssuerTrustAcknowledgementToken,
   createPayloadFetchConsentToken,
   inspectCredentialOperationEvent,
+  loadCredentialMutationReview,
   loadCredentialReview,
   loadCredentialReviewWithConsent,
   parseApiCredentialDetail,
@@ -51,6 +53,7 @@ const credential = {
   schemaUid: UID,
   uriHex: encodeUtf8Hex(uri),
   expiration: null,
+  accepted: false,
   state: 'pending',
 }
 const report = {
@@ -243,7 +246,7 @@ describe('exact credential review', () => {
     })
 
     expect(fetchImpl).not.toHaveBeenCalled()
-    expect(credentialActionBlockReason(review, 'delete')).toBeUndefined()
+    expect(credentialActionBlockReason(review, 'reject')).toBeUndefined()
     expect(credentialActionBlockReason(review, 'accept')).toBe('CREDENTIAL_PAYLOAD_REVIEW_FAILED')
   })
 
@@ -347,6 +350,72 @@ describe('exact credential review', () => {
     )
   })
 
+  it('routes expired subject actions by the normative accepted flag', () => {
+    const active = loadCredentialMutationReview(
+      { ...credential, accepted: true, state: 'active' },
+      { issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
+    )
+    const expired = { ...active, state: 'expired' as const }
+    const expiredUnaccepted = { ...expired, accepted: false }
+
+    expect(credentialActionBlockReason(active, 'remove')).toBeUndefined()
+    expect(credentialActionBlockReason(expired, 'remove')).toBeUndefined()
+    expect(credentialActionBlockReason({ ...active, state: 'pending' }, 'remove')).toBe(
+      'CREDENTIAL_MUST_BE_ACTIVE_OR_EXPIRED_ACCEPTED',
+    )
+    expect(credentialActionBlockReason(expiredUnaccepted, 'reject')).toBeUndefined()
+    expect(credentialActionBlockReason(expiredUnaccepted, 'remove')).toBe(
+      'CREDENTIAL_MUST_BE_ACTIVE_OR_EXPIRED_ACCEPTED',
+    )
+    expect(credentialActionBlockReason(expired, 'reject')).toBe(
+      'CREDENTIAL_MUST_BE_PENDING_OR_EXPIRED_UNACCEPTED',
+    )
+  })
+
+  it('rechecks tuple, profile, generation, state and accepted flag after subject signing', () => {
+    const expected = loadCredentialMutationReview(
+      { ...credential, accepted: true, state: 'active' },
+      { issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
+    )
+
+    expect(() =>
+      assertCredentialSubjectMutationReviewCurrent(
+        expected,
+        { ...expected },
+        'profile-a',
+        'profile-a',
+        'remove',
+      ),
+    ).not.toThrow()
+    expect(() =>
+      assertCredentialSubjectMutationReviewCurrent(
+        expected,
+        { ...expected, state: 'expired' },
+        'profile-a',
+        'profile-a',
+        'remove',
+      ),
+    ).toThrow('CREDENTIAL_STATE_CHANGED_AFTER_SIGNATURE')
+    expect(() =>
+      assertCredentialSubjectMutationReviewCurrent(
+        expected,
+        { ...expected, accepted: false },
+        'profile-a',
+        'profile-a',
+        'remove',
+      ),
+    ).toThrow('CREDENTIAL_STATE_CHANGED_AFTER_SIGNATURE')
+    expect(() =>
+      assertCredentialSubjectMutationReviewCurrent(
+        expected,
+        expected,
+        'profile-a',
+        'profile-b',
+        'remove',
+      ),
+    ).toThrow('NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE')
+  })
+
   it('rechecks the exact generation and action state after wallet signing', () => {
     const expected = {
       action: 'credential-accept' as const,
@@ -359,6 +428,18 @@ describe('exact credential review', () => {
     expect(() =>
       assertCredentialGenerationCurrent({ ...credential, generationId: '56'.repeat(32) }, expected),
     ).toThrow('CREDENTIAL_GENERATION_CHANGED_AFTER_SIGNATURE')
+    expect(() =>
+      assertCredentialGenerationCurrent(
+        { ...credential, accepted: true, state: 'expired' },
+        { ...expected, action: 'credential-remove' },
+      ),
+    ).not.toThrow()
+    expect(() =>
+      assertCredentialGenerationCurrent(
+        { ...credential, accepted: false, state: 'expired' },
+        { ...expected, action: 'credential-reject' },
+      ),
+    ).not.toThrow()
   })
 
   it('confirms only an event matching hash, generation and mutation type', () => {
@@ -388,6 +469,24 @@ describe('exact credential review', () => {
         expected,
       ),
     ).toBe('confirmed')
+    expect(
+      inspectCredentialOperationEvent(
+        {
+          transactionHash: expected.txHash,
+          event: {
+            transactionHash: expected.txHash,
+            issuer: ISSUER,
+            subject: SUBJECT,
+            schemaUid: UID,
+            generationId: GENERATION,
+            eventType: 'deleted',
+            accepted: true,
+            deletionCause: 'subject_rejected',
+          },
+        },
+        expected,
+      ),
+    ).toBe('mismatch')
     expect(
       inspectCredentialOperationEvent(
         {
@@ -446,6 +545,47 @@ describe('exact credential review', () => {
         { ...expected, action: 'credential-accept' },
       ),
     ).toBe('mismatch')
+  })
+
+  it('confirms subject removal only with the projected exact deletion cause', () => {
+    const expected = {
+      action: 'credential-remove' as const,
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      generationId: GENERATION,
+      txHash: 'AB'.repeat(32),
+    }
+    const response = {
+      transactionHash: expected.txHash,
+      event: {
+        transactionHash: expected.txHash,
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: UID,
+        generationId: GENERATION,
+        eventType: 'deleted',
+        accepted: true,
+        deletionCause: 'subject_removed',
+      },
+    }
+
+    expect(inspectCredentialOperationEvent(response, expected)).toBe('confirmed')
+    expect(
+      inspectCredentialOperationEvent(
+        { ...response, event: { ...response.event, deletionCause: 'issuer_revoked' } },
+        expected,
+      ),
+    ).toBe('mismatch')
+    expect(
+      inspectCredentialOperationEvent(
+        {
+          ...response,
+          event: { ...response.event, issuer: SUBJECT, deletionCause: 'issuer_revoked' },
+        },
+        { ...expected, issuer: SUBJECT },
+      ),
+    ).toBe('confirmed')
   })
 
   it('bounds indexer event reconciliation instead of reporting success indefinitely', async () => {

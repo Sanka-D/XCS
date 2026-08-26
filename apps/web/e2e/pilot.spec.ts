@@ -74,12 +74,15 @@ interface ApiMockOptions {
   readonly credentialEvidence?: () => 'confirmed' | 'mismatch'
   readonly credentialLifecycle?: BrowserCredentialLifecycle
   readonly credentialUri?: string
+  readonly pendingCredentialRejection?: boolean
 }
 
 interface BrowserCredentialLifecycle {
   generationId: string | null
-  state: 'pending' | 'active'
+  state: 'pending' | 'active' | 'expired' | 'deleted'
+  accepted: boolean
   acceptedTransactionHash: string | null
+  removedTransactionHash?: string | null
 }
 
 const browserErrors = new WeakMap<Page, string[]>()
@@ -248,6 +251,20 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
         accepted: true,
         deletionCause: null,
       }
+      const removedEvent = {
+        transactionHash: lifecycle.removedTransactionHash,
+        nodeIndex: 0,
+        generationId: lifecycle.generationId,
+        ledgerIndex: 100_003,
+        ledgerHash: 'fa'.repeat(32),
+        transactionIndex: 1,
+        eventType: 'deleted',
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        accepted: lifecycle.accepted,
+        deletionCause: lifecycle.accepted ? 'subject_removed' : 'subject_rejected',
+      }
       await route.fulfill({
         json: {
           generation: {
@@ -258,15 +275,32 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
             schemaUid: SCHEMA_UID,
             uriHex: encodeUtf8Hex(options.credentialUri),
             expiration: null,
-            accepted: lifecycle.state === 'active',
+            accepted: lifecycle.accepted,
             createdLedgerIndex: 100_001,
             createdTransactionIndex: 2,
-            lastLedgerIndex: lifecycle.state === 'active' ? 100_002 : 100_001,
-            deletedLedgerIndex: null,
-            deletionCause: null,
+            lastLedgerIndex:
+              lifecycle.state === 'deleted'
+                ? 100_003
+                : lifecycle.state === 'active' || lifecycle.state === 'expired'
+                  ? 100_002
+                  : 100_001,
+            deletedLedgerIndex: lifecycle.state === 'deleted' ? 100_003 : null,
+            deletionCause:
+              lifecycle.state === 'deleted'
+                ? lifecycle.accepted
+                  ? 'subject_removed'
+                  : 'subject_rejected'
+                : null,
           },
           state: lifecycle.state,
-          timeline: lifecycle.state === 'active' ? [createdEvent, acceptedEvent] : [createdEvent],
+          timeline:
+            lifecycle.state === 'deleted'
+              ? lifecycle.accepted
+                ? [createdEvent, acceptedEvent, removedEvent]
+                : [createdEvent, removedEvent]
+              : lifecycle.state === 'active' || lifecycle.state === 'expired'
+                ? [createdEvent, acceptedEvent]
+                : [createdEvent],
         },
       })
       return
@@ -308,6 +342,7 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
           schemaUid: SCHEMA_UID,
           uriHex: encodeUtf8Hex(options.credentialUri),
           expiration: null,
+          accepted: lifecycle.accepted,
           state: lifecycle.state,
         },
       })
@@ -322,20 +357,30 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
     if (credentialEventMatch) {
       const txHash = credentialEventMatch[1]!
       const lifecycle = options.credentialLifecycle
-      const acceptanceEvent =
+      const lifecycleEvent = Boolean(
         lifecycle !== undefined &&
         lifecycle.generationId !== null &&
-        lifecycle.generationId !== txHash
+        lifecycle.generationId !== txHash,
+      )
+      const deletionEvent =
+        lifecycleEvent &&
+        (lifecycle.state !== 'pending' || options.pendingCredentialRejection === true)
+      const acceptanceEvent = lifecycleEvent && !deletionEvent
       const evidenceConfirmed = options.credentialEvidence?.() === 'confirmed'
-      const generationId = acceptanceEvent
+      const generationId = lifecycleEvent
         ? lifecycle.generationId!
         : evidenceConfirmed
           ? txHash
           : '34'.repeat(32)
-      if (!acceptanceEvent && evidenceConfirmed && lifecycle) lifecycle.generationId = txHash
+      if (!lifecycleEvent && evidenceConfirmed && lifecycle) lifecycle.generationId = txHash
       if (acceptanceEvent && lifecycle) {
         lifecycle.state = 'active'
+        lifecycle.accepted = true
         lifecycle.acceptedTransactionHash = txHash
+      }
+      if (deletionEvent && lifecycle) {
+        lifecycle.state = 'deleted'
+        lifecycle.removedTransactionHash = txHash
       }
       await route.fulfill({
         json: {
@@ -350,9 +395,13 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
             ledgerIndex: 100_001,
             ledgerHash: LEDGER_HASH,
             transactionIndex: 2,
-            eventType: acceptanceEvent ? 'accepted' : 'created',
-            accepted: acceptanceEvent,
-            deletionCause: null,
+            eventType: deletionEvent ? 'deleted' : acceptanceEvent ? 'accepted' : 'created',
+            accepted: lifecycle?.accepted ?? false,
+            deletionCause: deletionEvent
+              ? lifecycle?.accepted
+                ? 'subject_removed'
+                : 'subject_rejected'
+              : null,
           },
         },
       })
@@ -446,6 +495,7 @@ test('issues, reconfirms, then accepts a credential with exact indexed evidence'
   const credentialLifecycle: BrowserCredentialLifecycle = {
     generationId: null,
     state: 'pending',
+    accepted: false,
     acceptedTransactionHash: null,
   }
   await installApiMock(page, {
@@ -587,12 +637,152 @@ test('issues, reconfirms, then accepts a credential with exact indexed evidence'
       accepted: true,
     },
   })
+
+  await acceptanceOperation.getByTestId('operation-credential-link').click()
+  await expect(page).toHaveURL(`/credentials/${credentialLifecycle.generationId}`)
+  await page.locator('[data-client-ready="true"]').waitFor()
+  const removeLink = page.getByTestId('credential-subject-action')
+  await expect(removeLink).toContainText(/Retirer cette génération|Remove this generation/u)
+  await expect(removeLink).toHaveAttribute(
+    'href',
+    `/accept?profile=${PROFILE_ID}&issuer=${ISSUER}&schema=${SCHEMA_UID}&generation=${credentialLifecycle.generationId}&action=remove`,
+  )
+
+  let subjectMutationVerifyRequests = 0
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (request.method() === 'POST' && url.pathname === `${API_PREFIX}/v1/verify`) {
+      subjectMutationVerifyRequests += 1
+    }
+  })
+  const payloadRequestsBeforeRemoval = payloadRequestCount
+  await removeLink.click()
+  await expect(page).toHaveURL(/action=remove$/u)
+  await connectSyntheticWallet(page, 'subject')
+  await page
+    .getByRole('button', { name: /Charger, relire et préparer|Load, review and prepare/u })
+    .click()
+
+  const removalPreview = page.getByTestId('transaction-preview')
+  await expect(removalPreview).toContainText('CredentialDelete')
+  await expect(removalPreview).toContainText(SUBJECT)
+  await expect(removalPreview).toContainText(ISSUER)
+  await expect(page.getByTestId('issuer-trust-acknowledgement')).toHaveCount(0)
+  await expect(page.getByLabel(/consens|consent/iu)).toHaveCount(0)
+  expect(subjectMutationVerifyRequests).toBe(0)
+  expect(payloadRequestCount).toBe(payloadRequestsBeforeRemoval)
+
+  await page.getByTestId('transaction-sign').click()
+  await expect(page.getByTestId('xrpl-finality')).toContainText('tesSUCCESS')
+  await expect(page.getByTestId('xcs-confirmed')).toBeVisible()
+  await expect(page.getByTestId('business-finality')).toContainText('deleted')
+  await expect(page.getByTestId('business-finality')).toContainText('subject_removed')
+  expect(subjectMutationVerifyRequests).toBe(0)
+  expect(payloadRequestCount).toBe(payloadRequestsBeforeRemoval)
+  expect(credentialLifecycle.state).toBe('deleted')
+  expect(credentialLifecycle.removedTransactionHash).toMatch(/^[0-9a-f]{64}$/u)
+
+  await page.getByTestId('subject-result-permalink').click()
+  await expect(page).toHaveURL(`/credentials/${credentialLifecycle.generationId}`)
+  await expect(page.getByText('deleted', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('subject_removed', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('credential-subject-action')).toHaveCount(0)
+  expect(payloadRequestCount).toBe(payloadRequestsBeforeRemoval)
+
+  await page.goto('/operations')
+  const removalOperation = page
+    .getByTestId('operation-card')
+    .filter({ hasText: 'credential-remove' })
+    .first()
+  await expect(removalOperation.getByTestId('operation-xcs-result')).toContainText('confirmed')
+  const removalDownloadPromise = page.waitForEvent('download')
+  await page
+    .getByRole('button', { name: /Exporter les reçus minimisés|Export sanitized receipts/u })
+    .click()
+  const removalExport = JSON.parse(await downloadText(await removalDownloadPromise)) as {
+    receipts: Array<Record<string, unknown>>
+  }
+  const removalReceipt = removalExport.receipts.find(
+    (receipt) =>
+      (receipt.business as { action?: string } | undefined)?.action === 'credential-remove',
+  )
+  expect(removalReceipt).toMatchObject({
+    receiptVersion: '0.2',
+    account: SUBJECT,
+    transactionType: 'CredentialDelete',
+    businessConfirmation: 'confirmed',
+    business: {
+      action: 'credential-remove',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: SCHEMA_UID,
+      generationId: credentialLifecycle.generationId,
+    },
+    businessEvidence: {
+      transactionHash: credentialLifecycle.removedTransactionHash,
+      generationId: credentialLifecycle.generationId,
+      eventType: 'deleted',
+      accepted: true,
+      deletionCause: 'subject_removed',
+    },
+  })
+})
+
+test('rejects a pending credential without loading payload or trust', async ({ page }) => {
+  const credentialLifecycle: BrowserCredentialLifecycle = {
+    generationId: PERMALINK_GENERATION_ID,
+    state: 'pending',
+    accepted: false,
+    acceptedTransactionHash: null,
+  }
+  await installApiMock(page, {
+    credentialLifecycle,
+    credentialUri: CREDENTIAL_URI,
+    pendingCredentialRejection: true,
+  })
+  let payloadRequestCount = 0
+  let verifyRequestCount = 0
+  await page.route(PAYLOAD_URL, async (route) => {
+    payloadRequestCount += 1
+    await route.abort('blockedbyclient')
+  })
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === `${API_PREFIX}/v1/verify`
+    ) {
+      verifyRequestCount += 1
+    }
+  })
+
+  await page.goto(
+    `/accept?profile=${PROFILE_ID}&issuer=${ISSUER}&schema=${SCHEMA_UID}&generation=${PERMALINK_GENERATION_ID}&action=reject`,
+  )
+  await connectSyntheticWallet(page, 'subject')
+  await page
+    .getByRole('button', { name: /Charger, relire et préparer|Load, review and prepare/u })
+    .click()
+
+  await expect(page.getByTestId('transaction-preview')).toContainText('CredentialDelete')
+  await expect(page.getByTestId('issuer-trust-acknowledgement')).toHaveCount(0)
+  await expect(page.getByLabel(/consens|consent/iu)).toHaveCount(0)
+  expect(payloadRequestCount).toBe(0)
+  expect(verifyRequestCount).toBe(0)
+
+  await page.getByTestId('transaction-sign').click()
+  await expect(page.getByTestId('xcs-confirmed')).toBeVisible()
+  await expect(page.getByTestId('business-finality')).toContainText('deleted')
+  await expect(page.getByTestId('business-finality')).toContainText('subject_rejected')
+  expect(payloadRequestCount).toBe(0)
+  expect(verifyRequestCount).toBe(0)
+  expect(credentialLifecycle.state).toBe('deleted')
 })
 
 test('reveals an exact diploma permalink only after bound payload consent', async ({ page }) => {
   const credentialLifecycle: BrowserCredentialLifecycle = {
     generationId: PERMALINK_GENERATION_ID,
     state: 'active',
+    accepted: true,
     acceptedTransactionHash: PERMALINK_ACCEPTED_TRANSACTION_HASH,
   }
   await installApiMock(page, {
@@ -702,6 +892,7 @@ test('keeps a replaced historical generation readable without payload consent', 
     credentialLifecycle: {
       generationId: PERMALINK_GENERATION_ID,
       state: 'active',
+      accepted: true,
       acceptedTransactionHash: PERMALINK_ACCEPTED_TRANSACTION_HASH,
     },
     credentialUri: CREDENTIAL_URI,
@@ -725,6 +916,7 @@ test('keeps a replaced historical generation readable without payload consent', 
   await expect(page.getByTestId('credential-verification-unavailable')).toBeVisible()
   await expect(page.getByTestId('credential-consent')).toHaveCount(0)
   await expect(page.getByTestId('credential-dimensions')).toHaveCount(0)
+  await expect(page.getByTestId('credential-subject-action')).toHaveCount(0)
   await expect(page.getByText('issuer_revoked', { exact: true })).toBeVisible()
   expect(payloadRequestCount).toBe(0)
 })

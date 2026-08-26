@@ -239,9 +239,93 @@ describe('validated business re-confirmation', () => {
     expect(
       operationBusinessConfirmation({
         ...operation,
+        businessEvidence: {
+          ...operation.businessEvidence!,
+          accepted: true,
+        },
+      }),
+    ).toBe('pending')
+    expect(
+      operationBusinessConfirmation({
+        ...operation,
         ledgerIndex: 102,
       }),
     ).toBe('pending')
+  })
+
+  it('rejects contradictory indexed rejection evidence marked as accepted', () => {
+    const business = {
+      action: 'credential-reject' as const,
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: SCHEMA_UID,
+      generationId: GENERATION_ID,
+    }
+    const response = {
+      transactionHash: TX_HASH,
+      event: {
+        transactionHash: TX_HASH,
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        generationId: GENERATION_ID,
+        ledgerIndex: 101,
+        ledgerHash: 'CD'.repeat(32),
+        transactionIndex: 2,
+        eventType: 'deleted',
+        accepted: true,
+        deletionCause: 'subject_rejected',
+      },
+    }
+
+    expect(inspectIndexedBusinessEvidence(response, business, TX_HASH)).toEqual({
+      state: 'mismatch',
+    })
+  })
+
+  it('confirms subject removal only from exact deleted subject_removed evidence', () => {
+    const business = {
+      action: 'credential-remove' as const,
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: SCHEMA_UID,
+      generationId: GENERATION_ID,
+    }
+    const response = {
+      transactionHash: TX_HASH,
+      event: {
+        transactionHash: TX_HASH,
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        generationId: GENERATION_ID,
+        ledgerIndex: 101,
+        ledgerHash: 'CD'.repeat(32),
+        transactionIndex: 2,
+        eventType: 'deleted',
+        accepted: true,
+        deletionCause: 'subject_removed',
+      },
+    }
+
+    expect(inspectIndexedBusinessEvidence(response, business, TX_HASH)).toMatchObject({
+      confirmation: 'confirmed',
+      evidence: { eventType: 'deleted', deletionCause: 'subject_removed' },
+    })
+    expect(
+      inspectIndexedBusinessEvidence(
+        { ...response, event: { ...response.event, deletionCause: 'subject_rejected' } },
+        business,
+        TX_HASH,
+      ),
+    ).toEqual({ state: 'mismatch' })
+    expect(
+      inspectIndexedBusinessEvidence(
+        { ...response, event: { ...response.event, accepted: false } },
+        business,
+        TX_HASH,
+      ),
+    ).toEqual({ state: 'mismatch' })
   })
 
   it('persists an exact confirmed event without requiring a blob or XRPL submitter', async () => {

@@ -7,12 +7,14 @@ import {
 } from '~/utils/credentialEvidence'
 import {
   createPayloadFetchConsentToken,
+  loadCredentialMutationReview,
   loadCredentialReview,
   loadCredentialReviewWithConsent,
   type CredentialReview,
   type PayloadFetchConsentToken,
 } from '~/utils/credentialReview'
 import { decodeUtf8HexForDisplay, displayXrplTime } from '~/utils/explorer'
+import { buildCredentialAcceptLink, credentialPermalinkSubjectAction } from '~/utils/operationLinks'
 import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
 
 interface ExactCredentialEvidence {
@@ -20,6 +22,7 @@ interface ExactCredentialEvidence {
   readonly detail: ApiCredentialGenerationDetail
   readonly schema: ApiSchemaDetail
   readonly payloadUri: string | null
+  readonly currentGeneration: boolean
   readonly review: CredentialReview | null
   readonly verificationError: string | null
 }
@@ -27,7 +30,8 @@ interface ExactCredentialEvidence {
 const route = useRoute()
 const generationId = computed(() => String(route.params.generationId).toLowerCase())
 const { locale, t } = useI18n()
-const { getActiveNetworkProfile, getCredentialGeneration, getSchema, verify } = useXcsApi()
+const { getActiveNetworkProfile, getCredential, getCredentialGeneration, getSchema, verify } =
+  useXcsApi()
 const payloadConsentToken = shallowRef<PayloadFetchConsentToken | null>(null)
 const verifiedReview = shallowRef<CredentialReview | null>(null)
 const verificationBusy = ref(false)
@@ -51,7 +55,7 @@ async function loadExactCredentialEvidence(
 
   const payloadUri =
     generation.uriHex === null ? null : (decodeUtf8HexForDisplay(generation.uriHex) ?? null)
-  const [schema, reportResult] = await Promise.all([
+  const [schema, reportResult, currentResult] = await Promise.all([
     getSchema(generation.schemaUid, profile.profileId),
     verify(
       {
@@ -65,13 +69,30 @@ async function loadExactCredentialEvidence(
       (report) => ({ report }),
       () => ({ error: 'CREDENTIAL_CURRENT_VERIFICATION_UNAVAILABLE' as const }),
     ),
+    getCredential(
+      generation.issuer,
+      generation.subject,
+      generation.schemaUid,
+      profile.profileId,
+    ).then(
+      (credential) => ({ credential }),
+      () => ({ error: 'CREDENTIAL_CURRENT_LOOKUP_UNAVAILABLE' as const }),
+    ),
   ])
+  const currentGeneration =
+    'credential' in currentResult &&
+    loadCredentialMutationReview(currentResult.credential, {
+      issuer: generation.issuer,
+      subject: generation.subject,
+      schemaUid: generation.schemaUid,
+    }).generationId === expectedGenerationId
   if ('error' in reportResult) {
     return {
       profileId: profile.profileId,
       detail,
       schema,
       payloadUri,
+      currentGeneration,
       review: null,
       verificationError: reportResult.error,
     }
@@ -91,6 +112,7 @@ async function loadExactCredentialEvidence(
       detail,
       schema,
       payloadUri,
+      currentGeneration,
       review,
       verificationError: null,
     }
@@ -103,6 +125,7 @@ async function loadExactCredentialEvidence(
     detail,
     schema,
     payloadUri,
+    currentGeneration,
     review: null,
     verificationError: 'CREDENTIAL_GENERATION_NOT_CURRENT',
   }
@@ -140,6 +163,25 @@ const claimRows = computed(() => {
   const claims = verifiedReview.value?.claims
   const schema = data.value?.schema.resolved
   return claims && schema ? credentialClaimsToRows(schema, claims) : []
+})
+const subjectActionLink = computed(() => {
+  const evidence = data.value
+  if (!evidence?.currentGeneration) return null
+  const state = evidence.detail.state
+  const generation = evidence.detail.generation
+  const action = credentialPermalinkSubjectAction({
+    currentGeneration: evidence.currentGeneration,
+    accepted: generation.accepted,
+    state,
+  })
+  if (action === null) return null
+  return buildCredentialAcceptLink({
+    profileId: evidence.profileId,
+    issuer: generation.issuer,
+    schemaUid: generation.schemaUid,
+    generationId: generation.generationId,
+    action,
+  })
 })
 
 function clearPayloadReview(): void {
@@ -334,6 +376,22 @@ useSeoMeta({
         <span v-else-if="copyState === 'error'" class="error-text" role="status">
           {{ $t('credential.copyFailed') }}
         </span>
+        <NuxtLinkLocale
+          v-if="subjectActionLink"
+          class="button secondary compact"
+          data-testid="credential-subject-action"
+          :to="subjectActionLink"
+        >
+          {{
+            $t(
+              data.detail.generation.accepted
+                ? 'credential.removeCredential'
+                : data.detail.state === 'expired'
+                  ? 'credential.rejectExpired'
+                  : 'credential.managePending',
+            )
+          }}
+        </NuxtLinkLocale>
       </div>
 
       <dl class="metadata-list explorer-metadata">

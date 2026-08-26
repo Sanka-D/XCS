@@ -18,7 +18,7 @@ const SCHEMA_STATUSES = ['valid', 'invalid', 'unknown'] as const
 const PAYLOAD_STATUSES = ['valid', 'unavailable', 'tampered', 'invalid', 'not_checked'] as const
 const TRUST_STATUSES = ['trusted', 'untrusted', 'unknown'] as const
 
-export type CredentialSubjectAction = 'accept' | 'delete'
+export type CredentialSubjectAction = 'accept' | 'reject' | 'remove'
 export type OnChainStatus = (typeof ON_CHAIN_STATUSES)[number]
 
 export interface VerificationDimensions {
@@ -36,6 +36,19 @@ export interface ApiCredentialDetail {
   readonly schemaUid: string
   readonly uriHex: string | null
   readonly expiration: number | null
+  readonly accepted: boolean
+  readonly state: OnChainStatus
+}
+
+/** Exact indexed metadata used by subject deletions without resolving payload or trust. */
+export interface CredentialMutationReview {
+  readonly generationId: string
+  readonly issuer: string
+  readonly subject: string
+  readonly schemaUid: string
+  readonly uri: string | null
+  readonly expiration: string | null
+  readonly accepted: boolean
   readonly state: OnChainStatus
 }
 
@@ -46,6 +59,7 @@ export interface CredentialReview {
   readonly schemaUid: string
   readonly uri: string | null
   readonly expiration: string | null
+  readonly accepted: boolean
   readonly state: OnChainStatus
   /** Kept in memory for the consented API verification call; never journaled. */
   readonly payload?: CredentialPayload | undefined
@@ -88,7 +102,7 @@ interface LoadCredentialReviewOptions {
 }
 
 export type CredentialMutationAction =
-  'credential-accept' | 'credential-reject' | 'credential-revoke'
+  'credential-accept' | 'credential-reject' | 'credential-remove' | 'credential-revoke'
 
 export interface ExpectedCredentialGeneration {
   readonly action: CredentialMutationAction
@@ -134,6 +148,7 @@ export function parseApiCredentialDetail(
   const rawUriHex = input.uriHex
   const uriHex = rawUriHex === null ? null : requiredString(input, 'uriHex')
   const expiration = input.expiration
+  const accepted = input.accepted
   const state = oneOf(input.state, ON_CHAIN_STATUSES, 'CREDENTIAL_STATE_INVALID')
 
   if (!/^[0-9a-f]{64}$/i.test(generationId)) throw new Error('CREDENTIAL_GENERATION_ID_INVALID')
@@ -156,6 +171,7 @@ export function parseApiCredentialDetail(
   ) {
     throw new Error('CREDENTIAL_EXPIRATION_INVALID')
   }
+  if (typeof accepted !== 'boolean') throw new Error('CREDENTIAL_ACCEPTED_INVALID')
 
   return {
     generationId: generationId.toLowerCase(),
@@ -164,7 +180,29 @@ export function parseApiCredentialDetail(
     schemaUid,
     uriHex,
     expiration: expiration as number | null,
+    accepted,
     state,
+  }
+}
+
+/** Parses only the authoritative tuple response; it performs no verification or remote fetch. */
+export function loadCredentialMutationReview(
+  input: unknown,
+  expected: { readonly issuer: string; readonly subject: string; readonly schemaUid: string },
+): CredentialMutationReview {
+  const credential = parseApiCredentialDetail(input, {
+    ...expected,
+    schemaUid: expected.schemaUid.toLowerCase(),
+  })
+  return {
+    generationId: credential.generationId,
+    issuer: credential.issuer,
+    subject: credential.subject,
+    schemaUid: credential.schemaUid,
+    uri: credential.uriHex === null ? null : decodeUtf8Hex(credential.uriHex),
+    expiration: credential.expiration === null ? null : rippleTimeToIso8601(credential.expiration),
+    accepted: credential.accepted,
+    state: credential.state,
   }
 }
 
@@ -234,6 +272,7 @@ export async function loadCredentialReview(
     schemaUid: credential.schemaUid,
     uri,
     expiration: credential.expiration === null ? null : rippleTimeToIso8601(credential.expiration),
+    accepted: credential.accepted,
     state: credential.state,
     ...(payload ? { payload } : {}),
     ...(payload ? { claims: payload.claims } : {}),
@@ -302,11 +341,11 @@ function credentialIssuerTrustBlockReason(
 export function assertCredentialAcceptanceReviewCurrent(
   expected: Pick<
     CredentialReview,
-    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'report'
+    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'accepted' | 'report'
   >,
   current: Pick<
     CredentialReview,
-    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'report'
+    'issuer' | 'subject' | 'schemaUid' | 'generationId' | 'state' | 'accepted' | 'report'
   >,
   expectedProfileId: string,
   currentProfileId: string,
@@ -327,6 +366,8 @@ export function assertCredentialAcceptanceReviewCurrent(
   }
   if (
     current.state !== expected.state ||
+    current.accepted !== expected.accepted ||
+    current.accepted ||
     current.report.onChain !== expected.report.onChain ||
     current.state !== 'pending'
   ) {
@@ -336,6 +377,34 @@ export function assertCredentialAcceptanceReviewCurrent(
     throw new Error('CREDENTIAL_ISSUER_TRUST_CHANGED_AFTER_SIGNATURE')
   }
   const reason = credentialIssuerTrustBlockReason(current, acknowledgement, currentProfileId)
+  if (reason !== undefined) throw new Error(reason)
+}
+
+/** Revalidates an exact reject/remove decision after signing, before blob persistence or submit. */
+export function assertCredentialSubjectMutationReviewCurrent(
+  expected: CredentialMutationReview,
+  current: CredentialMutationReview,
+  expectedProfileId: string,
+  currentProfileId: string,
+  action: Extract<CredentialSubjectAction, 'reject' | 'remove'>,
+): void {
+  if (currentProfileId !== expectedProfileId) {
+    throw new Error('NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE')
+  }
+  if (
+    current.issuer !== expected.issuer ||
+    current.subject !== expected.subject ||
+    current.schemaUid.toLowerCase() !== expected.schemaUid.toLowerCase()
+  ) {
+    throw new Error('CREDENTIAL_REVIEW_CHANGED_AFTER_SIGNATURE')
+  }
+  if (current.generationId.toLowerCase() !== expected.generationId.toLowerCase()) {
+    throw new Error('CREDENTIAL_GENERATION_CHANGED_AFTER_SIGNATURE')
+  }
+  if (current.state !== expected.state || current.accepted !== expected.accepted) {
+    throw new Error('CREDENTIAL_STATE_CHANGED_AFTER_SIGNATURE')
+  }
+  const reason = credentialActionBlockReason(current, action)
   if (reason !== undefined) throw new Error(reason)
 }
 
@@ -385,9 +454,18 @@ export function assertCredentialGenerationCurrent(
   const reason =
     expected.action === 'credential-revoke'
       ? credentialRevocationBlockReason(credential)
-      : credential.state === 'pending'
-        ? undefined
-        : 'CREDENTIAL_MUST_BE_PENDING'
+      : expected.action === 'credential-remove'
+        ? credential.accepted && (credential.state === 'active' || credential.state === 'expired')
+          ? undefined
+          : 'CREDENTIAL_MUST_BE_ACTIVE_OR_EXPIRED_ACCEPTED'
+        : expected.action === 'credential-reject'
+          ? !credential.accepted &&
+            (credential.state === 'pending' || credential.state === 'expired')
+            ? undefined
+            : 'CREDENTIAL_MUST_BE_PENDING_OR_EXPIRED_UNACCEPTED'
+          : !credential.accepted && credential.state === 'pending'
+            ? undefined
+            : 'CREDENTIAL_MUST_BE_PENDING'
   if (reason !== undefined) throw new Error(reason)
   return credential
 }
@@ -435,17 +513,22 @@ export function inspectCredentialOperationEvent(
   const expectedEventType = expected.action === 'credential-accept' ? 'accepted' : 'deleted'
   const expectedDeletionCause =
     expected.action === 'credential-reject'
-      ? expected.issuer === expected.subject
-        ? 'issuer_revoked'
-        : 'subject_rejected'
-      : expected.action === 'credential-revoke'
-        ? 'issuer_revoked'
-        : undefined
+      ? 'subject_rejected'
+      : expected.action === 'credential-remove'
+        ? expected.issuer === expected.subject
+          ? 'issuer_revoked'
+          : 'subject_removed'
+        : expected.action === 'credential-revoke'
+          ? 'issuer_revoked'
+          : undefined
   const confirmed =
     typeof event.generationId === 'string' &&
     event.generationId.toLowerCase() === expected.generationId.toLowerCase() &&
     event.eventType === expectedEventType &&
-    (expected.action !== 'credential-accept' || event.accepted === true) &&
+    (expected.action === 'credential-reject'
+      ? event.accepted === false
+      : (expected.action !== 'credential-accept' && expected.action !== 'credential-remove') ||
+        event.accepted === true) &&
     (expectedDeletionCause === undefined || event.deletionCause === expectedDeletionCause)
   return confirmed ? 'confirmed' : 'mismatch'
 }
@@ -484,17 +567,31 @@ export async function waitForCredentialOperationEvent(
 }
 
 export function credentialActionBlockReason(
-  review: CredentialReview,
+  review: CredentialReview | CredentialMutationReview,
   action: CredentialSubjectAction,
   issuerTrustAcknowledgement?: IssuerTrustAcknowledgementToken,
   profileId?: string,
 ): string | undefined {
-  if (review.state !== 'pending' || review.report.onChain !== 'pending') {
+  if (action === 'remove') {
+    return review.accepted && (review.state === 'active' || review.state === 'expired')
+      ? undefined
+      : 'CREDENTIAL_MUST_BE_ACTIVE_OR_EXPIRED_ACCEPTED'
+  }
+  if (action === 'reject') {
+    return !review.accepted && (review.state === 'pending' || review.state === 'expired')
+      ? undefined
+      : 'CREDENTIAL_MUST_BE_PENDING_OR_EXPIRED_UNACCEPTED'
+  }
+  if (
+    review.accepted ||
+    review.state !== 'pending' ||
+    ('report' in review && review.report.onChain !== 'pending')
+  ) {
     return 'CREDENTIAL_MUST_BE_PENDING'
   }
   // Rejecting a pending object does not endorse it. Trust and content gates
   // therefore apply to acceptance, while deletion remains a safe escape hatch.
-  if (action === 'delete') return undefined
+  if (!('report' in review)) return 'CREDENTIAL_ACCEPTANCE_REVIEW_REQUIRED'
   if (review.payloadReviewError !== undefined || review.claims === undefined) {
     return 'CREDENTIAL_PAYLOAD_REVIEW_FAILED'
   }
