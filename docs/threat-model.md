@@ -26,6 +26,32 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                    |
 | Public pin abuse                       | Testnet-only, wallet challenge, IP/address rate limit and payload quota                                  |
 
+## Browser policy rollout boundary
+
+Nitro owns the canonical browser security headers, while the ingress may only pass them through or
+overwrite an inherited value with the same reviewed value. It must never append an additional CSP:
+browsers apply every received policy, so duplicates can combine into behavior that was not tested
+with the wallet extensions. HSTS is limited to the current host and deliberately excludes
+`includeSubDomains` and `preload` until the organization audits every affected subdomain.
+
+The first CSP is `Content-Security-Policy-Report-Only`. This is an observation stage, not an
+implemented mitigation: violations remain allowed and an injected same-origin script could still
+read or relay a recoverable signed transaction blob. The policy can move to enforcement only after
+real Crossmark and GemWallet matrices cover every supported Credential transaction and the
+consented issuer-payload flow. Curl evidence must show one policy header, and browser DevTools must
+show no unresolved application-owned violations, before and after promotion.
+
+`connect-src https:` remains necessary because the permissionless model lets each issuer select its
+public HTTPS payload host. A fixed Commons host allowlist would introduce a publication gate. The
+broader connection directive is therefore paired with the application's exact-host display,
+explicit consent, generation/URI revalidation, CORS boundary and payload digest verification; it is
+not permission for background claim collection.
+
+The rollout configures no CSP report collector. Reports may contain exact Credential paths, issuer
+hosts, referrers or other browsing context, so local DevTools inspection is the privacy-preserving
+default. Introducing `report-uri`, `report-to`, `Reporting-Endpoints` or a reporting vendor requires
+a separate data-flow, retention and access review.
+
 ## Residual risks
 
 - Wallet applications may not yet understand every Credential transaction type; only verified adapters are exposed.
@@ -38,6 +64,10 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 - The browser pilot discloses the subject's IP and fetch timing to an issuer-controlled HTTPS payload
   host after explicit consent. Hostname filtering cannot fully eliminate DNS rebinding.
 - The alpha has not received an independent security audit and is not approved for PII or Mainnet use.
+- Until the real-wallet matrix has passed and the CSP is enforced, report-only diagnostics do not
+  reduce the impact of an XSS or compromised same-origin dependency. Adding an edge policy without
+  replacing the Nitro value can also break wallet or payload behavior through unintended policy
+  intersection.
 - Permissionless public schemas can contain misleading names or descriptions. Schema discovery is
   not Commons endorsement, and moderation must not reinterpret protocol validity.
 - `noindex` metadata on exact Credential, transaction and search-result pages is an indexing hint,

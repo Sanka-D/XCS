@@ -4,6 +4,7 @@ const baseURL = 'http://127.0.0.1:3100'
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: 'security.production.spec.ts',
   outputDir: './test-results',
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

@@ -225,8 +225,14 @@ Work:
   and safe rollback in a staging environment;
 - add container, dependency, license, secret, and software-bill-of-materials checks to release CI;
 - sign release tags and container artifacts and record build provenance;
-- deploy browser security headers and a strict Content Security Policy compatible with the selected
-  wallets;
+- make Nitro the source of truth for browser security headers; deploy one CSP in report-only mode,
+  require the edge to overwrite rather than append policy values, and keep HSTS scoped to the
+  current host without `includeSubDomains` or `preload`;
+- validate the report-only policy with `curl`, browser DevTools and real Crossmark/GemWallet
+  transaction matrices, then promote the same single policy to enforcement only after all
+  application-owned violations and wallet regressions are resolved; retain `connect-src https:` for
+  permissionless issuer payload hosts and do not add a CSP report collector without a separate
+  privacy review;
 - perform an internal threat-model and defensive design review, and close release-blocking findings
   before exposing the pilot; this review does not replace the final post-freeze audit in milestone 6;
 - document data retention, public-payload constraints, abuse handling, and incident contacts.
@@ -237,6 +243,8 @@ Exit criteria:
   objectives;
 - stale, discontinuous, or inconsistent ledger data never produces an authoritative active/valid
   response;
+- the public web origin exposes one enforced CSP and one host-scoped HSTS value, with recorded curl,
+  DevTools and real Crossmark/GemWallet evidence from the promoted policy;
 - the threat model, audit report, operational dashboards, alerts, and incident procedures are
   reviewed and linked from the release record;
 - production services hold no XRPL signing secret.

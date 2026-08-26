@@ -180,6 +180,74 @@ tip. `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` controls readiness and all authorita
 routes; stale, inconsistent, or implausibly future evidence returns `503`. OpenAPI documentation is
 served at `/documentation`.
 
+### Browser security-header rollout
+
+Nitro is the source of truth for the web application's browser security headers. The initial
+deployment emits the CSP as `Content-Security-Policy-Report-Only`; it must not emit an enforced
+`Content-Security-Policy` until the released Crossmark and GemWallet versions have passed the real
+browser matrix below. Report-only violations are diagnostic and do not block script execution,
+wallet communication or payload requests.
+
+The TLS response also emits `Strict-Transport-Security` for the current host without
+`includeSubDomains` or `preload`. Do not add either directive until every affected organizational
+subdomain is inventoried and a separate rollout and recovery decision has been reviewed.
+
+The ingress or CDN must not append a second CSP to Nitro's response. Configure it to overwrite any
+inherited security-policy value with the reviewed XCS value, or to pass Nitro's value through
+unchanged, so the browser receives exactly one report-only policy during observation and exactly one
+enforced policy after promotion. Multiple CSP fields are all applied by browsers and can intersect
+into an untested, unexpectedly restrictive policy. Apply the same single-value rule to HSTS.
+
+Nitro marks every rendered HTML response, including error documents, as `Cache-Control: private,
+no-store`. Configure the ingress and CDN to bypass their HTML cache and preserve this value: caching
+would reuse a response-bound nonce across clients. Fingerprinted `/_nuxt/` assets must retain their
+`public, max-age=31536000, immutable` policy.
+
+The policy intentionally permits `https:` in `connect-src`. Credential payload hosts are selected
+permissionlessly by issuers and cannot be enumerated in a Commons deployment allowlist without
+changing the product model. This directive does not trigger a fetch: the application must still
+display the exact host, obtain consent, re-read the exact generation, and validate the
+integrity-bound response. Keep the separately configured public XRPL WebSocket origin permitted for
+wallet submission.
+
+Do not configure `report-uri`, `report-to`, `Reporting-Endpoints` or a third-party CSP reporting
+service during this rollout. Violation reports can disclose exact Credential URLs, issuer hosts and
+browsing context. Operators inspect violations locally in browser DevTools; adding collection,
+retention or forwarding requires a separate privacy and threat-model review.
+
+For every candidate web image, first confirm the headers on the public HTTPS origin and on a
+representative localized route:
+
+```sh
+curl --fail --silent --show-error --dump-header - --output /dev/null https://xcs.example/
+curl --fail --silent --show-error --dump-header - --output /dev/null https://xcs.example/studio
+```
+
+Verify in the output that there is exactly one `Content-Security-Policy-Report-Only`, no
+`Content-Security-Policy`, and one `Strict-Transport-Security` value without `includeSubDomains` or
+`preload`. Both HTML responses must also contain `Cache-Control: private, no-store`; a sampled
+fingerprinted `/_nuxt/` asset must remain `public, max-age=31536000, immutable`. Then use a clean
+Chromium profile with DevTools open:
+
+1. Load Explorer, Studio, Developers and an exact Credential permalink; record every CSP violation
+   from the Console and the document's response headers from the Network panel.
+2. With the released Crossmark version, exercise connect, cancellation, schema registration,
+   `CredentialCreate`, `CredentialAccept` and `CredentialDelete` without relaxing the policy.
+3. Repeat the same matrix with the released GemWallet version.
+4. After explicit payload-host consent, load an issuer-hosted HTTPS payload with CORS and confirm
+   that its integrity verification succeeds. Confirm that no payload request occurs before consent.
+
+Classify and fix every application-owned violation. Record the browser, extension, adapter, web
+image and policy versions with the evidence. Extension-origin messages that cannot be attributed or
+reproduced are not a reason to add a broad source expression.
+
+Only after both real-wallet matrices pass may the reviewed deployment replace the single
+`Content-Security-Policy-Report-Only` field with the same policy under
+`Content-Security-Policy`. Re-run both `curl` checks and the DevTools matrix against the enforced
+candidate before promotion. Roll back to the prior image, which restores report-only mode, if a
+wallet or consented payload flow regresses; do not work around an incident by appending a second or
+weaker policy at the edge.
+
 ## Optional Testnet demo pinning
 
 Pinning is disabled by default. It is only intended for public, non-sensitive Testnet examples. To

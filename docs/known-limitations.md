@@ -58,6 +58,20 @@ integrators.
   replicas require a shared edge/store limiter. Nuxt SSR derives one opaque budget per safely
   resolved network address; reverse-proxy CIDRs must be narrow and explicitly configured, while
   catch-all `/0` trust ranges are rejected.
+- Nitro emits the initial browser CSP in report-only mode. It records violations in local browser
+  tooling but blocks nothing, so it is not yet an XSS or signed-blob exfiltration control. Enforcement
+  remains gated on the real Crossmark and GemWallet matrix; the ingress must preserve one policy
+  instead of appending its own.
+- The policy's `connect-src https:` allowance is intentional: permissionless issuer-hosted payload
+  domains cannot be known at deployment time. Host display, explicit consent, exact-generation
+  revalidation and payload integrity checks remain the application boundary. Narrowing this to a
+  Commons allowlist would change the accepted product model.
+- CSP violation collection is disabled. There is no `report-uri`, Reporting API endpoint or
+  third-party collector because reports can contain exact Credential URLs, issuer hosts and browsing
+  context. Operators must use local DevTools during rollout unless a later privacy review approves a
+  collector and retention policy.
+- HSTS covers only the deployed host. It deliberately omits `includeSubDomains` and `preload`, so it
+  does not assert HTTPS readiness for unrelated organizational subdomains.
 
 ## Wallets
 

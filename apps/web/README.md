@@ -71,6 +71,35 @@ Private and public runtime switches must match exactly, and both the Nitro start
 plugin reject the mode outside a development bundle. `nuxt.config.ts` also rejects
 `XCS_BROWSER_E2E=1` when `NODE_ENV=production`.
 
+## Browser response security
+
+The Node SSR deployment emits defensive browser headers and a nonce-based strict Content Security
+Policy in `Content-Security-Policy-Report-Only`. The observed policy has no `unsafe-inline` or
+`unsafe-eval`: Nuxt's server-rendered scripts and styles receive a fresh random nonce for every HTML
+response. Production browser connections are limited to the same origin, HTTPS and WSS. Local
+development additionally permits HTTP and WS for the separate development API and Vite HMR.
+
+The CSP is intentionally report-only until released Crossmark and GemWallet versions pass the
+manual Testnet matrix. Other headers, including clickjacking protection, MIME sniffing prevention,
+referrer suppression, HSTS and a restrictive Permissions Policy, are enforced immediately. COEP is
+disabled and COOP uses `same-origin-allow-popups` to avoid introducing an untested cross-origin
+isolation or popup boundary into injected-wallet flows. The response does not configure a CSP report
+collector: violation documents can contain exact Credential permalinks, so collection requires a
+separate privacy and retention design.
+
+Every rendered HTML response, including Nuxt error documents, is `private, no-store` so an
+intermediary cannot replay a response-bound nonce. Fingerprinted `/_nuxt/` assets remain public and
+immutable.
+
+`connect-src` necessarily permits arbitrary HTTPS destinations because the configured public API
+and issuer-hosted payload origins are deployment or Credential data, while the public XRPL client
+uses WSS. This means CSP cannot prevent HTTPS exfiltration after an already-authorized same-origin
+script is compromised. Treat the deployed JavaScript bundle and origin as part of the signing trust
+boundary. Before changing the policy from report-only to enforced, run every Playwright flow with no
+CSP console violations and record real extension tests for connect, register, create, accept,
+issuer/subject delete, cancellation, account/network changes, external payload CORS and the public
+XRPL WSS endpoint.
+
 ## Network safety
 
 Set:
