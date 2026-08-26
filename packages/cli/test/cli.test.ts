@@ -394,7 +394,7 @@ describe('xcs CLI', () => {
         'credential',
         'verify',
         '--api',
-        'https://xcs.example',
+        'https://xcs.example/xcs',
         '--network',
         'xrpl-testnet-xcs-v0.1',
         '--issuer',
@@ -412,7 +412,8 @@ describe('xcs CLI', () => {
     expect(JSON.parse(stderr.at(-1) ?? '{}')).toMatchObject({
       error: { code: 'XCS_CLI_VERIFICATION_NOT_VALID' },
     })
-    const [, request] = fetchMock.mock.calls[0] ?? []
+    const [endpoint, request] = fetchMock.mock.calls[0] ?? []
+    expect(String(endpoint)).toBe('https://xcs.example/xcs/v1/verify')
     expect(request).toEqual(
       expect.objectContaining({ redirect: 'error', signal: expect.any(AbortSignal) }),
     )

@@ -36,6 +36,7 @@ const SCHEMA_UID = computeSchemaUid({
   publisher: ISSUER,
 })
 const GENERATION_ID = '34'.repeat(32)
+const NO_URI_GENERATION_ID = '9a'.repeat(32)
 const ACCEPTED_TRANSACTION_HASH = '78'.repeat(32)
 const HISTORICAL_GENERATION_ID = '56'.repeat(32)
 const DELETED_TRANSACTION_HASH = 'bc'.repeat(32)
@@ -176,6 +177,43 @@ export default defineEventHandler((event) => {
           eventType: 'accepted',
           issuer: ISSUER,
           subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          accepted: true,
+          deletionCause: null,
+        },
+      ],
+    }
+  }
+
+  if (path === `networks/${PROFILE_ID}/credential-generations/${NO_URI_GENERATION_ID}`) {
+    return {
+      generation: {
+        generationId: NO_URI_GENERATION_ID,
+        ledgerObjectId: '92'.repeat(32),
+        issuer: ISSUER,
+        subject: ISSUER,
+        schemaUid: SCHEMA_UID,
+        uriHex: null,
+        expiration: null,
+        accepted: true,
+        createdLedgerIndex: 100_003,
+        createdTransactionIndex: 2,
+        lastLedgerIndex: 100_003,
+        deletedLedgerIndex: null,
+        deletionCause: null,
+      },
+      state: 'active',
+      timeline: [
+        {
+          transactionHash: NO_URI_GENERATION_ID,
+          nodeIndex: 0,
+          generationId: NO_URI_GENERATION_ID,
+          ledgerIndex: 100_003,
+          ledgerHash: 'fa'.repeat(32),
+          transactionIndex: 2,
+          eventType: 'created',
+          issuer: ISSUER,
+          subject: ISSUER,
           schemaUid: SCHEMA_UID,
           accepted: true,
           deletionCause: null,

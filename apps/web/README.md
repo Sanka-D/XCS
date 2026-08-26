@@ -31,8 +31,10 @@ The current application organizes the existing workflows as follows:
   operation-recovery flows. Schema registration has a guided scalar-field editor, course-completion
   and diploma templates, plus the advanced JSON editor. Issuance can derive a guided claims form
   from a compatible resolved schema and retains the advanced JSON path;
-- **Developers:** `/developers` links the live OpenAPI document and names the SDK/CLI packages;
-  `/learn` remains the protocol walkthrough.
+- **Developers:** `/developers` loads the active runtime profile, executes the privacy-explicit
+  exact-generation verification flow, derives REST/cURL, TypeScript and monorepo CLI examples from
+  that evidence, documents the wallet `Signer` boundary and catalogs aggregate versus exact API
+  routes; `/learn` remains the protocol walkthrough.
 
 Explorer text search indexes schema names and descriptions only. An XRPL address finds schemas that
 it published, while a complete 64-digit hexadecimal value performs exact schema UID, generation ID
@@ -53,7 +55,9 @@ The adapters still require real browser-extension testing for each native Creden
 The required Playwright gate exercises schema registration and credential issuance in Chromium,
 including the two distinct finality stages. Issuance first receives deliberately mismatched indexed
 evidence, withholds XCS success, then proves that `/operations` can re-confirm the exact event
-without signing or submitting again.
+without signing or submitting again. It also exercises the Developers quickstart against the
+deterministic exact-generation API, checks that local-payload verification never sets
+`resolvePayload`, and proves that a replaced generation fails before a payload can be submitted.
 
 ```bash
 pnpm --filter @xcs-protocol/web exec playwright install chromium
@@ -63,8 +67,38 @@ pnpm test:e2e
 Playwright starts its own Nuxt development server with `XCS_BROWSER_E2E=1`. In that process only,
 the normal wallet and XRPL client are replaced by deterministic in-browser fakes. The fake signer
 encodes a syntactic transaction blob with an intentionally unusable signature marker; it contains
-no seed or private key. HTTP API and public payload responses are intercepted by the test before
-navigation, so the suite never contacts Testnet, an issuer host, or an XCS deployment.
+no seed or private key. Pilot HTTP and public-payload responses are intercepted by the test, while
+the Developers flow uses guarded local-only Nitro fixtures. The suite never contacts Testnet, an
+issuer host or an XCS deployment.
+
+## Developers quickstart privacy boundary
+
+The `/developers` runnable flow starts from a deliberately shared `generationId`. It reads that
+exact generation, then its exact schema, then asks `/v1/verify` for metadata with
+`resolvePayload: false`. Because verification operates on the tuple's current generation, the page
+requires the report's `generationId` to match the shared generation before showing the local payload
+step. It repeats the exact reads and that generation guard immediately before verification and
+checks it again on the final report, so a deleted-and-recreated tuple fails closed.
+
+The payload field accepts the exact RFC 8785 canonical JSON bytes. The browser validates the schema
+and integrity-bound URI locally first. Choosing the four-dimension API check then sends the parsed
+public claims to the API in the `payload` property while omitting `resolvePayload`; the API receives
+those claims for this request but does not persist them or fetch the URI. Integrators that do not
+want the verifier process to receive claims can instead run `xcs payload check` locally for a
+standalone schema and retain the metadata-only API report, whose payload dimension necessarily
+remains `not_checked`. A generation without a payload URI is also kept metadata-only: the page does
+not offer a payload form or generate URI-dependent examples for it.
+
+SDK and CLI examples are explicitly monorepo-alpha examples. The packages are not assumed to be
+available from a public registry. CLI commands build the workspace package and invoke
+`node dist/bin.js`; transaction examples return unsigned fields and cross an external wallet
+`Signer` interface, never a seed/private-key API.
+
+The REST/cURL example parses `credential.json` with `jq`, so its API report validates the
+recanonicalized object rather than proving that the source file was already byte-for-byte canonical.
+The runnable page and TypeScript example perform that local byte/integrity check. The CLI does so
+only for standalone schemas; for a schema with `extends`, the generated CLI block explains that the
+alpha command has no resolved catalog and omits the unsupported local check.
 
 This harness is not a wallet compatibility test and must never be used for a deployed instance.
 Private and public runtime switches must match exactly, and both the Nitro startup guard and client

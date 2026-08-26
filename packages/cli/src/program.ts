@@ -538,7 +538,7 @@ async function requestVerification(
 ): Promise<unknown> {
   let endpoint: URL
   try {
-    endpoint = new URL('/v1/verify', ensureTrailingSlash(options.api))
+    endpoint = new URL('v1/verify', ensureTrailingSlash(options.api))
   } catch {
     throw new CliError('XCS_CLI_VERIFY_INPUT', '--api must be an absolute HTTP(S) URL.', 2)
   }
