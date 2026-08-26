@@ -51,7 +51,8 @@ instance.
 XCS_TEST_DATABASE_URL=postgres://postgres:password@127.0.0.1:5432/postgres pnpm test:postgres
 ```
 
-It requires PostgreSQL 18 and proves migrations `0000` then `0001`, NULL-safe constraints,
+It requires PostgreSQL 18 and proves migrations `0000` through `0002`, including the discovery
+indexes, NULL-safe constraints,
 lease takeover/fencing, rollback, restart/idempotence, transaction-root persistence, and equal
 timestamp-free digests across two replays. It also provisions the fixed runtime roles in the
 isolated cluster and proves their positive and denied permissions, then proves that two replays with

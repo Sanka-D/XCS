@@ -1,7 +1,13 @@
 {
   "nav": {
     "main": "Navigation principale",
+    "explorer": "Explorer",
+    "studio": "Studio",
+    "developers": "Développeurs",
     "schemas": "Schémas",
+    "activity": "Activité",
+    "status": "État du réseau",
+    "register": "Enregistrer",
     "issue": "Émettre",
     "accept": "Accepter",
     "revoke": "Révoquer",
@@ -45,7 +51,17 @@
     "title": "Un schéma commun. Des émetteurs indépendants. Une preuve vérifiable.",
     "description": "XCS relie les Credentials natives XRPL à des schémas publics et à des données hors chaîne dont l’intégrité est vérifiable.",
     "register": "Enregistrer un schéma",
+    "explore": "Explorer les schémas",
     "verify": "Vérifier un credential",
+    "stats": {
+      "eyebrow": "Projection publique",
+      "title": "État du réseau en un coup d’œil",
+      "status": "Voir l’état de l’indexeur",
+      "schemas": "schémas valides",
+      "publishers": "publishers distincts",
+      "credentials": "générations de Credentials",
+      "ledger": "dernier ledger indexé"
+    },
     "flow": {
       "schema": "Publier un schéma compact",
       "issue": "Émettre depuis le wallet de l’entité",
@@ -82,10 +98,20 @@
   },
   "schemas": {
     "title": "Schémas publics",
+    "metaTitle": "Schémas publics XCS",
     "description": "Tous les schémas valides sont réutilisables. Leur publication ne garantit ni le publisher ni les futurs émetteurs.",
     "register": "Nouveau schéma",
     "empty": "Aucun schéma n’a encore été indexé sur ce profil.",
     "notFound": "Schéma introuvable.",
+    "ledger": "Coordonnées ledger",
+    "registration": "Transaction d’enregistrement",
+    "parent": "Schéma parent",
+    "supersedes": "Remplace le schéma",
+    "neutrality": "Ce schéma est publié sans permission. Sa présence dans l’Explorer n’est ni une approbation de son publisher, ni une garantie sur ses futurs émetteurs.",
+    "fields": "Champs résolus",
+    "optional": "facultatif",
+    "required": "requis",
+    "lineage": "Lignée d’héritage",
     "definition": "Définition canonique",
     "use": "Utiliser ce schéma"
   },
@@ -98,7 +124,20 @@
     "canonical": "Octets canoniques enregistrés",
     "submitted": "Transaction validée",
     "uidLater": "L’UID final dépend du ledger validé et sera affiché par l’indexeur.",
-    "openSchema": "Ouvrir le schéma confirmé"
+    "openSchema": "Ouvrir le schéma confirmé",
+    "guidedMode": "Mode guidé",
+    "jsonMode": "Mode JSON",
+    "courseTemplate": "Modèle de réussite de cours",
+    "diplomaTemplate": "Modèle de diplôme",
+    "schemaName": "Nom du schéma",
+    "schemaDescription": "Description du schéma",
+    "fields": "Champs",
+    "fieldName": "Nom du champ",
+    "fieldType": "Type du champ",
+    "optional": "Facultatif",
+    "addField": "Ajouter un champ",
+    "removeField": "Retirer le champ",
+    "advancedHint": "Le mode JSON reste disponible pour l’héritage, la supersession et les descripteurs imbriqués."
   },
   "issue": {
     "title": "Émettre un credential",
@@ -115,7 +154,134 @@
     "submitted": "CredentialCreate validé : ",
     "links": "Partager le credential confirmé",
     "acceptLink": "Ouvrir le lien d’acceptation du sujet",
-    "verifyLink": "Ouvrir le lien de vérification"
+    "verifyLink": "Ouvrir le lien de vérification",
+    "guidedClaims": "Formulaire guidé",
+    "jsonClaims": "Mode JSON",
+    "loadSchema": "Charger le schéma",
+    "loadedSchema": "Schéma chargé : {name}",
+    "requiredField": "Champ requis",
+    "optionalField": "Champ facultatif",
+    "advancedClaimsHint": "Passez en mode JSON pour relire ou saisir directement l’objet de claims complet."
+  },
+  "explorer": {
+    "ledger": "Ledger {ledger}",
+    "search": {
+      "label": "Rechercher dans XCS",
+      "placeholder": "Nom de schéma, publisher, UID, génération ou transaction",
+      "submit": "Rechercher",
+      "title": "Recherche XCS",
+      "description": "Recherchez les schémas par texte ou publisher. Un UID, un identifiant de génération ou un hash de transaction exact peut aussi ouvrir sa preuve.",
+      "prompt": "Saisissez une recherche. Les claims et les listes de Credentials par sujet ne sont jamais indexés ici.",
+      "credential": "Génération de Credential",
+      "transaction": "Transaction XCS",
+      "limited": "D’autres schémas correspondent. Précisez la recherche pour réduire les résultats.",
+      "empty": "Aucun résultat public ne correspond à cette recherche."
+    },
+    "errors": {
+      "not-found": "Cette ressource XCS est introuvable.",
+      "unavailable": "La projection XCS ne peut pas répondre de façon fiable pour le moment.",
+      "unavailableHint": "L’Explorer échoue volontairement en mode fermé lorsque l’indexeur est en retard, arrêté ou sans preuve de ledger suffisante.",
+      "invalid": "La recherche ou l’identifiant fourni n’est pas valide.",
+      "generic": "Une erreur empêche l’affichage de cette ressource."
+    },
+    "pagination": {
+      "label": "Pagination",
+      "first": "Première page",
+      "next": "Page suivante"
+    }
+  },
+  "activity": {
+    "title": "Activité des schémas",
+    "description": "Enregistrements récents de schémas XCS, lus dans l’ordre validé du ledger.",
+    "scope": "Ce flux contient uniquement les registrations de schémas. Il ne publie aucun flux global de Credentials ni d’activité par sujet.",
+    "accepted": "Schéma accepté",
+    "rejected": "Registration rejetée",
+    "by": "par",
+    "transaction": "Transaction",
+    "reason": "Raison",
+    "empty": "Aucune registration de schéma n’a encore été indexée."
+  },
+  "credential": {
+    "title": "Preuve d’un Credential",
+    "description": "Permalien exact vers une génération partagée. Cette page n’est pas un annuaire de Credentials.",
+    "generation": "Identifiant de génération",
+    "issuer": "Émetteur",
+    "subject": "Sujet",
+    "schema": "Schéma",
+    "createdLedger": "Création",
+    "lastLedger": "Dernière mutation",
+    "expiration": "Expiration",
+    "noExpiration": "Sans expiration",
+    "ledgerObject": "Objet ledger",
+    "payloadMetadata": "Métadonnées du payload",
+    "payloadPrivacy": "L’Explorer affiche seulement l’URI ancrée. Il ne contacte pas son hébergeur et ne charge aucun claim automatiquement.",
+    "uri": "URI publique",
+    "noUri": "Aucune URI",
+    "trustTitle": "Confiance dans l’émetteur : non évaluée",
+    "trustNote": "Commons montre les preuves du protocole sans recommander, certifier ni classer cet émetteur.",
+    "verify": "Vérifier les quatre dimensions",
+    "timeline": "Cycle de vie indexé",
+    "timelineEmpty": "Aucun événement de cycle de vie n’est disponible.",
+    "events": {
+      "created": "Credential créé",
+      "accepted": "Credential accepté",
+      "deleted": "Credential supprimé"
+    }
+  },
+  "transactionExplorer": {
+    "title": "Transaction XCS",
+    "description": "Projection XCS exacte des effets de cette transaction validée.",
+    "hash": "Hash de transaction",
+    "ledgerHash": "Hash du ledger",
+    "registration": "Registration de schéma",
+    "publisher": "Publisher",
+    "schemaDigest": "Digest du schéma",
+    "credentialEvents": "Événements Credential",
+    "deletionCause": "Cause de suppression",
+    "empty": "Cette transaction ne contient aucun effet XCS affichable."
+  },
+  "networkStatus": {
+    "title": "État du réseau XCS",
+    "description": "Profil actif, sources XRPL et dernier ledger accepté conjointement par l’indexeur.",
+    "failClosed": "Les lectures protocolaires sont indisponibles plutôt que servies depuis une projection périmée ou divergente.",
+    "profile": "Profil",
+    "networkId": "Network ID XRPL",
+    "registry": "Registre blackholé",
+    "activation": "Ledger d’activation",
+    "primaryTip": "Tip source primaire",
+    "secondaryTip": "Tip source secondaire",
+    "agreedLedger": "Dernier ledger commun",
+    "authoritativeCheckpoint": "Checkpoint autoritatif",
+    "checkpointTime": "Clôture du checkpoint",
+    "transactionRoot": "Racine des transactions",
+    "updated": "Statut mis à jour",
+    "errorCode": "Code d’arrêt",
+    "states": {
+      "starting": "Démarrage",
+      "catching_up": "Rattrapage en cours",
+      "ready": "Prêt",
+      "halted": "Arrêté"
+    }
+  },
+  "studio": {
+    "title": "Studio XCS",
+    "description": "Préparez une opération unitaire, relisez ses champs puis signez-la avec votre wallet externe.",
+    "nonCustodial": "Aucun compte XCS n’est requis et Commons ne reçoit jamais votre seed ni votre clé privée.",
+    "register": "Créer et publier un schéma permissionless.",
+    "issue": "Produire un payload public lié puis émettre un Credential.",
+    "accept": "Relire un Credential pending puis l’accepter ou le retirer.",
+    "revoke": "Supprimer une génération émise avec le wallet de l’émetteur.",
+    "verify": "Contrôler séparément ledger, schéma, payload et confiance.",
+    "operations": "Reprendre les opérations conservées localement dans ce navigateur."
+  },
+  "developers": {
+    "title": "Construire avec XCS",
+    "description": "Intégrez le protocole v0.1 figé avec l’API REST, le SDK TypeScript et le CLI de référence.",
+    "rest": "Interrogez les projections publiques et les preuves exactes sans indexer de claims.",
+    "sdk": "Validez, canonicalisez et préparez les transactions dans votre application.",
+    "cli": "Produisez et vérifiez les artefacts depuis un workflow local non custodial.",
+    "endpoints": "Endpoints de découverte",
+    "learn": "Comprendre le modèle de vérification"
   },
   "accept": {
     "title": "Accepter ou retirer un credential",
@@ -194,5 +360,8 @@
     "acceptLink": "Acceptation du sujet",
     "verifyLink": "Vérification"
   },
-  "footer": { "summary": "XCS v0.1 — standard ouvert et implémentation de référence MIT." }
+  "footer": {
+    "summary": "XCS v0.1 — standard ouvert et implémentation de référence MIT.",
+    "navigation": "Liens de pied de page"
+  }
 }

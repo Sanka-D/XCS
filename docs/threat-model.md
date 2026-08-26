@@ -22,7 +22,8 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard    |
 | Duplicate/replayed ingestion           | Unique event keys and transactional, idempotent projections; deterministic replay digest                 |
 | Moving-tip replay divergence           | Mandatory index/hash target, quorum verification and a fixed inclusive worker bound                      |
-| Account privacy amplification          | Exact Credential lookup only; no public account-wide listing                                             |
+| Account privacy amplification          | Exact shared-coordinate lookup only; no subject feed, account-wide listing or claims search              |
+| Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                    |
 | Public pin abuse                       | Testnet-only, wallet challenge, IP/address rate limit and payload quota                                  |
 
 ## Residual risks
@@ -37,3 +38,12 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 - The browser pilot discloses the subject's IP and fetch timing to an issuer-controlled HTTPS payload
   host after explicit consent. Hostname filtering cannot fully eliminate DNS rebinding.
 - The alpha has not received an independent security audit and is not approved for PII or Mainnet use.
+- Permissionless public schemas can contain misleading names or descriptions. Schema discovery is
+  not Commons endorsement, and moderation must not reinterpret protocol validity.
+- `noindex` metadata on exact Credential, transaction and search-result pages is an indexing hint,
+  not an access control. Anyone who knows a public ledger coordinate can still query the exact API
+  and redistribute the returned metadata.
+- The reference API rate limiter is process-local. A multi-replica or high-volume deployment needs
+  an additional shared limiter at a trusted edge. Incorrectly omitting an ingress proxy CIDR safely
+  collapses its visitors into one budget; trusting an unnecessarily broad CIDR increases spoofing
+  risk, so catch-all `/0` ranges are rejected.

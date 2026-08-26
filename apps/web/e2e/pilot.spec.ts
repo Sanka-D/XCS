@@ -83,6 +83,50 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
       await route.fulfill({ json: { items: [PROFILE] } })
       return
     }
+    if (path === `/v1/networks/${PROFILE_ID}/stats`) {
+      await route.fulfill({
+        json: {
+          network: PROFILE_ID,
+          schemas: { total: 12, publishers: 4 },
+          credentialGenerations: {
+            total: 27,
+            pending: 3,
+            active: 20,
+            expired: 2,
+            deleted: 2,
+          },
+          checkpoint: {
+            ledgerIndex: 100_001,
+            ledgerHash: LEDGER_HASH,
+            closeTime: 838_857_600,
+            transactionRoot: 'cd'.repeat(32),
+          },
+        },
+      })
+      return
+    }
+    if (path === `/v1/networks/${PROFILE_ID}/search`) {
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              type: 'schema',
+              schemaUid: SCHEMA_UID,
+              name: SCHEMA.name,
+              description: SCHEMA.description,
+              publisher: ISSUER,
+              parentUid: null,
+              supersedesUid: null,
+              registrationTransactionHash: '56'.repeat(32),
+              ledgerIndex: 100_001,
+              transactionIndex: 1,
+            },
+          ],
+          hasMore: false,
+        },
+      })
+      return
+    }
     if (path === `/v1/networks/${PROFILE_ID}/schemas/${SCHEMA_UID}`) {
       await route.fulfill({
         json: {
@@ -90,8 +134,13 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
           name: SCHEMA.name,
           description: SCHEMA.description,
           publisher: ISSUER,
+          parentUid: null,
+          supersedesUid: null,
           definition: SCHEMA,
           resolvedDefinition: { definition: SCHEMA, fields: SCHEMA.fields, lineage: [] },
+          registrationTransactionHash: '56'.repeat(32),
+          ledgerIndex: 100_001,
+          transactionIndex: 1,
         },
       })
       return
@@ -132,6 +181,7 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
           transactionHash: txHash,
           event: {
             transactionHash: txHash,
+            nodeIndex: 0,
             issuer: ISSUER,
             subject: SUBJECT,
             schemaUid: SCHEMA_UID,
@@ -161,6 +211,26 @@ async function connectSyntheticWallet(page: Page): Promise<void> {
   await expect(page.getByTestId('wallet-toggle')).toContainText('rHb9CJ')
 }
 
+test('discovers a schema from aggregate stats and global search', async ({ page }) => {
+  await installApiMock(page)
+
+  await page.goto('/')
+  const schemaCount = page.getByText('12', { exact: true })
+  await expect(schemaCount).toBeVisible()
+  await expect(page.getByText(/schémas valides|valid schemas/u)).toBeVisible()
+
+  await page.locator('[data-client-ready="true"]').waitFor()
+  const search = page.locator('.explorer-search').filter({ has: page.locator('#explorer-search') })
+  await search.getByRole('searchbox').fill('Course')
+  await expect(search.getByRole('button')).toBeEnabled()
+  await search.getByRole('button').click()
+  await expect(page).toHaveURL(/\/(?:en\/)?search\?q=Course$/u)
+  const result = page.locator('.result-card').filter({ hasText: SCHEMA.name })
+  await expect(result).toContainText(SCHEMA_UID)
+  await result.click()
+  await expect(page.getByRole('heading', { level: 1, name: SCHEMA.name })).toBeVisible()
+})
+
 test('registers a schema through XRPL validation and exact indexed XCS finality', async ({
   page,
 }) => {
@@ -171,6 +241,7 @@ test('registers a schema through XRPL validation and exact indexed XCS finality'
 
   await page.goto('/schemas/register')
   await connectSyntheticWallet(page)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
   await page.locator('#schema-json').fill(JSON.stringify(SCHEMA, null, 2))
   await page.getByRole('button', { name: 'Valider et préparer' }).click()
 
@@ -209,6 +280,7 @@ test('issues a credential, withholds success on mismatched evidence, then reconf
   await connectSyntheticWallet(page)
   await page.locator('#schema-uid').fill(SCHEMA_UID)
   await page.locator('#subject').fill(SUBJECT)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
   await page.locator('#claims').fill(JSON.stringify(CLAIMS, null, 2))
   await page.locator('#https-url').fill(PAYLOAD_URL)
   await page.getByRole('button', { name: 'Valider et préparer' }).click()

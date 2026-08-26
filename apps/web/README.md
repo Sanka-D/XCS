@@ -1,6 +1,44 @@
 # XCS Testnet web app
 
-The Nuxt application is a non-custodial Testnet playground. It constructs and autofills an XRPL transaction, shows those exact final fields to the user, then asks an external wallet to sign without submitting. The private key or seed never enters the application.
+The Nuxt application is the accountless, non-custodial Testnet site for XCS. It combines schema
+exploration, Studio issuance/lifecycle workflows and developer education in one deployment. EAS and
+EASScan are interaction-design references only; the site constructs native XRPL transactions under
+the frozen XCS v0.1 protocol.
+
+For every write, the application constructs and autofills an XRPL transaction, shows those exact
+final fields to the user, then asks an external wallet to sign without submitting. The private key
+or seed never enters the application. There is no XCS user or organization account, server session,
+team administration or batch issuer in the Testnet beta; one wallet action is prepared at a time.
+
+## Public discovery boundary
+
+All valid permissionless schemas are public and discoverable. Credential verification is
+deliberately exact: callers share a generation ID, transaction hash or the complete
+issuer/subject/schema tuple. The site has no subject feed, account-wide Credential enumeration or
+claims search, and it displays no Commons issuer badge or universal trust result. Aggregate
+statistics contain only ledger-derived metadata. See
+[`ADR 0002`](../../docs/adr/0002-public-product-and-discovery.md).
+
+## Implemented site map
+
+The current application organizes the existing workflows as follows:
+
+- **Explorer:** `/` for aggregate checkpoint statistics and exact search, `/schemas` and
+  `/schemas/:uid` for paginated schema discovery, `/activity` for schema registrations only,
+  `/credentials/:generationId` and `/transactions/:hash` for exact evidence, and `/status` for the
+  indexer/network view;
+- **Studio:** `/studio` links the existing register, issue, accept, revoke, verify and local
+  operation-recovery flows. Schema registration has a guided scalar-field editor, course-completion
+  and diploma templates, plus the advanced JSON editor. Issuance can derive a guided claims form
+  from a compatible resolved schema and retains the advanced JSON path;
+- **Developers:** `/developers` links the live OpenAPI document and names the SDK/CLI packages;
+  `/learn` remains the protocol walkthrough.
+
+Explorer text search indexes schema names and descriptions only. An XRPL address finds schemas that
+it published, while a complete 64-digit hexadecimal value performs exact schema UID, generation ID
+and transaction-hash resolution. The activity page is not a Credential activity feed. Search
+results and exact Credential/transaction pages emit `noindex` metadata so search engines are not
+invited to turn shared coordinates into a secondary public directory.
 
 ## Wallet support
 
@@ -39,12 +77,22 @@ Set:
 
 ```bash
 NUXT_API_BASE_URL=http://api:3001
+NUXT_API_INTERNAL_TOKEN=replace-with-the-private-api-token
+NUXT_TRUSTED_PROXY_CIDRS=10.42.0.2/32
 NUXT_PUBLIC_API_BASE_URL=https://xcs-api.example
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
 ```
 
 `NUXT_API_BASE_URL` is the server-side/SSR endpoint; in Compose it is `http://api:3001`.
+`NUXT_API_INTERNAL_TOKEN` is private runtime configuration shared only with the API. Nuxt uses it
+to authenticate an opaque HMAC rate-limit key deterministically derived from the visitor network
+address on SSR requests, so visitors cannot mint or rotate arbitrary budgets. It must match
+`XCS_INTERNAL_API_TOKEN`, contain 32–256 URL-safe random characters, and must never be placed under
+`runtimeConfig.public` or a `NUXT_PUBLIC_*` variable. Forwarded addresses are ignored unless the
+immediate peer matches `NUXT_TRUSTED_PROXY_CIDRS`; configure only the narrow CIDRs of ingress
+proxies that overwrite client-supplied forwarding headers. With no trusted proxy, the direct socket
+address is used, which is safe but may collapse visitors behind an undeclared proxy.
 `NUXT_PUBLIC_API_BASE_URL` is exposed to the browser and must therefore be browser-reachable. The
 profile is fetched from the XCS API, parsed by the SDK, and matched against the RPC server's reported
 `network_id` before autofill and again before signing or recovery. This alpha rejects profiles other
@@ -59,7 +107,8 @@ public endpoint rather than either private indexer source.
 
 ## Pilot payload publication
 
-The pilot issuance and acceptance flows support public HTTPS payloads only. The payload host must
+The Commons beta issuance and acceptance flows support issuer-hosted public HTTPS payloads only.
+Commons does not store, cache or search credential claims. The issuer payload host must
 allow the web origin through CORS and return `application/json` (or a `+json` media type). Acceptance
 first displays only indexed metadata, the URI and its host. The subject must explicitly consent
 before the browser contacts that host. Consent stays in memory and is bound to the displayed
@@ -75,7 +124,7 @@ redirects or a changed final URL, limits the streamed body to 1 MiB, and verifie
 canonical bytes and URI digest. It sends the parsed payload object to `/v1/verify`; the API does not
 resolve the URI, so its remote resolver may remain disabled. There is intentionally no server-side
 fetch proxy, avoiding an SSRF trust boundary. IPFS remains part of the protocol and CLI, but is
-outside this browser pilot.
+outside the Commons-hosted browser beta.
 
 The standalone `/verify` flow follows the same boundary. It first reads and displays indexed
 credential metadata without contacting the issuer. Only after the verifier consents to the exact

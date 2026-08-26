@@ -2,16 +2,24 @@
 
 XCS is an open schema and verification layer for native [XRP Ledger Credentials](https://xrpl.org/docs/concepts/decentralized-storage/credentials). It defines how schemas are registered, how their identifiers are derived, how off-ledger JSON is bound to a Credential, and how an indexer reconstructs lifecycle state.
 
-This repository contains the XCS v0.1 specification and its reference implementation. The historical input document remains available as [`XCS_draft0.pdf`](./XCS_draft0.pdf); [`spec/XCS-0001.md`](./spec/XCS-0001.md) is the normative source for implemented v0.1 behavior.
+This repository contains the XCS v0.1 specification and its reference implementation. The historical input document remains available as [`XCS_draft0.pdf`](./XCS_draft0.pdf); [`spec/XCS-0001.md`](./spec/XCS-0001.md) is the normative source for implemented v0.1 behavior. Its normative semantics are frozen: a change to schema validity, UID bytes, payload interpretation or lifecycle projection requires a later protocol version and a separately activated profile.
 
 ## Status
 
 XCS v0.1 is alpha software intended for XRPL Testnet. The protocol, SDK, dual-source indexer,
 read API, CLI, and issuer/subject playground are implemented, but the repository deliberately ships
 without a live network profile. Do not use the example profile on Mainnet: its registry address and
-activation ledger are invalid placeholders.
+activation ledger are invalid placeholders. The next product target is a public Testnet beta operated
+by XRPL Commons, not a Mainnet launch.
 
 The implementation never needs an XRPL seed. Applications construct transactions, then delegate signing to a wallet or an injected signer controlled by the issuer or subject.
+
+The public product takes UX inspiration from EAS and EASScan, not protocol semantics. One site
+presents Explorer, Studio and Developers surfaces while retaining native XRPL Credentials. Public
+discovery is hybrid: schemas and aggregate statistics are discoverable, while Credentials remain
+exact lookups by shared generation, transaction or tuple; there is no subject feed or account-wide
+enumeration. Commons assigns no issuer badge or universal trust decision. These accepted product
+boundaries are recorded in [`ADR 0002`](./docs/adr/0002-public-product-and-discovery.md).
 
 ## Repository map
 
@@ -22,7 +30,7 @@ The implementation never needs an XRPL seed. Applications construct transactions
   rebuildable local projection.
 - `apps/indexer`: validated-ledger ingestion and XCS projections.
 - `apps/api`: read-only schema, credential and verification API.
-- `apps/web`: Nuxt 4 Testnet playground.
+- `apps/web`: accountless Nuxt 4 Testnet application for exploration, issuance and verification.
 - `verifier-go`: independent conformance verifier.
 - `conformance`: language-neutral test vectors.
 
@@ -55,8 +63,9 @@ indexer quorum endpoint or its credentials in that variable.
 
 PostgreSQL is not a credential authority and does not make Commons the custodian of issuer data. It
 is the reference implementation's local query cache: any organization can self-host the stack,
-replay the same validated ledgers, and compare a deterministic projection digest. Public payloads
-remain on issuer-selected HTTPS/IPFS infrastructure; signing keys remain in issuer/subject wallets.
+replay the same validated ledgers, and compare a deterministic projection digest. The Commons beta
+uses issuer-hosted HTTPS payloads and does not store claims; signing keys remain in issuer/subject
+wallets. Protocol and CLI support for IPFS remains available outside that hosted beta boundary.
 
 For the database and indexer workflow, see [`docs/runbooks/indexer.md`](./docs/runbooks/indexer.md). For commands and test tiers, see [`docs/TESTING.md`](./docs/TESTING.md).
 
@@ -67,8 +76,10 @@ decision is tracked in [`docs/implementation-plan.md`](./docs/implementation-pla
 
 - Never place a seed, private key, signed private document, or production secret in this repository.
 - XCS identifiers and native Credentials are public ledger data.
-- The public reference API deliberately provides exact Credential lookup only; it does not enumerate all Credentials attached to an account.
-- The Testnet payload service is for public, non-sensitive demonstrations only.
+- Public schemas are permissionless and discoverable; publication is not Commons endorsement.
+- The public reference API deliberately provides exact Credential lookup only; it does not expose a
+  subject feed or enumerate every Credential attached to an account.
+- Issuer-hosted Testnet payloads are public and must contain no personal or sensitive data.
 
 Report vulnerabilities according to [`SECURITY.md`](./SECURITY.md).
 Release gates and dependency-specific constraints are tracked in [`docs/known-limitations.md`](./docs/known-limitations.md).

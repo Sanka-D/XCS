@@ -20,16 +20,13 @@ onMounted(() => {
       </NuxtLinkLocale>
 
       <nav class="primary-nav" :aria-label="$t('nav.main')">
-        <NuxtLinkLocale to="/schemas">{{ $t('nav.schemas') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/issue">{{ $t('nav.issue') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/accept">{{ $t('nav.accept') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/revoke">{{ $t('nav.revoke') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/verify">{{ $t('nav.verify') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/operations">{{ $t('nav.operations') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/learn">{{ $t('nav.learn') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/">{{ $t('nav.explorer') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/studio">{{ $t('nav.studio') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/developers">{{ $t('nav.developers') }}</NuxtLinkLocale>
       </nav>
 
       <div class="header-actions">
+        <ExplorerSearch compact />
         <label class="sr-only" for="locale">{{ $t('nav.language') }}</label>
         <select
           id="locale"
@@ -53,7 +50,13 @@ onMounted(() => {
 
     <footer class="site-footer">
       <p>{{ $t('footer.summary') }}</p>
-      <a href="https://github.com/XRPLF/XRPL-Standards" rel="noreferrer">XRPL Standards</a>
+      <nav :aria-label="$t('footer.navigation')">
+        <NuxtLinkLocale to="/schemas">{{ $t('nav.schemas') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/activity">{{ $t('nav.activity') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/status">{{ $t('nav.status') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/verify">{{ $t('nav.verify') }}</NuxtLinkLocale>
+        <a href="https://github.com/XRPLF/XRPL-Standards" rel="noreferrer">XRPL Standards</a>
+      </nav>
     </footer>
   </div>
 </template>

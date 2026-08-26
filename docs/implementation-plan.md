@@ -1,8 +1,9 @@
 # XCS implementation plan
 
-This plan takes XCS from the current Testnet alpha to a service that organizations can use to
-register schemas and issue native XRPL Credentials without giving XCS custody of their signing
-keys. It is outcome-driven: a milestone is complete only when its exit criteria are demonstrated.
+This plan takes XCS from the current Testnet alpha to an accountless public Testnet beta that
+organizations can use to discover and register schemas, issue native XRPL Credentials, and inspect
+exact verification evidence without giving XCS custody of their signing keys or claims. It is
+outcome-driven: a milestone is complete only when its exit criteria are demonstrated.
 
 ## Product outcome
 
@@ -15,13 +16,37 @@ An organization must be able to complete this flow:
 4. create the native Credential, let its subject accept it, and later revoke or remove it;
 5. let an independent verifier reconstruct the same schema and lifecycle state from validated
    ledgers and report payload integrity separately from issuer trust.
+6. expose the result through one Explorer, Studio and Developers site without creating a Commons
+   issuer directory or a public subject feed.
 
 The reference service remains non-custodial and reproducible. A self-hosted indexer processing the
 same validated ledgers must reach the same protocol result as the shared service.
 
+## Accepted beta product boundaries
+
+- XCS v0.1 normative semantics are frozen. Product/API work must not alter historical schema
+  validity, UID bytes, payload interpretation or lifecycle projection.
+- EAS and EASScan are UX references only; the protocol remains native XRPL Credentials plus XCS.
+- All valid permissionless schemas and aggregate statistics are publicly discoverable.
+- Credential lookup is exact by shared generation ID, transaction hash or complete
+  issuer/subject/schema tuple. There is no public subject feed, account-wide Credential enumeration
+  or claims search. A future browsable Credential catalog needs a separately designed opt-in signal.
+- Commons presents addresses and four-dimensional verification without issuer badges, ranking or a
+  universal trust decision.
+- The beta uses issuer-hosted HTTPS payloads, unit issuance through Crossmark or GemWallet, and no
+  XCS account or multi-tenant backend.
+- One site contains Explorer, Studio and Developers surfaces. Its public integration contract is
+  REST-first; GraphQL is deferred until real usage demonstrates a need.
+- The initial pilot covers course participation/completion and diploma-style credentials.
+- Commons hosts the shared web, dual-source indexer, API and PostgreSQL cache, but no signing keys or
+  claims. Independent operators can reconstruct the same ledger-derived state.
+
+These choices are recorded in [`ADR 0002`](./adr/0002-public-product-and-discovery.md).
+
 ## Current implementation evidence
 
-The repository now contains the strict dual-`rippled` preflight/quorum, a fenced PostgreSQL writer,
+The repository now contains the frozen v0.1 specification and conformance contract, strict
+dual-`rippled` preflight/quorum, a fenced PostgreSQL writer,
 transaction-root checkpoints, fail-closed repeatable-read API guards, quorum-verified bounded
 empty-database replay, least-privilege database roles, and a timestamp-free projection digest. The
 browser submission RPC is configured separately from the two private indexer sources.
@@ -29,9 +54,23 @@ Unit/conformance suites cover the deterministic protocol, source normalization, 
 and browser flow; CI contains a PostgreSQL 18 job for the eight migration, role-permission, fencing,
 and replay scenarios.
 
+The reference product now also has REST reads for aggregate statistics, schema search and
+registration activity, exact Credential generation timelines, and exact XCS transaction
+projections. The Nuxt application exposes corresponding Explorer pages, a Studio workflow index and
+a Developers page. Its guided schema editor includes course-completion and diploma templates, while
+advanced JSON remains available for schemas outside the scalar-field editor. Database migration
+`0002_discovery_indexes.sql` adds only the supporting indexes and leaves existing rows and contracts
+unchanged.
+
 This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
 the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
 captured ledger fixtures, and two-entity pilot evidence remain external gates.
+
+The browser Playwright journey is deterministic and synthetic: it replaces the wallet, RPC, API and
+payload host with fakes and currently covers schema registration plus issuance. It is useful CI
+evidence for application state transitions, but it is not evidence for browser-extension
+compatibility, issuer-hosted CORS behavior, a live Commons deployment or validated Testnet pilot
+transactions.
 
 ## Scope boundaries for v0.1
 
@@ -42,7 +81,9 @@ The following are deliberately not v0.1 promises:
 - no private-credential or personal-data storage on public IPFS;
 - no Mainnet launch before the Testnet, interoperability, operations, and security gates below;
 - no in-place migration from the historical Nuxt MVP database;
-- no account-wide public Credential enumeration endpoint.
+- no public subject feed, account-wide Credential enumeration or claims search;
+- no Commons issuer badge, ranking or universal trust directory;
+- no XCS user or organization account and no GraphQL API in the beta;
 - no HSM integration, batch issuance, private claims, multi-tenant administration, or Mainnet
   activation in the first controlled pilot.
 
@@ -141,9 +182,10 @@ Exit criteria:
 - all automated checks run in CI and the manual wallet evidence records adapter and extension
   versions.
 
-## Milestone 3 — freeze an interoperable v0.1 candidate
+## Milestone 3 — prove frozen v0.1 interoperability
 
-**Goal:** remove protocol ambiguity before inviting external implementations.
+**Goal:** demonstrate that independent implementations reproduce the frozen v0.1 contract without
+changing its normative semantics.
 
 Work:
 
@@ -155,16 +197,16 @@ Work:
   output, not only counts;
 - submit or adopt the `xrpl.js` URI-length correction; keep the documented 128-byte interoperability
   guard until a released dependency is verified at the normative 256-byte boundary;
-- obtain review from at least one implementer who did not write the TypeScript core and record all
-  normative decisions in the ADR/specification;
+- obtain review from at least one implementer who did not write the TypeScript core and record any
+  clarification that does not change validity or derived bytes in the ADR/specification;
 - version the conformance vectors and define the compatibility policy for future protocol profiles.
 
 Exit criteria:
 
 - TypeScript and Go pass every v0.1 conformance vector with identical validity outcomes and stable
   error codes; diagnostic messages and paths need not be identical;
-- no open issue can change historical schema validity, UID bytes, payload interpretation, or
-  lifecycle projection without a new protocol version;
+- any proposal that changes historical schema validity, UID bytes, payload interpretation or
+  lifecycle projection is assigned to a new protocol version and activation profile;
 - an external implementation can derive a known UID and verify a known Credential from the published
   specification and vectors alone.
 
@@ -197,34 +239,47 @@ Exit criteria:
   reviewed and linked from the release record;
 - production services hold no XRPL signing secret.
 
-## Milestone 5 — deliver the organizational issuer workflow
+## Milestone 5 — deliver the public Explorer, Studio and Developers beta
 
-**Goal:** let pilot entities issue repeatably without adapting protocol internals themselves.
+**Goal:** let a visitor discover public schemas and exact evidence, and let pilot entities issue
+repeatably without accounts or protocol-specific integration work.
 
 Work:
 
-- add a schema-authoring workflow that validates locally, previews canonical bytes and memo size, and
-  records the resulting registration operation;
+- present public permissionless schemas, aggregate statistics and exact Credential evidence without
+  exposing a subject feed, account-wide listing or claims index;
+- provide exact Credential resolution from a shared generation ID, transaction hash or complete
+  issuer/subject/schema tuple;
+- organize one accountless site into Explorer, Studio and Developers surfaces with a REST-first
+  integration path;
+- retain the schema-authoring workflow that validates locally, previews canonical bytes and memo
+  size, and records the resulting registration operation;
 - build the controlled pilot on the SDK `Signer` boundary using the explicitly tested Crossmark and
   GemWallet browser adapters for low-volume, unit issuance;
-- add deterministic payload generation, organization-hosted HTTPS publication, optional public IPFS
-  publication, and a mandatory proof that the published bytes match the URI before issuance;
+- retain deterministic payload generation, issuer-hosted HTTPS publication and the mandatory proof
+  that published bytes match the URI before issuance;
 - support idempotent resumption and sanitized local receipts for each unit operation;
 - add organization-local audit exports containing schema, operation, ledger, hash, actor, and outcome
   metadata, but never seeds or private claim data by default;
 - add subject acceptance links and clear pending/active/expired/deleted lifecycle guidance;
-- run pilots with at least two entities using different signer and payload-hosting setups.
+- publish REST, SDK and CLI guidance alongside the application;
+- run a course participation/completion pilot and a diploma-style pilot with issuer-controlled HTTPS
+  hosts.
 
-Offline/HSM signing, batch issuance, multi-operator administration, and multi-tenant hosting are
-post-pilot work. Adding any of these changes the signing or authorization surface and requires a new
-threat-model review before release.
+Public subject feeds, Commons trust badges, XCS accounts, GraphQL, offline/HSM signing, batch
+issuance, multi-operator administration, and multi-tenant hosting are outside the beta. Adding any
+of these changes the privacy, signing or authorization surface and requires a new product decision
+and threat-model review.
 
 Exit criteria:
 
 - a new issuer follows published documentation without repository maintainer intervention;
+- a visitor can discover a public schema and open exact shared Credential evidence without creating
+  an account;
+- neither the site nor API enumerates a subject's Credentials or stores issuer payload claims;
 - retrying any interrupted operation cannot create an untracked duplicate or report a provisional
   result as final;
-- signing keys remain within the issuer-controlled wallet, offline signer, or HSM boundary;
+- signing keys remain within the issuer- or subject-controlled wallet;
 - pilot feedback is resolved or explicitly deferred before a stable release.
 
 ## Milestone 6 — final audit and Mainnet go/no-go
@@ -233,7 +288,7 @@ Exit criteria:
 
 Required gates:
 
-- the v0.1 candidate is frozen and independently implemented;
+- the frozen v0.1 contract is independently implemented;
 - real-wallet Testnet matrices and issuer pilots are complete;
 - an independent defensive security audit covers the exact frozen commit, container digests, signer
   adapters, indexer quorum, payload resolver, and authorization surfaces shipped after milestone 5;
@@ -267,9 +322,9 @@ The critical path is:
 baseline adopted
   → immutable Testnet profile
   → real wallet and ledger journey
-  → interoperable v0.1 candidate
+  → frozen v0.1 interoperability proof
   → operational readiness and pre-pilot review
-  → issuer pilots
+  → public Explorer/Studio/Developers beta and issuer pilots
   → final frozen-artifact audit
   → Mainnet go/no-go
 ```

@@ -99,9 +99,31 @@ Provisioning creates missing runtime roles, reapplies their exact grants and rot
 passwords. It reports role names or a stable failure code, never URLs or password values. The Compose
 dependency chain performs `migrate` then `provision` automatically.
 
+### Migration 0002: discovery indexes
+
+`0002_discovery_indexes.sql` is additive. It creates four indexes over existing projection rows and
+does not add tables, columns, constraints or backfilled application data:
+
+- `schema_events_activity_idx` supports the reverse-chronological schema-registration activity page;
+- `schemas_order_idx` supports stable schema pagination;
+- `schemas_search_idx` is a PostgreSQL GIN expression index for schema name and description search;
+- `credential_generations_stats_idx` supports aggregate lifecycle counts.
+
+Existing API and indexer versions ignore these indexes, so an application rollback does not require
+a database rollback. On an existing populated database, regular `CREATE INDEX` can block concurrent
+writes while each index is built; schedule the migration before exposing the discovery routes and
+monitor the indexer's writer lease and lag. Run `db:migrate`, then the standard `db:provision`, then
+deploy the API and web application. A fresh install receives the same migration through the normal
+sequence. If the application must be rolled back, retain the indexes and forward-fix any database
+issue instead of dropping them during the incident.
+
 ### Deployment configuration
 
-1. Copy `.env.example` to `.env` and replace all three local PostgreSQL passwords.
+1. Copy `.env.example` to `.env`, replace all three local PostgreSQL passwords, and generate a
+   distinct `XCS_INTERNAL_API_TOKEN` with at least 32 URL-safe random characters. Compose passes it
+   privately to the API and Nuxt SSR process; never reuse a database/RPC secret or expose it through
+   a `NUXT_PUBLIC_*` variable. It authenticates only the deterministic, network-derived SSR
+   rate-limit key—the public API remains unauthenticated and direct browser calls remain IP-limited.
 2. Complete and independently audit the registry blackhole ceremony described in
    `config/networks/README.md`.
 3. Save the immutable result as `config/networks/testnet.json`. Do not edit that file after indexing
@@ -109,6 +131,11 @@ dependency chain performs `migrate` then `provision` automatically.
 4. Set `XCS_PUBLIC_API_BASE_URL` and `XCS_ALLOWED_ORIGINS` to the browser-visible HTTPS origins when
    deploying behind a reverse proxy. The Compose web service uses `http://api:3001` separately for
    server-side rendering, so the public URL is never reused for container-to-container traffic.
+   Configure the proxy to discard incoming forwarding headers and write its own canonical client
+   address, then set `XCS_TRUSTED_PROXY_CIDRS` to that proxy's exact, narrow IP/CIDR. Compose applies
+   this list to the API and Nuxt SSR resolver. Leave it empty for direct exposure; never use a
+   wildcard, a catch-all `/0`, or trust arbitrary `X-Forwarded-For` values. An undeclared proxy is
+   safe but collapses its visitors into the proxy's shared rate-limit budget.
 5. Keep `XCS_BIND_ADDRESS=127.0.0.1` unless a firewall and authenticated administration boundary
    explicitly protect the exposed services.
 6. Set `XCS_RPC_URL_PRIMARY` and `XCS_RPC_URL_SECONDARY` to distinct WSS endpoints from independently
@@ -125,6 +152,17 @@ dependency chain performs `migrate` then `provision` automatically.
    query parameter is a provider secret.
 8. Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes and at least three times the
    polling interval. Run `pnpm --filter @xcs-protocol/indexer preflight` before enabling the service.
+
+For the Commons-hosted Testnet beta, also enforce the product boundary from
+[`ADR 0002`](../adr/0002-public-product-and-discovery.md):
+
+- leave `XCS_TRUSTED_ISSUERS` and `XCS_UNTRUSTED_ISSUERS` empty so Commons publishes no trust badge
+  or issuer allowlist decision;
+- keep `XCS_PAYLOAD_FETCH_ENABLED=false`; the browser retrieves issuer-hosted HTTPS payloads only
+  after consent and sends parsed content for validation without API-side resolution;
+- keep `XCS_DEMO_PINNING_ENABLED=false`; the issuer, not Commons, operates the public HTTPS payload
+  host;
+- do not add a subject feed, account-wide Credential export or claims ingestion to the deployment.
 
 Validate the rendered configuration, then build and start the stack:
 

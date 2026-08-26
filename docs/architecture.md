@@ -3,7 +3,7 @@
 XCS separates deterministic protocol logic from I/O and signing.
 
 ```text
-Wallet/HSM ──signs──> SDK / CLI / Nuxt playground
+Wallet/HSM ──signs──> SDK / CLI / Nuxt site
                          │ signed transaction
                          ▼
                   validated XRPL ledgers
@@ -33,7 +33,35 @@ Wallet/HSM ──signs──> SDK / CLI / Nuxt playground
   source of authoritative verification.
 - `verifier-go` is intentionally independent and consumes the same language-neutral vectors.
 
-The shared public service is convenient, not authoritative. A self-hosted indexer reconstructing the same validated ledgers must produce the same protocol result.
+The shared public service is convenient, not authoritative. XRPL Commons operates the reference
+web, indexer, API and PostgreSQL deployment for the Testnet beta, but a self-hosted indexer
+reconstructing the same validated ledgers must produce the same protocol result.
+
+## Product surface and discovery
+
+The accountless Nuxt application is one site with three navigation surfaces: Explorer for public
+schemas, aggregate statistics and exact Credential evidence; Studio for wallet-based schema and
+unit-issuance workflows; and Developers for REST, SDK and CLI integration material. EAS and EASScan
+inform interaction design only. XCS continues to use native XRPL Credentials and the frozen v0.1
+protocol described in `spec/XCS-0001.md`.
+
+Discovery is hybrid. Every valid permissionless schema is public and discoverable, but Credentials
+are resolved only from exact shared coordinates: generation ID, transaction hash or the complete
+issuer/subject/schema tuple. The reference service exposes no subject feed, account-wide Credential
+enumeration or claims search. A future browsable Credential catalog would require an explicit,
+separately specified opt-in signal. Aggregate counts contain no payload claims.
+
+This boundary limits privacy amplification; it does not make public ledger identifiers private.
+Schema visibility is not endorsement. The API and site expose the issuer address and independent
+verification dimensions without Commons badges, rankings or universal trust decisions. See
+[`ADR 0002`](./adr/0002-public-product-and-discovery.md).
+
+The implemented REST discovery surface exposes aggregate checkpoint statistics, paginated schemas,
+schema-only registration activity, exact generation timelines and exact XCS transaction
+projections. Text and publisher searches return schemas only; a complete 256-bit hexadecimal value
+may resolve an exact schema UID, Credential generation ID and transaction hash. These reads use the
+same repeatable-read snapshot and fail-closed checkpoint guard as verification. None reads payload
+claims or creates an issuer/subject Credential listing.
 
 ## Persistence
 
@@ -52,12 +80,22 @@ the database used by the historical `XRPL-Commons/xcs` MVP. Later migrations wit
 architecture must preserve mixed-version reads and use expand/migrate/contract when changing
 populated data.
 
+Migration `0002_discovery_indexes.sql` follows that compatibility rule: it adds four indexes for
+schema ordering/search/activity and lifecycle aggregates without changing a table, column,
+constraint or row. Old binaries ignore the indexes. The deployment and lock considerations for a
+populated database are documented in [`runbooks/deployment.md`](./runbooks/deployment.md).
+
 PostgreSQL uses three fixed trust identities. `xcs_admin` owns schema changes and runs migrations
 plus the post-migration provisioner; it is absent from runtime services. `xcs_indexer` receives only
 projection `SELECT`/`INSERT`/`UPDATE`, while `xcs_api` receives projection `SELECT` and CRUD on the
 isolated pinning tables. Neither runtime identity can create objects in `public`. Provisioning is
 idempotent so every migration and password rotation can reassert the complete grant set without
 logging connection URLs or passwords.
+
+PostgreSQL contains ledger-derived schemas, lifecycle events, current projections, checkpoints and
+optional demo-pinning administration rows. It contains no XRPL signing key and the Commons beta does
+not ingest or persist credential claims. Public credential payloads remain exact canonical HTTPS
+documents on issuer-controlled infrastructure.
 
 A maintenance replay has a content-addressed upper bound: the operator supplies a ledger index and
 hash, both sources quorum-verify that ledger, and the worker never processes beyond it even if the
@@ -67,3 +105,9 @@ ledger history instead of racing a moving network tip.
 ## Submission
 
 Transaction builders return unsigned semantic JSON. The application autofills fees, sequence and `LastLedgerSequence`, previews the complete transaction, asks an external wallet to sign, persists the resulting hash/blob, submits it, and waits for a validated result. A provisional submission response is never treated as success.
+
+The Testnet beta performs one wallet operation at a time through Crossmark or GemWallet. It has no
+XCS account, server session, batch issuer, team or multi-tenant authorization layer. Recovery state
+and sanitized receipts stay in the browser's IndexedDB; clearing site data removes that local
+history. Credential payloads are published by the issuer over HTTPS and verified immediately before
+issuance. Commons never receives a signing seed or private key.
