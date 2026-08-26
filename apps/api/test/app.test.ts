@@ -356,6 +356,164 @@ describe('read API', () => {
     expect(paths?.['/v1/verify']?.post?.responses).toHaveProperty('404')
   })
 
+  it('documents closed success contracts for the developer verification flow', async () => {
+    const repository = new RouteRepository()
+    const nestedDefinition = validateSchema({
+      ...registeredSchema,
+      fields: {
+        programId: { type: 'string' },
+        result: {
+          type: 'object',
+          fields: {
+            score: { type: 'uint' },
+            badges: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+    })
+    const nestedSchemaUid = computeSchemaUid({
+      schema: nestedDefinition,
+      networkId: network.networkId,
+      ledgerHash: checkpoint.ledgerHash,
+      ledgerIndex: checkpoint.ledgerIndex,
+      transactionIndex: acceptedSchemaRegistration.transactionIndex,
+      publisher: ISSUER,
+    })
+    const nestedSchemaRow: SchemaRow = {
+      ...registeredSchemaRow,
+      schemaUid: nestedSchemaUid,
+      definition: { ...nestedDefinition },
+      resolvedDefinition: {
+        definition: { ...nestedDefinition },
+        fields: nestedDefinition.fields,
+        lineage: [],
+      },
+    }
+    const nestedSchemaEvidence: SchemaProjectionEvidence = {
+      schema: nestedSchemaRow,
+      registration: {
+        ...acceptedSchemaRegistration,
+        schemaUid: nestedSchemaUid,
+        memoJson: { ...nestedDefinition },
+      },
+    }
+    const matchingGeneration = { ...generation, schemaUid: nestedSchemaUid }
+    repository.getSchema = async () => nestedSchemaRow
+    repository.listSchemas = async () => [nestedSchemaRow]
+    repository.getSchemaProjectionEvidence = async () => [nestedSchemaEvidence]
+    repository.getCredential = async () => matchingGeneration
+    const instance = await configuredApp({ repository })
+    const matchingCredentialUrl = `/v1/networks/testnet/credentials/${ISSUER}/${SUBJECT}/${nestedSchemaUid}`
+
+    const [exactSchema, schemaList, exactCredential, verification] = await Promise.all([
+      instance.inject({
+        method: 'GET',
+        url: `/v1/networks/testnet/schemas/${nestedSchemaUid}`,
+      }),
+      instance.inject({ method: 'GET', url: '/v1/networks/testnet/schemas' }),
+      instance.inject({ method: 'GET', url: matchingCredentialUrl }),
+      instance.inject({
+        method: 'POST',
+        url: '/v1/verify',
+        payload: {
+          network: 'testnet',
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: nestedSchemaUid,
+        },
+      }),
+    ])
+
+    expect(exactSchema.statusCode).toBe(200)
+    expect(exactSchema.json()).toEqual({
+      ...nestedSchemaRow,
+      registeredAt: NOW.toISOString(),
+    })
+    expect(schemaList.statusCode).toBe(200)
+    expect(schemaList.json()).toEqual({
+      items: [{ ...nestedSchemaRow, registeredAt: NOW.toISOString() }],
+    })
+    expect(exactCredential.statusCode).toBe(200)
+    expect(exactCredential.json()).toEqual({
+      ...matchingGeneration,
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+      state: 'active',
+    })
+    expect(verification.statusCode).toBe(200)
+    expect(verification.json()).toEqual({
+      onChain: 'active',
+      schema: 'valid',
+      payload: 'not_checked',
+      issuerTrust: 'unknown',
+      generationId: matchingGeneration.generationId,
+    })
+
+    type ContractSchema = {
+      type?: string
+      additionalProperties?: boolean
+      required?: string[]
+      properties?: Record<string, unknown>
+      oneOf?: ContractSchema[]
+    }
+    type ContractResponse = {
+      content?: Record<string, { schema?: ContractSchema }>
+    }
+    type ContractOperation = { responses?: Record<string, ContractResponse> }
+    const document = instance.swagger() as unknown as {
+      paths?: Record<string, { get?: ContractOperation; post?: ContractOperation }>
+      components?: { schemas?: Record<string, ContractSchema> }
+    }
+    const responseSchema = (path: string, method: 'get' | 'post') =>
+      document.paths?.[path]?.[method]?.responses?.['200']?.content?.['application/json']?.schema
+
+    const exactSchemaContract = responseSchema('/v1/networks/{network}/schemas/{uid}', 'get')
+    const schemaListContract = responseSchema('/v1/networks/{network}/schemas', 'get')
+    const exactCredentialContract = responseSchema(
+      '/v1/networks/{network}/credentials/{issuer}/{subject}/{schemaUid}',
+      'get',
+    )
+    const verificationContract = responseSchema('/v1/verify', 'post')
+
+    expect(exactSchemaContract).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: expect.arrayContaining([
+        'profileId',
+        'schemaUid',
+        'definition',
+        'resolvedDefinition',
+        'registeredAt',
+      ]),
+    })
+    expect(schemaListContract).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['items'],
+    })
+    expect(
+      (schemaListContract?.properties?.items as { items?: ContractSchema } | undefined)?.items,
+    ).toMatchObject({ type: 'object', additionalProperties: false })
+    expect(exactCredentialContract).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: expect.arrayContaining(['generationId', 'createdAt', 'updatedAt', 'state']),
+    })
+    expect(verificationContract).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['onChain', 'schema', 'payload', 'issuerTrust'],
+    })
+    expect(verificationContract?.properties).toHaveProperty('generationId')
+    const fieldDescriptorContract = Object.values(document.components?.schemas ?? {}).find(
+      (schema) => schema.oneOf?.length === 3,
+    )
+    expect(fieldDescriptorContract?.oneOf).toHaveLength(3)
+    for (const descriptor of fieldDescriptorContract?.oneOf ?? []) {
+      expect(descriptor).toMatchObject({ type: 'object', additionalProperties: false })
+    }
+  })
+
   it('returns mutually exclusive discovery statistics at the authoritative checkpoint', async () => {
     const repository = new RouteRepository()
     let observedCloseTime: number | undefined

@@ -262,6 +262,103 @@ const publicSchemaSummarySchema = {
   },
 } as const
 
+const xcsFieldDescriptorSchema = {
+  $id: 'XcsFieldDescriptor',
+  oneOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type'],
+      properties: {
+        type: { type: 'string', enum: ['string', 'bool', 'uint', 'int', 'bytes', 'address'] },
+        optional: { type: 'boolean' },
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'items'],
+      properties: {
+        type: { type: 'string', const: 'array' },
+        optional: { type: 'boolean' },
+        items: { $ref: 'XcsFieldDescriptor#' },
+      },
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['type', 'fields'],
+      properties: {
+        type: { type: 'string', const: 'object' },
+        optional: { type: 'boolean' },
+        fields: {
+          type: 'object',
+          minProperties: 1,
+          additionalProperties: { $ref: 'XcsFieldDescriptor#' },
+        },
+      },
+    },
+  ],
+} as const
+
+const xcsFieldsSchema = {
+  type: 'object',
+  minProperties: 1,
+  additionalProperties: { $ref: 'XcsFieldDescriptor#' },
+} as const
+
+const xcsSchemaDefinitionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['xcsVersion', 'name', 'description', 'fields'],
+  properties: {
+    xcsVersion: { type: 'string', const: '0.1' },
+    name: { type: 'string', minLength: 1 },
+    description: { type: 'string', minLength: 1 },
+    extends: { type: 'string', pattern: UID_PATTERN },
+    supersedes: { type: 'string', pattern: UID_PATTERN },
+    fields: xcsFieldsSchema,
+  },
+} as const
+
+const publicSchemaRowSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'profileId',
+    ...publicSchemaSummarySchema.required,
+    'definition',
+    'resolvedDefinition',
+    'registeredAt',
+  ],
+  properties: {
+    profileId: { type: 'string', pattern: PROFILE_PATTERN },
+    ...publicSchemaSummarySchema.properties,
+    definition: xcsSchemaDefinitionSchema,
+    resolvedDefinition: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['definition', 'fields', 'lineage'],
+      properties: {
+        definition: xcsSchemaDefinitionSchema,
+        fields: xcsFieldsSchema,
+        lineage: { type: 'array', items: { type: 'string', pattern: UID_PATTERN } },
+      },
+    },
+    registeredAt: { type: 'string', format: 'date-time' },
+  },
+} as const
+
+const schemaListResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['items'],
+  properties: {
+    items: { type: 'array', items: publicSchemaRowSchema },
+    nextCursor: { type: 'string', minLength: 1, maxLength: 512 },
+  },
+} as const
+
 const credentialStateSchema = {
   type: 'string',
   enum: ['pending', 'active', 'expired', 'deleted'],
@@ -318,6 +415,44 @@ const publicCredentialGenerationSchema = {
         { type: 'null' },
       ],
     },
+  },
+} as const
+
+const exactCredentialResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'profileId',
+    ...publicCredentialGenerationSchema.required,
+    'createdAt',
+    'updatedAt',
+    'state',
+  ],
+  properties: {
+    profileId: { type: 'string', pattern: PROFILE_PATTERN },
+    ...publicCredentialGenerationSchema.properties,
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    state: credentialStateSchema,
+  },
+} as const
+
+const verificationResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['onChain', 'schema', 'payload', 'issuerTrust'],
+  properties: {
+    onChain: {
+      type: 'string',
+      enum: ['pending', 'active', 'expired', 'deleted', 'not_found'],
+    },
+    schema: { type: 'string', enum: ['valid', 'invalid', 'unknown'] },
+    payload: {
+      type: 'string',
+      enum: ['valid', 'unavailable', 'tampered', 'invalid', 'not_checked'],
+    },
+    issuerTrust: { type: 'string', enum: ['trusted', 'untrusted', 'unknown'] },
+    generationId: { type: 'string', pattern: UID_PATTERN },
   },
 } as const
 
@@ -1023,6 +1158,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
       },
     },
   })
+  app.addSchema(xcsFieldDescriptorSchema)
 
   await app.register(cors, {
     origin: options.allowedOrigins ?? ['http://localhost:3000'],
@@ -1744,7 +1880,11 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
             uid: { type: 'string', pattern: UID_PATTERN },
           },
         },
-        response: { 404: errorResponseSchema, 503: errorResponseSchema },
+        response: {
+          200: publicSchemaRowSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -1862,7 +2002,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
             limit: { type: 'string', pattern: '^(?:[1-9]|[1-9][0-9]|100)$' },
           },
         },
-        response: { 503: errorResponseSchema },
+        response: { 200: schemaListResponseSchema, 503: errorResponseSchema },
       },
     },
     async (request, reply) => {
@@ -1954,7 +2094,11 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     {
       schema: {
         params: credentialParamsSchema,
-        response: { 404: errorResponseSchema, 503: errorResponseSchema },
+        response: {
+          200: exactCredentialResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
       },
     },
     async (request, reply) => {
@@ -2163,7 +2307,11 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           },
           not: { required: ['payload', 'resolvePayload'] },
         },
-        response: { 404: errorResponseSchema, 503: errorResponseSchema },
+        response: {
+          200: verificationResponseSchema,
+          404: errorResponseSchema,
+          503: errorResponseSchema,
+        },
       },
     },
     async (request, reply) => {
