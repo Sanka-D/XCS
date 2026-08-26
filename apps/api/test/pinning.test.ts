@@ -196,6 +196,7 @@ class FakeApiRepository implements ApiRepository {
         active: 0,
         expired: 0,
         deleted: 0,
+        invalidEvidence: 0,
         minimumCreatedLedgerIndex: null,
         maximumLastLedgerIndex: null,
       },

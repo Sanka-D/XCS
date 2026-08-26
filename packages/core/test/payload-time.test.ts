@@ -14,6 +14,12 @@ import {
 const RAW_HELLO_URI = 'ipfs://bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'
 const HTTPS_HELLO_URI =
   'https://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'
+const PAYLOAD_SCHEMA = {
+  xcsVersion: '0.1' as const,
+  name: 'Course payload',
+  description: 'Validates the course identifier in the payload tests.',
+  fields: { programId: { type: 'string' as const } },
+}
 
 describe('payload integrity', () => {
   it('creates canonical HTTPS and raw CIDv1 URIs', () => {
@@ -45,7 +51,7 @@ describe('payload integrity', () => {
         issuer,
         subject,
         schemaUid,
-        schema: { programId: { type: 'string' } },
+        schema: PAYLOAD_SCHEMA,
       }).claims,
     ).toEqual({ programId: 'course-1' })
     const pretty = JSON.stringify(JSON.parse(content), null, 2)
@@ -54,7 +60,7 @@ describe('payload integrity', () => {
         issuer,
         subject,
         schemaUid,
-        schema: { programId: { type: 'string' } },
+        schema: PAYLOAD_SCHEMA,
       }),
     ).toThrowError(expect.objectContaining({ code: 'PAYLOAD_INVALID' }))
     expect(() =>
@@ -62,9 +68,37 @@ describe('payload integrity', () => {
         issuer,
         subject,
         schemaUid,
-        schema: { programId: { type: 'string' } },
+        schema: PAYLOAD_SCHEMA,
       }),
     ).toThrowError(expect.objectContaining({ code: 'PAYLOAD_INVALID' }))
+  })
+
+  it('fails closed when callers provide an unresolved inherited definition', () => {
+    const issuer = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+    const subject = 'rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn'
+    const schemaUid = 'ab'.repeat(32)
+    const content = canonicalize({
+      xcsVersion: '0.1',
+      issuer,
+      subject,
+      schema: schemaUid,
+      claims: { local: 'present' },
+    })
+
+    expect(() =>
+      parseCredentialPayload(content, {
+        issuer,
+        subject,
+        schemaUid,
+        schema: {
+          xcsVersion: '0.1',
+          name: 'Unresolved child',
+          description: 'Requires a parent catalog before claims can be checked.',
+          extends: 'cd'.repeat(32),
+          fields: { local: { type: 'string' } },
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'SCHEMA_PARENT_NOT_FOUND' }))
   })
 })
 

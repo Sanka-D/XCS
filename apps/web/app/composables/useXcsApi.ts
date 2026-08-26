@@ -6,6 +6,7 @@ import {
   exactSchemaRegistrationPath,
 } from '../utils/transactions'
 import type { InternalSsrRateLimitContext } from '../utils/internalSsrRateLimit'
+import { parseSigningReadiness, type SigningReadiness } from '../utils/signingReadiness'
 
 export interface ApiSchemaSummary {
   uid: string
@@ -289,6 +290,25 @@ export function useXcsApi() {
     })
   }
 
+  async function getNetworkReadiness(network?: string): Promise<SigningReadiness> {
+    const profileId = await resolveNetworkId(network)
+    let response: unknown
+    try {
+      response = await apiFetch<unknown>(
+        `/v1/networks/${encodeURIComponent(profileId)}/readiness`,
+        {
+          baseURL,
+          cache: 'no-store',
+          retry: 0,
+          timeout: 5_000,
+        },
+      )
+    } catch {
+      throw new Error('INDEXER_SIGNING_READINESS_UNAVAILABLE')
+    }
+    return parseSigningReadiness(response, profileId)
+  }
+
   async function search(query: string, limit = 20, network?: string) {
     const profileId = await resolveNetworkId(network)
     return apiFetch<{ items: ApiSearchResult[]; hasMore: boolean }>(
@@ -404,6 +424,7 @@ export function useXcsApi() {
     getSchema,
     getStats,
     getNetworkStatus,
+    getNetworkReadiness,
     search,
     getSchemaActivity,
     getCredentialGeneration,

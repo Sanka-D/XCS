@@ -23,27 +23,39 @@ type conformanceHandler string
 const (
 	canonicalizationHandler  conformanceHandler = "canonicalization"
 	schemaValidationHandler  conformanceHandler = "schema-validation"
+	schemaResolutionHandler  conformanceHandler = "schema-resolution"
+	rippleTimeHandler        conformanceHandler = "ripple-time"
+	lifecycleStateHandler    conformanceHandler = "lifecycle-state"
 	schemaUIDHandler         conformanceHandler = "schema-uid"
 	claimsHandler            conformanceHandler = "claims"
 	payloadIntegrityHandler  conformanceHandler = "payload-integrity"
+	payloadRetrievalHandler  conformanceHandler = "payload-retrieval"
 	payloadValidationHandler conformanceHandler = "payload-validation"
 )
 
 var conformanceHandlerFiles = map[conformanceHandler]string{
 	canonicalizationHandler:  "canonicalization.json",
 	schemaValidationHandler:  "schema-validation.json",
+	schemaResolutionHandler:  "schema-resolution.json",
+	rippleTimeHandler:        "ripple-time.json",
+	lifecycleStateHandler:    "lifecycle-state.json",
 	schemaUIDHandler:         "schema-uid.json",
 	claimsHandler:            "claims.json",
 	payloadIntegrityHandler:  "payload-integrity.json",
+	payloadRetrievalHandler:  "payload-retrieval.json",
 	payloadValidationHandler: "payload-validation.json",
 }
 
 var conformanceHandlers = []conformanceHandler{
 	canonicalizationHandler,
 	schemaValidationHandler,
+	schemaResolutionHandler,
+	rippleTimeHandler,
+	lifecycleStateHandler,
 	schemaUIDHandler,
 	claimsHandler,
 	payloadIntegrityHandler,
+	payloadRetrievalHandler,
 	payloadValidationHandler,
 }
 

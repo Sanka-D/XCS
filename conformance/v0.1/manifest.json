@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "protocolVersion": "0.1",
-  "revision": 5,
+  "revision": 9,
   "files": [
     {
       "file": "canonicalization.json",
@@ -10,6 +10,18 @@
     {
       "file": "schema-validation.json",
       "handler": "schema-validation"
+    },
+    {
+      "file": "schema-resolution.json",
+      "handler": "schema-resolution"
+    },
+    {
+      "file": "ripple-time.json",
+      "handler": "ripple-time"
+    },
+    {
+      "file": "lifecycle-state.json",
+      "handler": "lifecycle-state"
     },
     {
       "file": "schema-uid.json",
@@ -22,6 +34,10 @@
     {
       "file": "payload-integrity.json",
       "handler": "payload-integrity"
+    },
+    {
+      "file": "payload-retrieval.json",
+      "handler": "payload-retrieval"
     },
     {
       "file": "payload-validation.json",

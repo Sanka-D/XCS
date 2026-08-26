@@ -5,7 +5,7 @@ function assertPairedSurrogates(value: string): void {
     const code = value.charCodeAt(index)
     if (code >= 0xd800 && code <= 0xdbff) {
       const low = value.charCodeAt(index + 1)
-      if (low < 0xdc00 || low > 0xdfff) {
+      if (index + 1 >= value.length || low < 0xdc00 || low > 0xdfff) {
         fail('UTF8_INVALID', 'String contains an unpaired high surrogate', '$', { offset: index })
       }
       index += 1

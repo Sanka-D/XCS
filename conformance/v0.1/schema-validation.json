@@ -62,6 +62,33 @@
       "valid": false,
       "errorCode": "SCHEMA_INVALID",
       "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":null}"
+    },
+    {
+      "id": "schema.reject-duplicate-decoded-key",
+      "name": "classifies duplicate decoded JSON keys as JSON_DUPLICATE_KEY",
+      "valid": false,
+      "errorCode": "JSON_DUPLICATE_KEY",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"\\u006eame\":\"Duplicate\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}}}"
+    },
+    {
+      "id": "schema.reject-unpaired-surrogate",
+      "name": "classifies an unpaired JSON surrogate as JSON_INVALID_UNICODE",
+      "valid": false,
+      "errorCode": "JSON_INVALID_UNICODE",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Unsafe\\ud800\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}}}"
+    },
+    {
+      "id": "schema.accept-depth-sixteen",
+      "name": "accepts sixteen descriptor levels",
+      "valid": true,
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Depth boundary\",\"description\":\"Exercises the descriptor nesting limit.\",\"fields\":{\"value\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}}}}}}}}}}}}}}"
+    },
+    {
+      "id": "schema.reject-depth-seventeen",
+      "name": "rejects seventeen descriptor levels",
+      "valid": false,
+      "errorCode": "SCHEMA_DEPTH_EXCEEDED",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Depth boundary\",\"description\":\"Exercises the descriptor nesting limit.\",\"fields\":{\"value\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}}}}}}}}}}}}}}}"
     }
   ]
 }

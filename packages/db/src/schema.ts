@@ -76,9 +76,11 @@ export const ledgerCheckpoints = pgTable(
     }),
     uniqueIndex('ledger_checkpoints_profile_hash_uq').on(table.profileId, table.ledgerHash),
     check('ledger_checkpoints_index', sql`${table.ledgerIndex} >= 0`),
+    check('ledger_checkpoints_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
     check('ledger_checkpoints_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
     check('ledger_checkpoints_parent', sql`${table.parentHash} ~ ${HASH_PATTERN}`),
     check('ledger_checkpoints_close_time', sql`${table.closeTime} >= 0`),
+    check('ledger_checkpoints_close_time_uint32', sql`${table.closeTime} BETWEEN 0 AND 4294967295`),
     check('ledger_checkpoints_tx_count', sql`${table.transactionCount} >= 0`),
     check(
       'ledger_checkpoints_transaction_root',
@@ -204,6 +206,7 @@ export const schemaEvents = pgTable(
     index('schema_events_publisher_idx').on(table.profileId, table.publisher),
     check('schema_events_tx_hash', sql`${table.transactionHash} ~ ${HASH_PATTERN}`),
     check('schema_events_ledger_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
+    check('schema_events_ledger_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
     check('schema_events_tx_index', sql`${table.transactionIndex} >= 0`),
     check('schema_events_status', sql`${table.status} IN ('accepted', 'rejected')`),
     check(
@@ -280,6 +283,8 @@ export const schemas = pgTable(
       'schemas_registration_tx_hash',
       sql`${table.registrationTransactionHash} ~ ${HASH_PATTERN}`,
     ),
+    check('schemas_ledger_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
+    check('schemas_transaction_index', sql`${table.transactionIndex} >= 0`),
   ],
 )
 
@@ -337,6 +342,31 @@ export const credentialGenerations = pgTable(
     check(
       'credential_generations_expiration',
       sql`${table.expiration} IS NULL OR ${table.expiration} >= 0`,
+    ),
+    check(
+      'credential_generations_expiration_uint32',
+      sql`${table.expiration} IS NULL OR ${table.expiration} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_created_ledger_uint32',
+      sql`${table.createdLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_created_transaction_index',
+      sql`${table.createdTransactionIndex} >= 0`,
+    ),
+    check(
+      'credential_generations_last_ledger_uint32',
+      sql`${table.lastLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_deleted_ledger_uint32',
+      sql`${table.deletedLedgerIndex} IS NULL OR ${table.deletedLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_ledger_order',
+      sql`${table.lastLedgerIndex} >= ${table.createdLedgerIndex}
+          AND (${table.deletedLedgerIndex} IS NULL OR ${table.deletedLedgerIndex} = ${table.lastLedgerIndex})`,
     ),
     check(
       'credential_generations_deletion',
@@ -407,6 +437,17 @@ export const credentialEvents = pgTable(
     check('credential_events_object', sql`${table.ledgerObjectId} ~ ${HASH_PATTERN}`),
     check('credential_events_ledger_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
     check('credential_events_schema', sql`${table.schemaUid} ~ ${HASH_PATTERN}`),
+    check('credential_events_generation_id', sql`${table.generationId} IS NOT NULL`),
+    check('credential_events_node_index', sql`${table.nodeIndex} >= 0`),
+    check(
+      'credential_events_ledger_index_uint32',
+      sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check('credential_events_transaction_index', sql`${table.transactionIndex} >= 0`),
+    check(
+      'credential_events_expiration_uint32',
+      sql`${table.expiration} IS NULL OR ${table.expiration} BETWEEN 0 AND 4294967295`,
+    ),
     check('credential_events_type', sql`${table.eventType} IN ('created', 'accepted', 'deleted')`),
     check(
       'credential_events_delete_shape',

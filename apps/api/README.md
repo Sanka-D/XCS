@@ -25,6 +25,45 @@ addresses and rate-limits by the direct peer. Wildcards and named proxy presets 
 Catch-all IPv4 or IPv6 `/0` ranges are also rejected; keep every allowed range as narrow as the
 actual ingress network.
 
+## Deployment probes
+
+`GET /health/live` and its compatibility alias `GET /health` report only that the API process can
+serve requests. `GET /health/ready` additionally checks PostgreSQL plus every configured network's
+live writer lease, dual-source agreement, checkpoint root and freshness. Use liveness to decide
+whether to restart the container; use readiness to decide whether the deployment may receive
+authoritative traffic. A catching-up or halted indexer must make readiness return `503` without
+restarting an otherwise healthy API process.
+
+All three probes return `Cache-Control: no-store` and are intentionally outside the public request
+rate-limit budget so monitoring cannot make its own next check fail. Restrict direct probe access to
+the load balancer and monitoring network at the ingress; this is especially important for
+`/health/ready`, which performs database reads. The Compose healthcheck uses `/health/live`, and the
+web service waits for that container health signal before starting.
+
+## Operational metrics
+
+Set `XCS_METRICS_ENABLED=true` and a dedicated `XCS_METRICS_TOKEN` to expose
+`GET /internal/metrics`. The token must contain 32–256 URL-safe characters, must differ from
+`XCS_INTERNAL_API_TOKEN`, and is presented as `Authorization: Bearer <token>`. The route is absent
+when disabled, hidden from OpenAPI, non-cacheable, and outside public request budgets. Restrict it
+to the monitoring network at the ingress even though the token is mandatory.
+
+The versioned JSON snapshot reports each enabled profile's source tips, ledger lag, current
+checkpoint hash/age, active continuity halt, and accepted/rejected schema-registration totals. It
+also reports cluster client-connection count, configured PostgreSQL connection ceiling, logical
+database size, process-local rate-limit totals, and server-side payload-resolution outcomes. It
+never stores an IP, client key, URI, issuer, subject, payload, or error message. If PostgreSQL is
+unavailable, the route deliberately remains `200`, marks the database unavailable, and preserves
+the process counters; `/health/ready` remains the deployment availability signal. The stable
+`database.errorCode` distinguishes `DATABASE_UNAVAILABLE` from `METRICS_EVIDENCE_INVALID`; the
+latter means PostgreSQL answered but its projection evidence could not be represented safely.
+
+The response's `coverage` object is part of the honesty boundary. Continuity covers only the
+currently durable halt, payload counters cover only the optional server resolver, and browser-local
+XRPL submission outcomes are not visible to the API. `logicalSizeBytes` is not physical free disk,
+and cluster connection count is not postgres.js pool saturation. Those missing signals require
+separate infrastructure exporters or a privacy-reviewed design rather than invented API metrics.
+
 ## Discovery boundary
 
 All valid permissionless schemas and aggregate network statistics are public. Schema visibility is
@@ -59,7 +98,21 @@ the schema list for paginated browsing. All routes above validate the same live 
 projection evidence as existing authoritative reads and return `503` rather than serve stale or
 inconsistent data. They return ledger metadata only and never fetch or return payload claims.
 
-Deploy these routes after applying the additive, index-only
+## Signing readiness
+
+`GET /v1/networks/:network/readiness` is the profile-bound authorization for starting a wallet
+signing side effect. A `200 ready` response contains the authoritative checkpoint after validating
+the live writer lease, dual-source quorum, checkpoint root and freshness. Invalid profile input
+returns `400`, a missing profile returns `404`, exhausted request budget returns `429`, unavailable
+authority returns `503`, and an unexpected server failure returns `500`.
+
+Every outcome carries `Cache-Control: private, no-store`; the browser also requests `no-store`.
+Ingresses and CDNs must preserve that response header and must never cache or synthesize readiness
+responses. `/v1/networks/:network/status` remains diagnostic and may return `200` while the indexer
+is starting, catching up, halted or no longer authoritative. `/health/ready` is a deployment-wide
+load-balancer probe and is not a substitute for the per-profile decision.
+
+Deploy the discovery routes after applying the additive, index-only
 `packages/db/drizzle/0002_discovery_indexes.sql` migration. Existing binaries remain compatible with
 the added indexes; the rollout and populated-database lock considerations are documented in the
 [deployment runbook](../../docs/runbooks/deployment.md#migration-0002-discovery-indexes).
@@ -81,6 +134,29 @@ validate or pin a payload against a partial schema projection. Exact-schema, sch
 verification, and pinning reads load every claimed ancestor and its accepted registration event in
 the same repeatable-read snapshot. The API recomputes every schema UID and every inherited field set
 before trusting or exposing the stored projection.
+
+## Payload verification outcomes
+
+`POST /v1/verify` reports payload state independently as `valid`, `unavailable`, `tampered`,
+`invalid`, or `not_checked`. A non-conforming native URI is `invalid`; DNS, timeout, transport,
+redirect, and non-success HTTP failures are `unavailable`; more than 1 MiB of actually received
+bytes is `invalid`; a digest mismatch is `tampered`; and digest-matching bytes still have to pass
+UTF-8, strict JSON, JCS, envelope linkage, and resolved-claim validation before becoming `valid`.
+Low-level network errors and payload contents are never copied into the report.
+
+The resolver uses one five-second deadline across HTTPS DNS lookup, redirects, response headers and
+body reading. It reads at most 1 MiB plus the byte needed to prove a size violation, preserves DNS
+pinning and rejects private answers or unsafe redirects. `Content-Length` and `Content-Type` are not
+used as normative evidence: either can be missing or inaccurate, while the received bytes and
+on-ledger SHA-256 binding are authoritative. Issuers should still serve the JSON media type for
+browser interoperability.
+
+When the request supplies a parsed `payload` JSON value instead of `resolvePayload: true`, the API
+recanonicalizes that value, then applies the same integrity-first classification and structural
+validation as the retrieval path. This path cannot prove the caller's pre-parse byte order or detect
+duplicate keys already discarded by an upstream JSON parser; use retrieval of the exact
+issuer-hosted bytes when byte-level JCS evidence is required. Server-side retrieval remains disabled
+by default and in the Commons-hosted beta configuration.
 
 Demo pinning additionally requires a live indexer writer lease and a fresh, matching dual-source
 checkpoint. Freshness is evaluated with PostgreSQL time, and every schema-ancestor ledger must fall

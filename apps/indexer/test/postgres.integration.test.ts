@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
   acquireIndexerLease,
+  credentialEvents,
+  credentialGenerations,
   createDatabaseClient,
   ledgerCheckpoints,
+  migrateDatabase,
+  PROJECTION_INTEGRITY_MIGRATION_ERROR,
   provisionRuntimeDatabaseRoles,
   releaseIndexerLease,
   renewIndexerLease,
@@ -13,20 +20,30 @@ import {
   updateIndexerStatus,
   type DatabaseClient,
 } from '@xcs-protocol/db'
-import type { JsonValue } from '@xcs-protocol/core'
-import { and, eq } from 'drizzle-orm'
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
+import {
+  canonicalize,
+  computeSchemaUid,
+  createIpfsRawPayloadUri,
+  encodeUtf8,
+  type JsonValue,
+} from '@xcs-protocol/core'
+import { and, asc, eq } from 'drizzle-orm'
+import { migrate as drizzleMigrate } from 'drizzle-orm/postgres-js/migrator'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { captureLedgerFixtureBundle, ledgerFixtureBundleDigest } from '../src/fixture-bundle.js'
+import { prepareFixtureReplay } from '../src/fixture-replay.js'
 import { computeProjectionDigest } from '../src/projection-digest.js'
 import { QuorumLedgerSource } from '../src/quorum-ledger-source.js'
 import { PostgresIndexerRepository } from '../src/repository.js'
 import { IndexerWorker } from '../src/worker.js'
 import type {
+  CredentialDeletionCause,
   IndexerStatusUpdate,
   LedgerProjection,
   LedgerSource,
   LedgerSourcePreflight,
+  LedgerTransaction,
   NetworkProfile,
   SchemaDefinition,
   ValidatedLedger,
@@ -51,11 +68,41 @@ const CREDENTIAL_TRANSACTION_HASH = 'e'.repeat(64)
 const CREDENTIAL_OBJECT_ID = 'f'.repeat(64)
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv'
+const FIXTURE_SUBJECTS = [
+  SUBJECT,
+  'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+  'rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn',
+  'rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY',
+  'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+  'rrrrrrrrrrrrrrrrrrrrBZbvji',
+] as const
+const PROJECTION_INTEGRITY_CONSTRAINT_NAMES = [
+  'ledger_checkpoints_index_uint32',
+  'ledger_checkpoints_close_time_uint32',
+  'schema_events_ledger_index_uint32',
+  'schemas_ledger_index_uint32',
+  'schemas_transaction_index',
+  'credential_generations_expiration_uint32',
+  'credential_generations_created_ledger_uint32',
+  'credential_generations_created_transaction_index',
+  'credential_generations_last_ledger_uint32',
+  'credential_generations_deleted_ledger_uint32',
+  'credential_generations_ledger_order',
+  'credential_events_generation_id',
+  'credential_events_node_index',
+  'credential_events_ledger_index_uint32',
+  'credential_events_transaction_index',
+  'credential_events_expiration_uint32',
+] as const
 
 interface TemporaryDatabase {
   name: string
   url: string
   client: DatabaseClient
+}
+
+interface TemporaryDatabaseOptions {
+  applyMigrations?: boolean
 }
 
 let adminClient: DatabaseClient | undefined
@@ -165,7 +212,10 @@ async function expectPermissionDenied(operation: Promise<unknown>): Promise<void
   await expect(operation).rejects.toMatchObject({ code: '42501' })
 }
 
-async function createTemporaryDatabase(baseUrl: string): Promise<TemporaryDatabase> {
+async function createTemporaryDatabase(
+  baseUrl: string,
+  options: TemporaryDatabaseOptions = {},
+): Promise<TemporaryDatabase> {
   if (adminClient === undefined) throw new Error('PostgreSQL admin client is not initialized')
 
   const name = temporaryDatabaseName()
@@ -176,8 +226,56 @@ async function createTemporaryDatabase(baseUrl: string): Promise<TemporaryDataba
   const client = createDatabaseClient(url)
   const database = { name, url, client }
   temporaryDatabases.push(database)
-  await migrate(client.db, { migrationsFolder: MIGRATIONS_FOLDER })
+  if (options.applyMigrations !== false) {
+    await migrateDatabase(client, { migrationsFolder: MIGRATIONS_FOLDER })
+  }
   return database
+}
+
+async function createLegacyMigrationsFolder(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'xcs-migrations-0002-'))
+  const metadataFolder = join(folder, 'meta')
+  await mkdir(metadataFolder)
+  await Promise.all(
+    ['0000_initial.sql', '0001_durable_indexer_status.sql', '0002_discovery_indexes.sql'].map(
+      (fileName) => copyFile(join(MIGRATIONS_FOLDER, fileName), join(folder, fileName)),
+    ),
+  )
+
+  const journalPath = join(MIGRATIONS_FOLDER, 'meta', '_journal.json')
+  const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
+    entries: Array<{ idx: number }>
+  }
+  journal.entries = journal.entries.filter((entry) => entry.idx <= 2)
+  await writeFile(join(metadataFolder, '_journal.json'), `${JSON.stringify(journal, null, 2)}\n`)
+  return folder
+}
+
+async function projectionIntegrityConstraintStates(database: TemporaryDatabase) {
+  const rows = await database.client.sql<
+    Array<{ constraintName: string; tableName: string; validated: boolean }>
+  >`
+    SELECT
+      constraint_object.conname AS "constraintName",
+      relation.relname AS "tableName",
+      constraint_object.convalidated AS validated
+    FROM pg_constraint constraint_object
+    JOIN pg_class relation ON relation.oid = constraint_object.conrelid
+    JOIN pg_namespace namespace_object ON namespace_object.oid = relation.relnamespace
+    WHERE namespace_object.nspname = 'public'
+      AND constraint_object.contype = 'c'
+      AND relation.relname IN (
+        'ledger_checkpoints',
+        'schema_events',
+        'schemas',
+        'credential_generations',
+        'credential_events'
+      )
+  `
+  const expectedNames = new Set<string>(PROJECTION_INTEGRITY_CONSTRAINT_NAMES)
+  return rows
+    .filter((row) => expectedNames.has(row.constraintName))
+    .sort((left, right) => left.constraintName.localeCompare(right.constraintName))
 }
 
 async function restartConnection(database: TemporaryDatabase): Promise<DatabaseClient> {
@@ -301,6 +399,277 @@ const schemaMemoJson = {
     participatedAt: { type: 'string' },
   },
 } as unknown as JsonValue
+
+interface FixtureDeletionCase {
+  cause: CredentialDeletionCause
+  subject: (typeof FIXTURE_SUBJECTS)[number]
+  transactionType: string
+  actor: string
+  accepted: boolean
+  expiration?: number
+  result: string
+}
+
+const FIXTURE_DELETION_CASES: readonly FixtureDeletionCase[] = [
+  {
+    cause: 'issuer_revoked',
+    subject: FIXTURE_SUBJECTS[0],
+    transactionType: 'CredentialDelete',
+    actor: ISSUER,
+    accepted: false,
+    result: 'tesSUCCESS',
+  },
+  {
+    cause: 'subject_rejected',
+    subject: FIXTURE_SUBJECTS[1],
+    transactionType: 'CredentialDelete',
+    actor: FIXTURE_SUBJECTS[1],
+    accepted: false,
+    result: 'tesSUCCESS',
+  },
+  {
+    cause: 'subject_removed',
+    subject: FIXTURE_SUBJECTS[2],
+    transactionType: 'CredentialDelete',
+    actor: FIXTURE_SUBJECTS[2],
+    accepted: true,
+    result: 'tesSUCCESS',
+  },
+  {
+    cause: 'expired_cleanup',
+    subject: FIXTURE_SUBJECTS[3],
+    transactionType: 'CredentialAccept',
+    actor: FIXTURE_SUBJECTS[3],
+    accepted: false,
+    expiration: 1_102,
+    result: 'tecEXPIRED',
+  },
+  {
+    cause: 'account_deleted',
+    subject: FIXTURE_SUBJECTS[4],
+    transactionType: 'AccountDelete',
+    actor: FIXTURE_SUBJECTS[4],
+    accepted: false,
+    result: 'tesSUCCESS',
+  },
+  {
+    cause: 'self_deleted',
+    subject: FIXTURE_SUBJECTS[5],
+    transactionType: 'Payment',
+    actor: ISSUER,
+    accepted: false,
+    expiration: 1_104,
+    result: 'tesSUCCESS',
+  },
+]
+
+const FIXTURE_URI_HEX = Buffer.from(createIpfsRawPayloadUri('complete-projection-fixture'), 'utf8')
+  .toString('hex')
+  .toUpperCase()
+
+function fixtureHex(value: number): string {
+  return value.toString(16).padStart(64, '0')
+}
+
+function fixtureObjectId(index: number): string {
+  return fixtureHex(0x500 + index)
+}
+
+function fixtureCredentialFields(
+  fixtureCase: FixtureDeletionCase,
+  schemaUid: string,
+  accepted = fixtureCase.accepted,
+): Record<string, unknown> {
+  return {
+    Issuer: ISSUER,
+    Subject: fixtureCase.subject,
+    CredentialType: schemaUid.toUpperCase(),
+    URI: FIXTURE_URI_HEX,
+    Flags: accepted ? 0x0001_0000 : 0,
+    ...(fixtureCase.expiration === undefined ? {} : { Expiration: fixtureCase.expiration }),
+  }
+}
+
+function fixtureTransaction(input: {
+  hash: string
+  transactionIndex: number
+  transaction: Record<string, unknown>
+  affectedNodes?: unknown[]
+  result?: string
+}): LedgerTransaction {
+  return {
+    hash: input.hash,
+    transactionIndex: input.transactionIndex,
+    transaction: input.transaction,
+    metadata: {
+      TransactionIndex: input.transactionIndex,
+      TransactionResult: input.result ?? 'tesSUCCESS',
+      AffectedNodes: input.affectedNodes ?? [],
+    },
+  }
+}
+
+function completeProjectionFixture(replayProfile: NetworkProfile): {
+  ledgers: ReadonlyMap<number, ValidatedLedger>
+  schemaUid: string
+} {
+  const registrationText = canonicalize(schemaDefinition as unknown as JsonValue)
+  const schemaUid = computeSchemaUid({
+    networkId: replayProfile.networkId,
+    ledgerHash: replayProfile.activationLedgerHash,
+    ledgerIndex: replayProfile.activationLedgerIndex,
+    transactionIndex: 0,
+    publisher: ISSUER,
+    schema: schemaDefinition,
+  })
+  const registration = fixtureTransaction({
+    hash: fixtureHex(0x400),
+    transactionIndex: 0,
+    transaction: {
+      TransactionType: 'Payment',
+      Account: ISSUER,
+      Destination: replayProfile.registryAddress,
+      Amount: replayProfile.registrationAmountDrops,
+      Memos: [
+        {
+          Memo: {
+            MemoType: Buffer.from('xcs:schema_register', 'utf8').toString('hex').toUpperCase(),
+            MemoFormat: Buffer.from('application/json', 'utf8').toString('hex').toUpperCase(),
+            MemoData: Buffer.from(registrationText, 'utf8').toString('hex').toUpperCase(),
+          },
+        },
+      ],
+    },
+  })
+  const creations = FIXTURE_DELETION_CASES.map((fixtureCase, index) =>
+    fixtureTransaction({
+      hash: fixtureHex(0x600 + index),
+      transactionIndex: index,
+      transaction: { TransactionType: 'CredentialCreate', Account: ISSUER },
+      affectedNodes: [
+        {
+          CreatedNode: {
+            LedgerEntryType: 'Credential',
+            LedgerIndex: fixtureObjectId(index),
+            NewFields: fixtureCredentialFields(fixtureCase, schemaUid, false),
+          },
+        },
+      ],
+    }),
+  )
+  const acceptedCaseIndex = FIXTURE_DELETION_CASES.findIndex(
+    (fixtureCase) => fixtureCase.cause === 'subject_removed',
+  )
+  const acceptedCase = FIXTURE_DELETION_CASES[acceptedCaseIndex]
+  if (acceptedCase === undefined) throw new Error('Accepted fixture case is missing')
+  const acceptance = fixtureTransaction({
+    hash: fixtureHex(0x700),
+    transactionIndex: 0,
+    transaction: { TransactionType: 'CredentialAccept', Account: acceptedCase.subject },
+    affectedNodes: [
+      {
+        ModifiedNode: {
+          LedgerEntryType: 'Credential',
+          LedgerIndex: fixtureObjectId(acceptedCaseIndex),
+          PreviousFields: { Flags: 0 },
+          FinalFields: fixtureCredentialFields(acceptedCase, schemaUid, true),
+        },
+      },
+    ],
+  })
+  const deletions = FIXTURE_DELETION_CASES.map((fixtureCase, index) =>
+    fixtureTransaction({
+      hash: fixtureHex(0x800 + index),
+      transactionIndex: index,
+      transaction: {
+        TransactionType: fixtureCase.transactionType,
+        Account: fixtureCase.actor,
+      },
+      affectedNodes: [
+        {
+          DeletedNode: {
+            LedgerEntryType: 'Credential',
+            LedgerIndex: fixtureObjectId(index),
+            FinalFields: fixtureCredentialFields(fixtureCase, schemaUid),
+          },
+        },
+      ],
+      result: fixtureCase.result,
+    }),
+  )
+
+  return {
+    schemaUid,
+    ledgers: new Map([
+      [
+        ACTIVATION_LEDGER_INDEX,
+        { ...ledger(ACTIVATION_LEDGER_INDEX), transactions: [registration] },
+      ],
+      [
+        ACTIVATION_LEDGER_INDEX + 1,
+        { ...ledger(ACTIVATION_LEDGER_INDEX + 1), transactions: creations },
+      ],
+      [
+        ACTIVATION_LEDGER_INDEX + 2,
+        { ...ledger(ACTIVATION_LEDGER_INDEX + 2), transactions: [acceptance] },
+      ],
+      [
+        ACTIVATION_LEDGER_INDEX + 3,
+        { ...ledger(ACTIVATION_LEDGER_INDEX + 3), transactions: deletions },
+      ],
+    ]),
+  }
+}
+
+class CompleteProjectionFixtureSource implements LedgerSource {
+  private readonly tip: number
+
+  constructor(
+    private readonly replayProfile: NetworkProfile,
+    private readonly ledgers: ReadonlyMap<number, ValidatedLedger>,
+  ) {
+    this.tip = Math.max(...ledgers.keys())
+  }
+
+  async connect(): Promise<void> {}
+
+  async disconnect(): Promise<void> {}
+
+  async preflight(profileToCheck: NetworkProfile): Promise<LedgerSourcePreflight> {
+    if (
+      canonicalize(profileToCheck as unknown as JsonValue) !==
+      canonicalize(this.replayProfile as unknown as JsonValue)
+    ) {
+      throw new Error('Fixture replay profile mismatch')
+    }
+    return {
+      networkId: this.replayProfile.networkId,
+      completeLedgerRanges: [{ min: this.replayProfile.activationLedgerIndex, max: this.tip }],
+      activationLedger: await this.getLedger(this.replayProfile.activationLedgerIndex),
+      tips: this.tips(),
+    }
+  }
+
+  async assertAmendmentEnabled(): Promise<void> {}
+
+  async getValidatedLedgerIndex(): Promise<number> {
+    return this.tip
+  }
+
+  async getValidatedLedgerTips() {
+    return this.tips()
+  }
+
+  async getLedger(ledgerIndex: number): Promise<ValidatedLedger> {
+    const value = this.ledgers.get(ledgerIndex)
+    if (value === undefined) throw new Error(`Missing fixture ledger ${ledgerIndex}`)
+    return structuredClone(value)
+  }
+
+  private tips() {
+    return { primary: this.tip, secondary: this.tip, effective: this.tip }
+  }
+}
 
 function replayProjections(): [LedgerProjection, LedgerProjection] {
   const registrationLedger = ledger(ACTIVATION_LEDGER_INDEX, [SCHEMA_TRANSACTION_HASH])
@@ -443,11 +812,11 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await closeAndDropTemporaryDatabases()
   }, 60_000)
 
-  it('applies migrations 0000 through 0002 to a fresh database and is migration-idempotent', async () => {
+  it('applies migrations 0000 through 0003 to a fresh database and is migration-idempotent', async () => {
     const database = temporaryDatabases[0]
     if (database === undefined) throw new Error('First temporary database was not created')
 
-    await migrate(database.client.db, { migrationsFolder: MIGRATIONS_FOLDER })
+    await migrateDatabase(database.client, { migrationsFolder: MIGRATIONS_FOLDER })
 
     const [migrationCount] = await database.client.sql<{ count: number }[]>`
       SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
@@ -474,7 +843,9 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       ORDER BY indexname
     `
 
-    expect(migrationCount?.count).toBe(3)
+    const integrityConstraints = await projectionIntegrityConstraintStates(database)
+
+    expect(migrationCount?.count).toBe(4)
     expect(columns.map((row) => row.columnName)).toContain('transaction_root')
     expect(statusTable?.exists).toBe(true)
     expect(discoveryIndexes.map((row) => row.indexName)).toEqual([
@@ -483,7 +854,159 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       'schemas_order_idx',
       'schemas_search_idx',
     ])
+    expect(integrityConstraints.map((constraint) => constraint.constraintName)).toEqual(
+      [...PROJECTION_INTEGRITY_CONSTRAINT_NAMES].sort(),
+    )
+    expect(integrityConstraints.every((constraint) => constraint.validated)).toBe(true)
   })
+
+  it('fails closed on invalid 0002 history and resumes 0003 validation after replay repair', async () => {
+    if (adminDatabaseUrl === undefined) throw new Error('PostgreSQL admin URL is not initialized')
+    const database = await createTemporaryDatabase(adminDatabaseUrl, { applyMigrations: false })
+    const legacyMigrationsFolder = await createLegacyMigrationsFolder()
+    try {
+      await drizzleMigrate(database.client.db, { migrationsFolder: legacyMigrationsFolder })
+    } finally {
+      await rm(legacyMigrationsFolder, { recursive: true, force: true })
+    }
+
+    const upgradeProfile = profile('projection-integrity-upgrade')
+    await replayProjection(database, upgradeProfile)
+    await database.client.sql`
+      UPDATE credential_generations
+      SET expiration = 4294967296,
+          last_ledger_index = created_ledger_index - 1
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+
+    await expect(
+      migrateDatabase(database.client, { migrationsFolder: MIGRATIONS_FOLDER }),
+    ).rejects.toMatchObject({
+      code: PROJECTION_INTEGRITY_MIGRATION_ERROR,
+      databaseCode: '23514',
+      tableName: 'credential_generations',
+    })
+
+    const [failedMigrationCount] = await database.client.sql<{ count: number }[]>`
+      SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+    `
+    const failedConstraintStates = await projectionIntegrityConstraintStates(database)
+    const generationConstraintStates = failedConstraintStates.filter(
+      (constraint) => constraint.tableName === 'credential_generations',
+    )
+    const eventConstraintStates = failedConstraintStates.filter(
+      (constraint) => constraint.tableName === 'credential_events',
+    )
+    expect(failedMigrationCount?.count).toBe(4)
+    expect(generationConstraintStates).toHaveLength(6)
+    expect(generationConstraintStates.every((constraint) => !constraint.validated)).toBe(true)
+    expect(eventConstraintStates).toHaveLength(5)
+    expect(eventConstraintStates.every((constraint) => !constraint.validated)).toBe(true)
+
+    await expect(
+      database.client.sql`
+        UPDATE credential_events
+        SET node_index = -1
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'credential_events_node_index',
+    })
+
+    // Production recovery rebuilds ledger-derived rows. Updating this isolated
+    // fixture is the minimal equivalent needed to exercise the resumable runner.
+    await database.client.sql`
+      UPDATE credential_generations
+      SET expiration = NULL,
+          last_ledger_index = created_ledger_index
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+    await migrateDatabase(database.client, { migrationsFolder: MIGRATIONS_FOLDER })
+
+    const recoveredConstraintStates = await projectionIntegrityConstraintStates(database)
+    expect(recoveredConstraintStates).toHaveLength(PROJECTION_INTEGRITY_CONSTRAINT_NAMES.length)
+    expect(recoveredConstraintStates.every((constraint) => constraint.validated)).toBe(true)
+
+    await expect(
+      database.client.sql`
+        UPDATE ledger_checkpoints
+        SET close_time = 4294967296
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'ledger_checkpoints_close_time_uint32',
+    })
+    await expect(
+      database.client.sql`
+        UPDATE schema_events
+        SET ledger_index = 4294967296
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'schema_events_ledger_index_uint32',
+    })
+    await expect(
+      database.client.sql`
+        UPDATE schemas
+        SET transaction_index = -1
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({ code: '23514', constraint_name: 'schemas_transaction_index' })
+    await expect(
+      database.client.sql`
+        UPDATE credential_generations
+        SET expiration = 4294967296
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'credential_generations_expiration_uint32',
+    })
+    await expect(
+      database.client.sql`
+        UPDATE credential_generations
+        SET last_ledger_index = created_ledger_index - 1
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'credential_generations_ledger_order',
+    })
+    await expect(
+      database.client.sql`
+        UPDATE credential_events
+        SET generation_id = NULL
+        WHERE profile_id = ${upgradeProfile.profileId}
+      `,
+    ).rejects.toMatchObject({
+      code: '23514',
+      constraint_name: 'credential_events_generation_id',
+    })
+
+    await database.client.sql`
+      UPDATE ledger_checkpoints
+      SET close_time = 4294967295
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+    await database.client.sql`
+      UPDATE credential_generations
+      SET expiration = 4294967295
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+    await database.client.sql`
+      UPDATE ledger_checkpoints
+      SET close_time = 0
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+    await database.client.sql`
+      UPDATE credential_generations
+      SET expiration = NULL
+      WHERE profile_id = ${upgradeProfile.profileId}
+    `
+  }, 30_000)
 
   it('provisions idempotent least-privilege indexer and API roles', async () => {
     const database = temporaryDatabases[0]
@@ -671,6 +1194,37 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         WHERE profile_id = ${permissionsProfile.profileId}
       `
       expect(projectionRead?.count).toBe(1)
+
+      const [operationalRead] = await apiClient.sql<
+        Array<{
+          usedConnections: string
+          maxConnections: string
+          logicalSizeBytes: string
+        }>
+      >`
+        SELECT
+          (
+            SELECT COUNT(*)::text
+            FROM pg_stat_activity
+            WHERE backend_type = 'client backend'
+          ) AS "usedConnections",
+          current_setting('max_connections') AS "maxConnections",
+          pg_database_size(current_database())::text AS "logicalSizeBytes"
+      `
+      expect(Number(operationalRead?.usedConnections)).toBeGreaterThan(0)
+      expect(Number(operationalRead?.maxConnections)).toBeGreaterThan(0)
+      expect(Number(operationalRead?.logicalSizeBytes)).toBeGreaterThan(0)
+
+      await expect(
+        indexerClient.sql`
+          UPDATE ledger_checkpoints
+          SET close_time = 4294967296
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+      ).rejects.toMatchObject({
+        code: '23514',
+        constraint_name: 'ledger_checkpoints_close_time_uint32',
+      })
 
       await expectPermissionDenied(
         apiClient.sql`
@@ -1000,6 +1554,152 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       credentialGenerations: 1,
     })
   })
+
+  it('replays one integrity-bound ledger bundle into identical complete projections', async () => {
+    const firstDatabase = temporaryDatabases[0]
+    const secondDatabase = temporaryDatabases[1]
+    if (firstDatabase === undefined || secondDatabase === undefined) {
+      throw new Error('Two temporary databases are required for fixture replay comparison')
+    }
+    const replayProfile: NetworkProfile = {
+      ...profile('complete-fixture-replay'),
+      requiredAmendment: 'B'.repeat(64),
+    }
+    const fixture = completeProjectionFixture(replayProfile)
+    const profileFileBytes = encodeUtf8(canonicalize(replayProfile as unknown as JsonValue))
+    const temporaryRoot = await mkdtemp(join(tmpdir(), 'xcs-complete-replay-'))
+    const bundleDirectory = join(temporaryRoot, 'bundle')
+
+    try {
+      const manifest = await captureLedgerFixtureBundle({
+        outputDirectory: bundleDirectory,
+        profile: replayProfile,
+        profileFileBytes,
+        source: new CompleteProjectionFixtureSource(replayProfile, fixture.ledgers),
+        toLedgerIndex: ACTIVATION_LEDGER_INDEX + 3,
+        primaryOperator: 'XRPL Commons fixture',
+        secondaryOperator: 'Independent fixture operator',
+        capturedAt: new Date('2026-08-26T00:00:00.000Z'),
+      })
+      const bundleDigest = ledgerFixtureBundleDigest(manifest)
+      const [firstReplay, secondReplay] = await Promise.all([
+        prepareFixtureReplay({
+          directory: bundleDirectory,
+          bundleDigest,
+          profile: replayProfile,
+          profileFileBytes,
+        }),
+        prepareFixtureReplay({
+          directory: bundleDirectory,
+          bundleDigest,
+          profile: replayProfile,
+          profileFileBytes,
+        }),
+      ])
+      expect(secondReplay.replayTarget).toEqual(firstReplay.replayTarget)
+      expect(firstReplay.replayTarget).toEqual({
+        ledgerIndex: ACTIVATION_LEDGER_INDEX + 3,
+        ledgerHash: ledgerHash(ACTIVATION_LEDGER_INDEX + 3),
+      })
+
+      const replayInto = async (
+        database: TemporaryDatabase,
+        prepared: typeof firstReplay,
+        writerId: string,
+      ) => {
+        let caughtUpLedger: number | undefined
+        const worker = new IndexerWorker({
+          profile: replayProfile,
+          source: prepared.source,
+          repository: new PostgresIndexerRepository(database.client.db),
+          replayTarget: prepared.replayTarget,
+          pollIntervalMs: 250,
+          leaseDurationMs: 10_000,
+          batchSize: 4,
+          writerId,
+          observer: {
+            caughtUp: (ledgerIndex) => {
+              caughtUpLedger = ledgerIndex
+            },
+          },
+        })
+        await worker.start(new AbortController().signal)
+        expect(caughtUpLedger).toBe(prepared.replayTarget.ledgerIndex)
+        return computeProjectionDigest(database.client.db, replayProfile.profileId)
+      }
+
+      const [firstDigest, secondDigest] = await Promise.all([
+        replayInto(firstDatabase, firstReplay, 'complete-fixture-a'),
+        replayInto(secondDatabase, secondReplay, 'complete-fixture-b'),
+      ])
+      const [deletionEvents, generationRows, storedSchemaRows] = await Promise.all([
+        firstDatabase.client.db
+          .select({
+            transactionIndex: credentialEvents.transactionIndex,
+            deletionCause: credentialEvents.deletionCause,
+            accepted: credentialEvents.accepted,
+          })
+          .from(credentialEvents)
+          .where(
+            and(
+              eq(credentialEvents.profileId, replayProfile.profileId),
+              eq(credentialEvents.eventType, 'deleted'),
+            ),
+          )
+          .orderBy(asc(credentialEvents.transactionIndex)),
+        firstDatabase.client.db
+          .select({
+            subject: credentialGenerations.subject,
+            expiration: credentialGenerations.expiration,
+            accepted: credentialGenerations.accepted,
+            createdTransactionIndex: credentialGenerations.createdTransactionIndex,
+            lastLedgerIndex: credentialGenerations.lastLedgerIndex,
+            deletedLedgerIndex: credentialGenerations.deletedLedgerIndex,
+            deletionCause: credentialGenerations.deletionCause,
+          })
+          .from(credentialGenerations)
+          .where(eq(credentialGenerations.profileId, replayProfile.profileId))
+          .orderBy(asc(credentialGenerations.createdTransactionIndex)),
+        firstDatabase.client.db
+          .select({ schemaUid: schemas.schemaUid })
+          .from(schemas)
+          .where(eq(schemas.profileId, replayProfile.profileId)),
+      ])
+
+      expect(secondDigest).toEqual(firstDigest)
+      expect(firstDigest.digestHex).toBe(
+        '19b2a150af329cad035f5bc934b3db772237fa52bcc76a411439001ab6b1bed0',
+      )
+      expect(firstDigest.rowCounts).toEqual({
+        ledgerCheckpoints: 4,
+        schemaEvents: 1,
+        schemas: 1,
+        credentialEvents: 13,
+        credentialGenerations: 6,
+      })
+      expect(storedSchemaRows).toEqual([{ schemaUid: fixture.schemaUid }])
+      expect(deletionEvents).toEqual(
+        FIXTURE_DELETION_CASES.map((fixtureCase, transactionIndex) => ({
+          transactionIndex,
+          deletionCause: fixtureCase.cause,
+          accepted: fixtureCase.accepted,
+        })),
+      )
+      expect(generationRows).toEqual(
+        FIXTURE_DELETION_CASES.map((fixtureCase, createdTransactionIndex) => ({
+          subject: fixtureCase.subject,
+          expiration: fixtureCase.expiration ?? null,
+          accepted: fixtureCase.accepted,
+          createdTransactionIndex,
+          lastLedgerIndex: ACTIVATION_LEDGER_INDEX + 3,
+          deletedLedgerIndex: ACTIVATION_LEDGER_INDEX + 3,
+          deletionCause: fixtureCase.cause,
+        })),
+      )
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true })
+    }
+  }, 60_000)
 
   it('stops two quorum-backed replays at the same bound despite different source tips', async () => {
     const firstDatabase = temporaryDatabases[0]

@@ -13,11 +13,49 @@
       }
     }
   },
+  "inheritedContext": {
+    "issuer": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+    "subject": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+    "schemaUid": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "schema": {
+      "xcsVersion": "0.1",
+      "name": "Inherited payload child",
+      "description": "Adds a local claim to an inherited payload schema.",
+      "extends": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "fields": {
+        "child": { "type": "string" }
+      }
+    },
+    "resolution": {
+      "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+      "networkId": 1,
+      "ledgerIndex": 200,
+      "transactionIndex": 1
+    },
+    "catalog": [
+      {
+        "uid": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+        "definition": {
+          "xcsVersion": "0.1",
+          "name": "Inherited payload parent",
+          "description": "Declares the required inherited payload claim.",
+          "fields": {
+            "parent": { "type": "string" }
+          }
+        },
+        "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+        "networkId": 1,
+        "ledgerIndex": 200,
+        "transactionIndex": 0
+      }
+    ]
+  },
   "cases": [
     {
       "id": "payload-validation.accept-canonical-payload",
       "name": "accepts a canonical payload with object claims",
       "valid": true,
+      "expectedClaims": { "programId": "race-2026" },
       "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
     },
     {
@@ -40,6 +78,115 @@
       "valid": false,
       "errorCode": "CLAIMS_INVALID",
       "inputJson": "{\"claims\":[],\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-issuer-mismatch",
+      "name": "rejects an envelope issuer different from the native issuer",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-subject-mismatch",
+      "name": "rejects an envelope subject different from the native subject",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-schema-mismatch",
+      "name": "rejects an envelope schema different from CredentialType",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-non-canonical-json",
+      "name": "rejects semantically valid payload bytes that are not canonical JCS",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{ \"xcsVersion\": \"0.1\", \"issuer\": \"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\", \"subject\": \"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\", \"schema\": \"abababababababababababababababababababababababababababababababab\", \"claims\": { \"programId\": \"race-2026\" } }"
+    },
+    {
+      "id": "payload-validation.reject-unknown-envelope-property",
+      "name": "rejects an unknown top-level payload property",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"future\":true,\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-duplicate-envelope-key",
+      "name": "rejects a duplicate decoded envelope key",
+      "valid": false,
+      "errorCode": "JSON_DUPLICATE_KEY",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-malformed-json",
+      "name": "classifies malformed payload JSON",
+      "valid": false,
+      "errorCode": "JSON_INVALID",
+      "inputJson": "{"
+    },
+    {
+      "id": "payload-validation.reject-wrong-version",
+      "name": "rejects a payload from another protocol version",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.2\"}"
+    },
+    {
+      "id": "payload-validation.reject-uppercase-schema",
+      "name": "rejects a non-lowercase schema UID in the envelope",
+      "valid": false,
+      "errorCode": "PAYLOAD_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-unknown-claim",
+      "name": "rejects a claim not declared by the schema",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "inputJson": "{\"claims\":{\"extra\":true,\"programId\":\"race-2026\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-missing-required-claim",
+      "name": "rejects a payload missing a required schema claim",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "inputJson": "{\"claims\":{},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-wrong-claim-type",
+      "name": "rejects a claim whose JSON type differs from its descriptor",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "inputJson": "{\"claims\":{\"programId\":true},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"abababababababababababababababababababababababababababababababab\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.accept-resolved-inherited-claims",
+      "name": "validates both inherited and local claims against a resolved schema",
+      "context": "inherited",
+      "valid": true,
+      "expectedClaims": { "child": "local", "parent": "inherited" },
+      "inputJson": "{\"claims\":{\"child\":\"local\",\"parent\":\"inherited\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-missing-inherited-claim",
+      "name": "rejects a payload that omits a required inherited claim",
+      "context": "inherited",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "inputJson": "{\"claims\":{\"child\":\"local\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
+    },
+    {
+      "id": "payload-validation.reject-unresolved-inherited-parent",
+      "name": "fails closed when the inherited parent catalog is incomplete",
+      "context": "inherited",
+      "catalog": [],
+      "valid": false,
+      "errorCode": "SCHEMA_PARENT_NOT_FOUND",
+      "inputJson": "{\"claims\":{\"child\":\"local\",\"parent\":\"inherited\"},\"issuer\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"schema\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"subject\":\"rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn\",\"xcsVersion\":\"0.1\"}"
     }
   ]
 }

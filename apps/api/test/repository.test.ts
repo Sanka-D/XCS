@@ -7,6 +7,8 @@ import {
   type SchemaRow,
   type XcsDatabase,
 } from '@xcs-protocol/db'
+import type { SQL } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { describe, expect, it, vi } from 'vitest'
 
 import { PostgresApiRepository } from '../src/repository.js'
@@ -156,5 +158,46 @@ describe('PostgresApiRepository authority reads', () => {
     expect(from).toHaveBeenCalledWith(credentialGenerations)
     expect(where).toHaveBeenCalledOnce()
     expect(limit).toHaveBeenCalledWith(1)
+  })
+
+  it('counts out-of-range and contradictory lifecycle evidence in discovery stats', async () => {
+    const selections: Array<Record<string, unknown>> = []
+    const select = vi.fn((selection: Record<string, unknown>) => {
+      selections.push(selection)
+      const aggregate =
+        selections.length === 1
+          ? {
+              total: 0,
+              publishers: 0,
+              minimumLedgerIndex: null,
+              maximumLedgerIndex: null,
+            }
+          : {
+              total: 0,
+              pending: 0,
+              active: 0,
+              expired: 0,
+              deleted: 0,
+              invalidEvidence: 0,
+              minimumCreatedLedgerIndex: null,
+              maximumLastLedgerIndex: null,
+            }
+      return { from: () => ({ where: async () => [aggregate] }) }
+    })
+    const repository = new PostgresApiRepository({ select } as unknown as XcsDatabase)
+
+    await repository.getDiscoveryStats({ profileId: 'testnet', checkpointCloseTime: 1_000 })
+
+    const invalidEvidence = selections[1]?.invalidEvidence as SQL | undefined
+    expect(invalidEvidence).toBeDefined()
+    const query = new PgDialect().sqlToQuery(invalidEvidence!).sql
+    expect(query).toContain('"last_ledger_index" < "credential_generations"."created_ledger_index"')
+    expect(query).toContain('"credential_generations"."created_transaction_index" < 0')
+    expect(query).toContain(
+      '"deleted_ledger_index" < "credential_generations"."created_ledger_index"',
+    )
+    expect(query).toContain(
+      '"deleted_ledger_index" <> "credential_generations"."last_ledger_index"',
+    )
   })
 })

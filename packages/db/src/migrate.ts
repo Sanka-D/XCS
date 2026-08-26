@@ -1,6 +1,5 @@
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
-
 import { createDatabaseClient } from './client.js'
+import { migrateDatabase, parseMigrationStatementTimeoutMs } from './migrations.js'
 
 const databaseUrl =
   process.env.XCS_MIGRATOR_DATABASE_URL ?? process.env.XCS_DATABASE_URL ?? process.env.DATABASE_URL
@@ -9,9 +8,15 @@ if (databaseUrl === undefined) {
 }
 
 const client = createDatabaseClient(databaseUrl)
+const validationStatementTimeoutMs = parseMigrationStatementTimeoutMs(
+  process.env.XCS_MIGRATION_STATEMENT_TIMEOUT_MS,
+)
 
 try {
-  await migrate(client.db, { migrationsFolder: './drizzle' })
+  await migrateDatabase(client, {
+    migrationsFolder: './drizzle',
+    validationStatementTimeoutMs,
+  })
 } finally {
   await client.close()
 }

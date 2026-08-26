@@ -237,7 +237,7 @@ export function createProgram(dependencies: CliDependencies): Command {
           issuer: options.issuer,
           subject: options.subject,
           schemaUid: options.schema.toLowerCase(),
-          schema: schemaDefinition.fields,
+          schema: schemaDefinition,
         },
       )
       const canonical = canonicalize(credentialPayload as JsonValue)
@@ -277,7 +277,7 @@ export function createProgram(dependencies: CliDependencies): Command {
         issuer: options.issuer,
         subject: options.subject,
         schemaUid: options.schema.toLowerCase(),
-        schema: schemaDefinition.fields,
+        schema: schemaDefinition,
       })
       const integrity = verifyPayloadIntegrity(content, options.uri)
       if (integrity.status !== 'valid') {

@@ -115,6 +115,22 @@ func ValidateClaims(claims any, fields map[string]FieldDescriptor) error {
 // locally complete. Inherited schemas require parent resolution, which this
 // offline verifier cannot infer from a child definition alone.
 func ValidateClaimsAgainstSchema(claims any, schema SchemaDefinition) error {
+	return validateClaimsAgainstSchema(claims, schema, nil)
+}
+
+func validateClaimsAgainstSchema(
+	claims any,
+	schema SchemaDefinition,
+	resolutionContext *SchemaResolutionContext,
+) error {
+	if resolutionContext != nil {
+		resolved, err := ResolveSchema(schema, *resolutionContext)
+		if err != nil {
+			return err
+		}
+		return ValidateClaims(claims, resolved.Fields)
+	}
+
 	if err := ValidateSchema(schema); err != nil {
 		return err
 	}

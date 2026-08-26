@@ -11,6 +11,7 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | Threat                                 | Control                                                                                                  |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Ambiguous JSON or hash divergence      | Strict parser, duplicate-key rejection, I-JSON checks, JCS and cross-language vectors                    |
+| Cross-language protocol drift          | Exhaustive manifest; shared schema, payload, Ripple-time and lifecycle vectors; independent Go runner    |
 | Forged payload content                 | URI-bound SHA-256/CID verification plus envelope linkage                                                 |
 | False issuer endorsement               | State, payload and trust reported separately                                                             |
 | Seed/key disclosure                    | No seed API; injected wallet signer; redacted errors and logs                                            |
@@ -20,7 +21,9 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | History gaps or inconsistent providers | Two full-history sources; deep normalized comparison; transaction-root checkpoint; fail-closed status    |
 | Stale/concurrent indexer writer        | PostgreSQL lease epoch, row lock and status/checkpoint update in the same transaction                    |
 | Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard    |
+| Wallet signing against stale state     | Non-cacheable profile readiness before wallet invocation and again before blob persistence/submission    |
 | Duplicate/replayed ingestion           | Unique event keys and transactional, idempotent projections; deterministic replay digest                 |
+| Operational metrics disclosure/abuse   | Disabled by default; dedicated constant-time bearer; no-store; monitoring-ingress restriction            |
 | Moving-tip replay divergence           | Mandatory index/hash target, quorum verification and a fixed inclusive worker bound                      |
 | Account privacy amplification          | Exact shared-coordinate lookup only; no subject feed, account-wide listing or claims search              |
 | Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                    |
@@ -62,6 +65,10 @@ a separate data-flow, retention and access review.
 - A blackholed registry prevents governance capture but cannot enforce anti-spam moderation.
 - Two URLs do not prove independent infrastructure; correlated or colluding providers can still agree
   on false input. Provider ownership is an operational review requirement.
+- Readiness is a point-in-time guard, not an XRPL transaction precondition. The indexer can degrade
+  after the final browser check, so validated ledger and exact indexed business confirmation remain
+  mandatory before the site reports XCS success. The ingress must preserve `private, no-store` and
+  never cache or synthesize readiness responses.
 - The browser pilot discloses the subject's IP and fetch timing to an issuer-controlled HTTPS payload
   host after explicit consent. Hostname filtering cannot fully eliminate DNS rebinding.
 - The alpha has not received an independent security audit and is not approved for PII or Mainnet use.

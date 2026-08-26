@@ -8,9 +8,13 @@ const EXPECTED_PROTOCOL_VERSION = '0.1'
 export const CONFORMANCE_HANDLER_FILES = {
   canonicalization: 'canonicalization.json',
   'schema-validation': 'schema-validation.json',
+  'schema-resolution': 'schema-resolution.json',
+  'ripple-time': 'ripple-time.json',
+  'lifecycle-state': 'lifecycle-state.json',
   'schema-uid': 'schema-uid.json',
   claims: 'claims.json',
   'payload-integrity': 'payload-integrity.json',
+  'payload-retrieval': 'payload-retrieval.json',
   'payload-validation': 'payload-validation.json',
 } as const
 

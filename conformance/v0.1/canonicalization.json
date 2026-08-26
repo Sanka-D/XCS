@@ -18,6 +18,24 @@
       "name": "sorts keys by UTF-16 code units",
       "inputJson": "{\"€\":1,\"a\":2,\"😀\":3,\"ö\":4}",
       "canonical": "{\"a\":2,\"ö\":4,\"€\":1,\"😀\":3}"
+    },
+    {
+      "id": "canonicalization.negative-zero",
+      "name": "normalizes negative zero to zero",
+      "inputJson": "[-0,0,-0.0,-0e10]",
+      "canonical": "[0,0,0,0]"
+    },
+    {
+      "id": "canonicalization.nested-key-order",
+      "name": "sorts every nested object independently",
+      "inputJson": "{\"z\":{\"b\":2,\"a\":1},\"a\":[{\"d\":4,\"c\":3}]}",
+      "canonical": "{\"a\":[{\"c\":3,\"d\":4}],\"z\":{\"a\":1,\"b\":2}}"
+    },
+    {
+      "id": "canonicalization.finite-number-boundaries",
+      "name": "serializes the finite IEEE-754 boundaries",
+      "inputJson": "[-1.7976931348623157e308,1.7976931348623157e308,5e-324]",
+      "canonical": "[-1.7976931348623157e+308,1.7976931348623157e+308,5e-324]"
     }
   ]
 }

@@ -74,8 +74,40 @@ describe('authoritative indexer evidence', () => {
       'INDEXER_EVIDENCE_INVALID',
     ],
     [
+      'primary source tip above uint32',
+      { status: { ...status, primarySourceTip: 4_294_967_296 } },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
+      'secondary source tip above uint32',
+      { status: { ...status, secondarySourceTip: 4_294_967_296 } },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
+      'last agreed ledger index above uint32',
+      {
+        status: {
+          ...status,
+          primarySourceTip: 4_294_967_296,
+          secondarySourceTip: 4_294_967_296,
+          lastAgreedLedgerIndex: 4_294_967_296,
+        },
+      },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
       'missing transaction root',
       { checkpoint: { ...checkpoint, transactionRoot: null } },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
+      'checkpoint ledger index above uint32',
+      { checkpoint: { ...checkpoint, ledgerIndex: 4_294_967_296 } },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
+      'close time above uint32',
+      { checkpoint: { ...checkpoint, closeTime: 4_294_967_296 } },
       'INDEXER_EVIDENCE_INVALID',
     ],
     [
@@ -106,5 +138,11 @@ describe('authoritative indexer evidence', () => {
     expect(value).not.toHaveProperty('writerId')
     expect(value).not.toHaveProperty('writerEpoch')
     expect(value).not.toHaveProperty('leaseExpiresAt')
+  })
+
+  it('refuses to serialize out-of-range diagnostic ledger evidence', () => {
+    expect(() => publicIndexerStatus({ ...status, primarySourceTip: 4_294_967_296 })).toThrow(
+      'Stored indexer status has an invalid ledger-evidence shape',
+    )
   })
 })

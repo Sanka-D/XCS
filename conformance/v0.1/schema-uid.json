@@ -96,6 +96,86 @@
           "fields": { "bib": { "type": "uint" } }
         }
       }
+    },
+    {
+      "id": "schema-uid.uint32-boundaries-and-normalization",
+      "name": "normalizes uppercase ledger hash and optional false at uint32 boundaries",
+      "valid": true,
+      "input": {
+        "networkId": 0,
+        "ledgerHash": "CDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCDCD",
+        "ledgerIndex": 4294967295,
+        "transactionIndex": 4294967295,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Boundary schema",
+          "description": "Exercises uint32 limits and normalization.",
+          "fields": {
+            "required": { "type": "string", "optional": false },
+            "optional": { "type": "bool", "optional": true }
+          }
+        }
+      },
+      "canonicalPreimage": "{\"ledgerHash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"ledgerIndex\":4294967295,\"networkId\":0,\"publisher\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"purpose\":\"xcs.schema.uid\",\"schema\":{\"description\":\"Exercises uint32 limits and normalization.\",\"fields\":{\"optional\":{\"optional\":true,\"type\":\"bool\"},\"required\":{\"type\":\"string\"}},\"name\":\"Boundary schema\",\"xcsVersion\":\"0.1\"},\"transactionIndex\":4294967295,\"version\":\"0.1\"}",
+      "uid": "fc0157ffced2f556eb108e73f6c320632ae6e56eedfbe62752b96e068619faba"
+    },
+    {
+      "id": "schema-uid.reject-network-id-overflow",
+      "name": "rejects networkId above uint32",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": {
+        "networkId": 4294967296,
+        "ledgerHash": "abababababababababababababababababababababababababababababababab",
+        "ledgerIndex": 100,
+        "transactionIndex": 2,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
+    },
+    {
+      "id": "schema-uid.reject-negative-ledger-index",
+      "name": "rejects a negative ledgerIndex",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": {
+        "networkId": 1,
+        "ledgerHash": "abababababababababababababababababababababababababababababababab",
+        "ledgerIndex": -1,
+        "transactionIndex": 2,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
+    },
+    {
+      "id": "schema-uid.reject-fractional-transaction-index",
+      "name": "rejects a fractional transactionIndex",
+      "valid": false,
+      "errorCode": "UID_INPUT_INVALID",
+      "input": {
+        "networkId": 1,
+        "ledgerHash": "abababababababababababababababababababababababababababababababab",
+        "ledgerIndex": 100,
+        "transactionIndex": 1.5,
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "schema": {
+          "xcsVersion": "0.1",
+          "name": "Race participation",
+          "description": "Confirms participation in a race.",
+          "fields": { "bib": { "type": "uint" } }
+        }
+      }
     }
   ]
 }

@@ -48,6 +48,9 @@ integrators.
   but operators must also keep opaque credentials out of the URL path and query string.
 - PostgreSQL, Kubo, Docker, and real Testnet services are separate integration tiers; pure unit tests
   do not prove those deployments.
+- CI replays one deterministic synthetic ledger bundle through two PostgreSQL projections and pins
+  their complete digest, but this proves the harness rather than Testnet history. A reviewed public
+  Testnet capture from two demonstrably independent providers remains release evidence.
 - Discovery migration `0002_discovery_indexes.sql` contains regular, additive `CREATE INDEX`
   statements. It preserves old application compatibility and needs no row backfill, but index
   creation can block writes on an already populated deployment and should run before the new routes
@@ -55,6 +58,18 @@ integrators.
 - PostgreSQL is a self-hostable, rebuildable reference projection, not a Commons authority and not a
   protocol requirement for third-party implementations. A MongoDB adapter would need to reproduce
   atomic checkpoints, single-writer fencing, snapshots, constraints, and deterministic replay.
+- Migration `0003_projection_integrity.sql` adds 16 PostgreSQL `CHECK` constraints for native XRPL
+  uint32 bounds, non-negative event coordinates, event generation identity, and generation-ledger
+  ordering. It installs them as `NOT VALID` with a 5-second lock timeout; `db:migrate` then validates
+  each table in a separate post-commit transaction with a configurable statement timeout (30
+  minutes by default). An upgrade can therefore fail because a lock is busy, a scan exceeds its
+  configured maintenance window, or historical projection data is invalid. In the latter case
+  `0003` remains applied and its checks protect new writes, but the affected table is not marked
+  validated until operators rebuild or replay the ledger-derived projection and rerun `db:migrate`.
+- Signed PostgreSQL `integer` coordinate columns, including transaction and node indexes, still
+  represent at most `2147483647`, not the full abstract uint32 range. `0003` enforces their
+  non-negative boundary but does not widen them; widening populated columns requires a separate,
+  more locking migration.
 - XRPL Commons intends to host the shared Testnet indexer, read API and PostgreSQL projection. That
   projection remains a reconstructible cache and contains neither issuer/subject signing keys nor
   credential claims.
@@ -62,6 +77,16 @@ integrators.
   replicas require a shared edge/store limiter. Nuxt SSR derives one opaque budget per safely
   resolved network address; reverse-proxy CIDRs must be narrow and explicitly configured, while
   catch-all `/0` trust ranges are rejected.
+- Operational counters are also process-local and reset whenever an API replica restarts. The
+  protected JSON snapshot exposes only the current durable indexer halt, not continuity incident
+  history. It cannot observe browser-local XRPL submission outcomes, postgres.js pool queues, or
+  physical PostgreSQL volume capacity; its database byte count is logical size only. Multi-replica
+  aggregation, infrastructure exporters, retention, alerts and any client telemetry require later
+  operational/privacy design.
+- Browser signing readiness is a short, profile-bound point-in-time proof. It prevents the site from
+  opening a wallet or submitting a returned blob against known stale or inconsistent state, but it
+  cannot atomically bind a later XRPL transaction to that checkpoint. Exact post-validation indexer
+  confirmation remains mandatory.
 - Nitro emits the initial browser CSP in report-only mode. It records violations in local browser
   tooling but blocks nothing, so it is not yet an XSS or signed-blob exfiltration control. Enforcement
   remains gated on the real Crossmark and GemWallet matrix; the ingress must preserve one policy
@@ -101,6 +126,10 @@ short HTTPS base URL until the upstream validator is fixed.
 The Commons Testnet beta uses issuer-hosted HTTPS payloads. The issuer must retain the exact
 canonical bytes, serve a JSON media type, enable CORS for the site, and keep the integrity-bound URL
 available. Commons does not store or index payload claims.
+
+The JSON media type is an interoperability recommendation for browsers, not normative verification
+evidence. The optional server resolver classifies the observed, integrity-bound bytes even when
+`Content-Type` is absent or different and does not trust `Content-Length` to prove the 1 MiB limit.
 
 The optional pinning API is disabled by default, limited to configured Testnet profiles, and not a
 private storage service or part of the Commons-hosted beta product. Its PII field-name filter is only

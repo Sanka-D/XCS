@@ -40,6 +40,7 @@ export interface DiscoveryStats {
     active: number
     expired: number
     deleted: number
+    invalidEvidence: number
     minimumCreatedLedgerIndex: number | null
     maximumLastLedgerIndex: number | null
   }

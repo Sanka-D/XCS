@@ -2,6 +2,12 @@ import type { IndexerStatusRow, IndexerStatusState, LedgerCheckpointRow } from '
 
 import { assertFreshLedgerCheckpoint, IndexerUnavailableError } from './ledger-freshness.js'
 
+const MAX_UINT32 = 4_294_967_295
+
+function isUint32(value: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value <= MAX_UINT32
+}
+
 export interface PublicIndexerStatus {
   profileId: string
   state: IndexerStatusState
@@ -20,8 +26,13 @@ export interface PublicIndexerStatus {
 export function publicIndexerStatus(row: IndexerStatusRow): PublicIndexerStatus {
   const hasAgreedIndex = row.lastAgreedLedgerIndex !== null
   const hasAgreedHash = row.lastAgreedLedgerHash !== null
-  if (hasAgreedIndex !== hasAgreedHash) {
-    throw new Error('Stored indexer status has an invalid agreed-ledger shape')
+  if (
+    hasAgreedIndex !== hasAgreedHash ||
+    (row.primarySourceTip !== null && !isUint32(row.primarySourceTip)) ||
+    (row.secondarySourceTip !== null && !isUint32(row.secondarySourceTip)) ||
+    (row.lastAgreedLedgerIndex !== null && !isUint32(row.lastAgreedLedgerIndex))
+  ) {
+    throw new Error('Stored indexer status has an invalid ledger-evidence shape')
   }
   return {
     profileId: row.profileId,
@@ -78,6 +89,9 @@ export function assertIndexerReady(
     status.secondarySourceTip === null ||
     status.lastAgreedLedgerIndex === null ||
     status.lastAgreedLedgerHash === null ||
+    !isUint32(status.primarySourceTip) ||
+    !isUint32(status.secondarySourceTip) ||
+    !isUint32(status.lastAgreedLedgerIndex) ||
     status.lastAgreedLedgerIndex !== Math.min(status.primarySourceTip, status.secondarySourceTip)
   ) {
     throw new IndexerUnavailableError(
@@ -112,7 +126,9 @@ export function assertAuthoritativeLedgerEvidence(input: {
     checkpoint.profileId !== input.expectedProfileId ||
     input.status.lastAgreedLedgerIndex !== checkpoint.ledgerIndex ||
     input.status.lastAgreedLedgerHash !== checkpoint.ledgerHash ||
-    checkpoint.transactionRoot === null
+    checkpoint.transactionRoot === null ||
+    !isUint32(checkpoint.ledgerIndex) ||
+    !isUint32(checkpoint.closeTime)
   ) {
     throw new IndexerUnavailableError(
       'INDEXER_EVIDENCE_INVALID',

@@ -80,4 +80,37 @@ describe('useXcsApi discovery contract', () => {
       baseURL: 'https://api.example',
     })
   })
+
+  it('loads bounded profile readiness and normalizes transport failures', async () => {
+    const readiness = {
+      profileId: PROFILE.profileId,
+      status: 'ready',
+      checkpoint: {
+        ledgerIndex: 123,
+        ledgerHash: 'ab'.repeat(32),
+        closeTime: 838_857_600,
+        transactionRoot: 'cd'.repeat(32),
+      },
+    } as const
+    const fetchMock = vi.fn(async () => readiness)
+    vi.stubGlobal('useRuntimeConfig', () => ({
+      apiBaseUrl: 'http://api.internal',
+      public: { apiBaseUrl: 'https://api.example', profileId: PROFILE.profileId },
+    }))
+    vi.stubGlobal('$fetch', fetchMock)
+
+    const api = useXcsApi()
+    await expect(api.getNetworkReadiness(PROFILE.profileId)).resolves.toEqual(readiness)
+    expect(fetchMock).toHaveBeenLastCalledWith(`/v1/networks/${PROFILE.profileId}/readiness`, {
+      baseURL: 'https://api.example',
+      cache: 'no-store',
+      retry: 0,
+      timeout: 5_000,
+    })
+
+    fetchMock.mockRejectedValueOnce(new Error('503'))
+    await expect(api.getNetworkReadiness(PROFILE.profileId)).rejects.toThrowError(
+      'INDEXER_SIGNING_READINESS_UNAVAILABLE',
+    )
+  })
 })

@@ -115,6 +115,117 @@
       "valid": false,
       "errorCode": "CLAIMS_INVALID",
       "claims": null
+    },
+    {
+      "id": "claims.integer-complementary-boundaries",
+      "name": "accepts uint zero and the maximum signed int",
+      "valid": true,
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "0",
+        "delta": "57896044618658097711785492504343953926634992332820282019728792003956564819967",
+        "data": "AA",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-uint256-overflow",
+      "name": "rejects 2^256 as an unsigned claim",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "115792089237316195423570985008687907853269984665640564039457584007913129639936",
+        "delta": "0",
+        "data": "",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-int256-positive-overflow",
+      "name": "rejects 2^255 as a signed claim",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "57896044618658097711785492504343953926634992332820282019728792003956564819968",
+        "data": "",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-int256-negative-overflow",
+      "name": "rejects the value below -2^255",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "-57896044618658097711785492504343953926634992332820282019728792003956564819969",
+        "data": "",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-non-canonical-base64url-tail",
+      "name": "rejects non-zero unused base64url bits",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "0",
+        "data": "AB",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-padded-base64url",
+      "name": "rejects base64url padding",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "0",
+        "data": "SGVsbG8=",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1" }
+      }
+    },
+    {
+      "id": "claims.reject-nested-additional-claim",
+      "name": "rejects an undeclared property in a nested object",
+      "valid": false,
+      "errorCode": "CLAIMS_INVALID",
+      "claims": {
+        "text": "completed",
+        "flag": true,
+        "count": "1",
+        "delta": "0",
+        "data": "",
+        "account": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "tags": [],
+        "detail": { "code": "course-1", "extra": true }
+      }
     }
   ]
 }

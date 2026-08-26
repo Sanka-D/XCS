@@ -13,14 +13,25 @@ import {
   type VerificationReport,
 } from '@xcs-protocol/core'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
-import { timingSafeEqual } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
 
+import {
+  assertCredentialGenerationEvidence,
+  CREDENTIAL_DELETION_CAUSES,
+  type CredentialGenerationEvidenceExpectation,
+} from './credential-generation-evidence.js'
+import { credentialGenerationState } from './credential-state.js'
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS, IndexerUnavailableError } from './ledger-freshness.js'
 import {
   assertAuthoritativeLedgerEvidence,
   assertIndexerReady,
   publicIndexerStatus,
 } from './indexer-status.js'
+import {
+  OperationalMetricsCollector,
+  rateLimitMetric,
+  type OperationalMetricsRepository,
+} from './operational-metrics.js'
 import {
   decodeSchemaCursor,
   decodeSchemaRegistrationCursor,
@@ -55,25 +66,30 @@ const DISCOVERY_SEARCH_MAX_LIMIT = 50
 const DISCOVERY_PAGE_DEFAULT_LIMIT = 20
 const DISCOVERY_PAGE_MAX_LIMIT = 100
 const MAX_NODE_INDEX = 2_147_483_647
+const MAX_UINT32 = 4_294_967_295
 const SEARCH_QUERY_CONTENT = /[\p{L}\p{N}]/u
 const SEARCH_QUERY_CONTROL = /[\u0000-\u001f\u007f]/u
 const INTERNAL_SSR_TOKEN = /^[A-Za-z0-9_-]{32,256}$/u
 const INTERNAL_SSR_CLIENT_KEY = /^[0-9a-f]{64}$/u
 const INTERNAL_SSR_TOKEN_HEADER = 'x-xcs-internal-token'
 const INTERNAL_SSR_CLIENT_KEY_HEADER = 'x-xcs-client-key'
-const CREDENTIAL_DELETION_CAUSES = new Set([
-  'issuer_revoked',
-  'subject_rejected',
-  'subject_removed',
-  'expired_cleanup',
-  'account_deleted',
-  'self_deleted',
-])
+const INTERNAL_METRICS_TOKEN_HEADER = 'authorization'
+const INTERNAL_METRICS_TOKEN = /^[A-Za-z0-9_-]{32,256}$/u
 const errorResponseSchema = {
   type: 'object',
   additionalProperties: false,
   required: ['error', 'message'],
   properties: {
+    error: { type: 'string' },
+    message: { type: 'string' },
+  },
+} as const
+const rateLimitResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['statusCode', 'error', 'message'],
+  properties: {
+    statusCode: { type: 'integer', const: 429 },
     error: { type: 'string' },
     message: { type: 'string' },
   },
@@ -230,8 +246,19 @@ const publicCheckpointSchema = {
   properties: {
     ledgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
     ledgerHash: { type: 'string', pattern: UID_PATTERN },
-    closeTime: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+    closeTime: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
     transactionRoot: { type: 'string', pattern: UID_PATTERN },
+  },
+} as const
+
+const networkReadinessResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['profileId', 'status', 'checkpoint'],
+  properties: {
+    profileId: { type: 'string', pattern: PROFILE_PATTERN },
+    status: { type: 'string', enum: ['ready'] },
+    checkpoint: publicCheckpointSchema,
   },
 } as const
 
@@ -390,7 +417,7 @@ const publicCredentialGenerationSchema = {
     schemaUid: { type: 'string', pattern: UID_PATTERN },
     uriHex: { anyOf: [{ type: 'string', pattern: '^(?:[0-9A-Fa-f]{2})*$' }, { type: 'null' }] },
     expiration: {
-      anyOf: [{ type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }, { type: 'null' }],
+      anyOf: [{ type: 'integer', minimum: 0, maximum: 4_294_967_295 }, { type: 'null' }],
     },
     accepted: { type: 'boolean' },
     createdLedgerIndex: { type: 'integer', minimum: 0, maximum: 4_294_967_295 },
@@ -649,21 +676,6 @@ function publicNetwork(row: Awaited<ReturnType<ApiRepository['listNetworks']>>[n
   }
 }
 
-function credentialState(
-  generation: NonNullable<Awaited<ReturnType<ApiRepository['getCredential']>>>,
-  closeTime: number | undefined,
-): VerificationReport['onChain'] {
-  if (generation.deletedLedgerIndex !== null) return 'deleted'
-  if (
-    generation.expiration !== null &&
-    closeTime !== undefined &&
-    generation.expiration <= closeTime
-  ) {
-    return 'expired'
-  }
-  return generation.accepted ? 'active' : 'pending'
-}
-
 function invalidIndexerEvidence(
   message = 'The indexed evidence is incomplete or inconsistent.',
 ): never {
@@ -686,48 +698,9 @@ function publicSchemaSummary(row: NonNullable<Awaited<ReturnType<ApiRepository['
 
 function publicCredentialGeneration(
   generation: NonNullable<Awaited<ReturnType<ApiRepository['getCredential']>>>,
-  expected: {
-    readonly profileId: string
-    readonly activationLedgerIndex: number
-    readonly checkpointLedgerIndex: number
-  },
+  expected: CredentialGenerationEvidenceExpectation,
 ) {
-  const validDeletionShape =
-    (generation.deletedLedgerIndex === null && generation.deletionCause === null) ||
-    (generation.deletedLedgerIndex !== null &&
-      typeof generation.deletionCause === 'string' &&
-      CREDENTIAL_DELETION_CAUSES.has(generation.deletionCause) &&
-      generation.deletedLedgerIndex === generation.lastLedgerIndex)
-  if (
-    generation.profileId !== expected.profileId ||
-    !LOWERCASE_HASH.test(generation.generationId) ||
-    !LOWERCASE_HASH.test(generation.ledgerObjectId) ||
-    !LOWERCASE_HASH.test(generation.schemaUid) ||
-    !isClassicAddress(generation.issuer) ||
-    !isClassicAddress(generation.subject) ||
-    (generation.uriHex !== null && !HEX_BYTES.test(generation.uriHex)) ||
-    (generation.expiration !== null &&
-      (!Number.isSafeInteger(generation.expiration) || generation.expiration < 0)) ||
-    typeof generation.accepted !== 'boolean' ||
-    !Number.isSafeInteger(generation.createdLedgerIndex) ||
-    generation.createdLedgerIndex < expected.activationLedgerIndex ||
-    generation.createdLedgerIndex > expected.checkpointLedgerIndex ||
-    !Number.isSafeInteger(generation.createdTransactionIndex) ||
-    generation.createdTransactionIndex < 0 ||
-    generation.createdTransactionIndex > MAX_NODE_INDEX ||
-    !Number.isSafeInteger(generation.lastLedgerIndex) ||
-    generation.lastLedgerIndex < generation.createdLedgerIndex ||
-    generation.lastLedgerIndex > expected.checkpointLedgerIndex ||
-    (generation.deletedLedgerIndex !== null &&
-      (!Number.isSafeInteger(generation.deletedLedgerIndex) ||
-        generation.deletedLedgerIndex < generation.createdLedgerIndex ||
-        generation.deletedLedgerIndex > expected.checkpointLedgerIndex)) ||
-    !validDeletionShape
-  ) {
-    return invalidIndexerEvidence(
-      'The indexed credential generation is incomplete or inconsistent.',
-    )
-  }
+  assertCredentialGenerationEvidence(generation, expected)
   return {
     generationId: generation.generationId,
     ledgerObjectId: generation.ledgerObjectId,
@@ -763,6 +736,7 @@ function publicDiscoveryStats(stats: Awaited<ReturnType<ApiRepository['getDiscov
     stats.credentialGenerations.active,
     stats.credentialGenerations.expired,
     stats.credentialGenerations.deleted,
+    stats.credentialGenerations.invalidEvidence,
   ]
   const validCounts = [...schemaCounts, ...credentialCounts].every(
     (value) => Number.isSafeInteger(value) && value >= 0,
@@ -784,6 +758,7 @@ function publicDiscoveryStats(stats: Awaited<ReturnType<ApiRepository['getDiscov
   if (
     !validCounts ||
     stats.schemas.publishers > stats.schemas.total ||
+    stats.credentialGenerations.invalidEvidence !== 0 ||
     stats.credentialGenerations.pending +
       stats.credentialGenerations.active +
       stats.credentialGenerations.expired +
@@ -854,12 +829,15 @@ function publicCredentialEvent(
     row.nodeIndex <= MAX_NODE_INDEX &&
     Number.isSafeInteger(row.ledgerIndex) &&
     row.ledgerIndex >= expected.activationLedgerIndex &&
-    row.ledgerIndex <= 4_294_967_295 &&
+    row.ledgerIndex <= MAX_UINT32 &&
     Number.isSafeInteger(row.transactionIndex) &&
     row.transactionIndex >= 0 &&
     row.transactionIndex <= MAX_NODE_INDEX &&
     (row.uriHex === null || HEX_BYTES.test(row.uriHex)) &&
-    (row.expiration === null || (Number.isSafeInteger(row.expiration) && row.expiration >= 0)) &&
+    (row.expiration === null ||
+      (Number.isSafeInteger(row.expiration) &&
+        row.expiration >= 0 &&
+        row.expiration <= MAX_UINT32)) &&
     (row.eventType === 'created' || row.eventType === 'accepted' || row.eventType === 'deleted') &&
     (row.eventType === 'deleted'
       ? typeof row.deletionCause === 'string' && CREDENTIAL_DELETION_CAUSES.has(row.deletionCause)
@@ -1097,6 +1075,11 @@ export interface CreateApiOptions {
   trustedProxyCidrs?: string[]
   verifyRateLimit?: number
   pinningService?: DemoPinningService
+  operationalMetrics?: {
+    token: string
+    repository: OperationalMetricsRepository
+    observePayloadResolver?: boolean
+  }
   readinessMaxLedgerAgeSeconds?: number
   now?: () => Date
 }
@@ -1107,12 +1090,11 @@ function singleHeader(request: FastifyRequest, name: string): string | undefined
 }
 
 function tokensMatch(expected: string, presented: string | undefined): boolean {
-  if (presented === undefined) return false
-  const expectedBytes = Buffer.from(expected, 'utf8')
-  const presentedBytes = Buffer.from(presented, 'utf8')
-  return (
-    expectedBytes.length === presentedBytes.length && timingSafeEqual(expectedBytes, presentedBytes)
-  )
+  const expectedDigest = createHash('sha256').update(expected, 'utf8').digest()
+  const presentedDigest = createHash('sha256')
+    .update(presented ?? '', 'utf8')
+    .digest()
+  return presented !== undefined && timingSafeEqual(expectedDigest, presentedDigest)
 }
 
 function rateLimitKey(request: FastifyRequest, internalSsrToken: string | undefined): string {
@@ -1143,6 +1125,26 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
   ) {
     throw new Error('internalSsrToken must be 32 to 256 URL-safe random characters')
   }
+  if (
+    options.operationalMetrics !== undefined &&
+    !INTERNAL_METRICS_TOKEN.test(options.operationalMetrics.token)
+  ) {
+    throw new Error('operationalMetrics.token must be 32 to 256 URL-safe random characters')
+  }
+  if (
+    options.operationalMetrics !== undefined &&
+    options.internalSsrToken === options.operationalMetrics.token
+  ) {
+    throw new Error('operationalMetrics.token must be distinct from internalSsrToken')
+  }
+  const metricsCollector =
+    options.operationalMetrics === undefined
+      ? undefined
+      : new OperationalMetricsCollector(options.now)
+  const payloadResolver =
+    metricsCollector !== undefined && options.operationalMetrics?.observePayloadResolver === true
+      ? metricsCollector.observePayloadResolver(options.resolver)
+      : options.resolver
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: DEFAULT_BODY_LIMIT_BYTES,
@@ -1171,6 +1173,13 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     timeWindow: '1 minute',
     keyGenerator: (request) => rateLimitKey(request, options.internalSsrToken),
   })
+  if (metricsCollector !== undefined) {
+    app.addHook('onResponse', async (request, reply) => {
+      if (reply.statusCode === 429) {
+        metricsCollector.recordRateLimited(rateLimitMetric(request.routeOptions.url))
+      }
+    })
+  }
 
   await app.register(swagger, {
     openapi: {
@@ -1273,9 +1282,16 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     })
   })
 
-  app.get('/health/live', async () => ({ status: 'ok' }))
-  app.get('/health', async () => ({ status: 'ok' }))
-  app.get('/health/ready', async (_request, reply) => {
+  app.get('/health/live', { config: { rateLimit: false } }, async (_request, reply) => {
+    reply.header('cache-control', 'no-store')
+    return { status: 'ok' }
+  })
+  app.get('/health', { config: { rateLimit: false } }, async (_request, reply) => {
+    reply.header('cache-control', 'no-store')
+    return { status: 'ok' }
+  })
+  app.get('/health/ready', { config: { rateLimit: false } }, async (_request, reply) => {
+    reply.header('cache-control', 'no-store')
     try {
       await options.repository.ping()
       return await options.repository.withConsistentSnapshot(async (repository) => {
@@ -1309,6 +1325,30 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     }
   })
 
+  if (options.operationalMetrics !== undefined && metricsCollector !== undefined) {
+    app.get(
+      '/internal/metrics',
+      {
+        config: { rateLimit: false },
+        schema: { hide: true },
+      },
+      async (request, reply) => {
+        reply.header('cache-control', 'no-store')
+        const authorization = singleHeader(request, INTERNAL_METRICS_TOKEN_HEADER)
+        const presentedToken = authorization?.startsWith('Bearer ')
+          ? authorization.slice('Bearer '.length)
+          : undefined
+        if (!tokensMatch(options.operationalMetrics!.token, presentedToken)) {
+          return reply
+            .code(401)
+            .header('www-authenticate', 'Bearer realm="xcs-metrics"')
+            .send({ error: 'UNAUTHORIZED', message: 'Authentication required' })
+        }
+        return metricsCollector.collect(options.operationalMetrics!.repository)
+      },
+    )
+  }
+
   app.get('/v1/networks', async () => ({
     items: (await options.repository.listNetworks()).map(publicNetwork),
   }))
@@ -1337,6 +1377,54 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
       }
       return publicIndexerStatus(status)
     },
+  )
+
+  app.get<{ Params: { network: string } }>(
+    '/v1/networks/:network/readiness',
+    {
+      schema: {
+        params: networkParamsSchema,
+        response: {
+          200: networkReadinessResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          429: rateLimitResponseSchema,
+          503: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+      onSend: async (_request, reply, payload) => {
+        reply.header('cache-control', 'private, no-store')
+        return payload
+      },
+    },
+    async (request, reply) =>
+      options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const checkpoint = await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          [],
+          network.activationLedgerIndex,
+        )
+        return {
+          profileId: request.params.network,
+          status: 'ready' as const,
+          checkpoint: {
+            ledgerIndex: checkpoint.ledgerIndex,
+            ledgerHash: checkpoint.ledgerHash,
+            closeTime: checkpoint.closeTime,
+            transactionRoot: checkpoint.transactionRoot,
+          },
+        }
+      }),
   )
 
   app.get<{ Params: { network: string } }>(
@@ -1512,6 +1600,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
               profileId: request.params.network,
               activationLedgerIndex: network.activationLedgerIndex,
               checkpointLedgerIndex: checkpoint.ledgerIndex,
+              generationId: normalizedHash,
             })
             publicCredentialTimeline(generationTimeline, generation, network.activationLedgerIndex)
             items.push({
@@ -1520,7 +1609,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
               issuer: publicGeneration.issuer,
               subject: publicGeneration.subject,
               schemaUid: publicGeneration.schemaUid,
-              state: credentialState(generation, checkpoint.closeTime),
+              state: credentialGenerationState(generation, checkpoint.closeTime),
               createdLedgerIndex: publicGeneration.createdLedgerIndex,
               lastLedgerIndex: publicGeneration.lastLedgerIndex,
             })
@@ -1732,10 +1821,11 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
           profileId: request.params.network,
           activationLedgerIndex: network.activationLedgerIndex,
           checkpointLedgerIndex: checkpoint.ledgerIndex,
+          generationId,
         })
         return {
           generation: publicGeneration,
-          state: credentialState(generation, checkpoint.closeTime),
+          state: credentialGenerationState(generation, checkpoint.closeTime),
           timeline: publicCredentialTimeline(timeline, generation, network.activationLedgerIndex),
         }
       })
@@ -2136,9 +2226,20 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
             .code(404)
             .send({ error: 'CREDENTIAL_NOT_FOUND', message: 'Credential not found' })
         }
+        const publicGeneration = publicCredentialGeneration(generation, {
+          profileId: request.params.network,
+          activationLedgerIndex: network.activationLedgerIndex,
+          checkpointLedgerIndex: checkpoint.ledgerIndex,
+          issuer: request.params.issuer,
+          subject: request.params.subject,
+          schemaUid: request.params.schemaUid,
+        })
         return {
-          ...generation,
-          state: credentialState(generation, checkpoint.closeTime),
+          profileId: generation.profileId,
+          ...publicGeneration,
+          createdAt: generation.createdAt,
+          updatedAt: generation.updatedAt,
+          state: credentialGenerationState(generation, checkpoint.closeTime),
         }
       })
     },
@@ -2323,7 +2424,7 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
       }
       return verifyCredential(request.body, {
         repository: options.repository,
-        resolver: options.resolver,
+        resolver: payloadResolver,
         trustPolicy: options.trustPolicy,
         maxLedgerAgeSeconds: options.readinessMaxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
         ...(options.now === undefined ? {} : { now: options.now }),

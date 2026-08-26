@@ -1,4 +1,5 @@
 export * from './client.js'
 export * from './indexer-status.js'
+export * from './migrations.js'
 export * from './provision.js'
 export * from './schema.js'

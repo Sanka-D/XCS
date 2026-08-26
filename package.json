@@ -29,7 +29,7 @@
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "test:e2e": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/sdk build && pnpm --filter @xcs-protocol/web build && pnpm --filter @xcs-protocol/web test:e2e && pnpm --filter @xcs-protocol/web test:e2e:security",
-    "test:postgres": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/indexer test:postgres",
+    "test:postgres": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/indexer test:postgres && pnpm --filter @xcs-protocol/api test:postgres",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },

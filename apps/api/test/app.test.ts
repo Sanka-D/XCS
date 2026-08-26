@@ -18,6 +18,7 @@ import type {
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createApi } from '../src/app.js'
+import type { OperationalMetricsRepository } from '../src/operational-metrics.js'
 import type { ApiRepository, SchemaProjectionEvidence } from '../src/types.js'
 import { StaticTrustPolicy } from '../src/verification.js'
 
@@ -27,6 +28,7 @@ const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv'
 const NOW = new Date('2026-08-19T00:00:00.000Z')
 const NOW_RIPPLE = Math.floor(NOW.getTime() / 1_000) - 946_684_800
+const METRICS_TOKEN = 'test-operational-metrics-token-00000001'
 
 const network: NetworkProfileRow = {
   profileId: 'testnet',
@@ -228,6 +230,7 @@ class RouteRepository implements ApiRepository {
         active: 0,
         expired: 0,
         deleted: 0,
+        invalidEvidence: 0,
         minimumCreatedLedgerIndex: null,
         maximumLastLedgerIndex: null,
       },
@@ -303,8 +306,157 @@ afterEach(async () => {
 describe('read API', () => {
   it('exposes liveness and indexer readiness separately', async () => {
     const instance = await app()
+    const liveness = await instance.inject({ method: 'GET', url: '/health/live' })
+    const readiness = await instance.inject({ method: 'GET', url: '/health/ready' })
+    expect(liveness.statusCode).toBe(200)
+    expect(readiness.statusCode).toBe(200)
+    expect(liveness.headers['cache-control']).toBe('no-store')
+    expect(readiness.headers['cache-control']).toBe('no-store')
+  })
+
+  it('keeps deployment probes available outside the global request budget', async () => {
+    const instance = await configuredApp({ globalRateLimit: 1 })
+
+    for (const url of ['/health/live', '/health', '/health/ready']) {
+      const first = await instance.inject({ method: 'GET', url })
+      const second = await instance.inject({ method: 'GET', url })
+      expect(first.statusCode).toBe(200)
+      expect(second.statusCode).toBe(200)
+      expect(first.headers['cache-control']).toBe('no-store')
+      expect(second.headers['cache-control']).toBe('no-store')
+    }
+
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(200)
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(429)
     expect((await instance.inject({ method: 'GET', url: '/health/live' })).statusCode).toBe(200)
-    expect((await instance.inject({ method: 'GET', url: '/health/ready' })).statusCode).toBe(200)
+  })
+
+  it('keeps operational metrics absent unless explicitly configured', async () => {
+    const instance = await app()
+    const response = await instance.inject({ method: 'GET', url: '/internal/metrics' })
+
+    expect(response.statusCode).toBe(404)
+    expect(instance.swagger().paths).not.toHaveProperty('/internal/metrics')
+  })
+
+  it('protects operational metrics, keeps them outside quotas, and hides them from OpenAPI', async () => {
+    let snapshotCalls = 0
+    const metricsRepository: OperationalMetricsRepository = {
+      getSnapshot: async () => {
+        snapshotCalls += 1
+        return {
+          observedAt: NOW,
+          database: { usedConnections: 3, maxConnections: 100, sizeBytes: 9_999 },
+          profiles: [],
+        }
+      },
+    }
+    const instance = await configuredApp({
+      globalRateLimit: 1,
+      operationalMetrics: { token: METRICS_TOKEN, repository: metricsRepository },
+    })
+
+    for (const authorization of [
+      undefined,
+      'Basic ignored',
+      'Bearer wrong-operational-metrics-token-0001',
+      `Bearer ${'é'.repeat(METRICS_TOKEN.length)}`,
+    ]) {
+      const response = await instance.inject({
+        method: 'GET',
+        url: '/internal/metrics',
+        ...(authorization === undefined ? {} : { headers: { authorization } }),
+      })
+      expect(response.statusCode).toBe(401)
+      expect(response.headers['cache-control']).toBe('no-store')
+      expect(response.headers['www-authenticate']).toBe('Bearer realm="xcs-metrics"')
+      expect(response.json()).toEqual({
+        error: 'UNAUTHORIZED',
+        message: 'Authentication required',
+      })
+    }
+    expect(snapshotCalls).toBe(0)
+
+    const headers = { authorization: `Bearer ${METRICS_TOKEN}` }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await instance.inject({ method: 'GET', url: '/internal/metrics', headers })
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['cache-control']).toBe('no-store')
+      expect(response.json()).toMatchObject({
+        schemaVersion: 1,
+        clockSource: 'database',
+        database: {
+          available: true,
+          clusterConnections: { used: 3, maximum: 100 },
+          logicalSizeBytes: 9_999,
+        },
+        api: { counterScope: 'process' },
+      })
+    }
+    expect(snapshotCalls).toBe(2)
+    expect(instance.swagger().paths).not.toHaveProperty('/internal/metrics')
+
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(200)
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(429)
+    const afterLimit = await instance.inject({ method: 'GET', url: '/internal/metrics', headers })
+    expect(afterLimit.statusCode).toBe(200)
+    expect(afterLimit.json().api.rateLimitedResponses).toEqual({
+      global: 1,
+      verify: 0,
+      pinning: 0,
+    })
+  })
+
+  it('returns process metrics without leaking database errors when the snapshot fails', async () => {
+    const metricsRepository: OperationalMetricsRepository = {
+      getSnapshot: async () => {
+        throw new Error('postgresql://secret@internal-host/xcs')
+      },
+    }
+    const instance = await configuredApp({
+      operationalMetrics: { token: METRICS_TOKEN, repository: metricsRepository },
+    })
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/internal/metrics',
+      headers: { authorization: `Bearer ${METRICS_TOKEN}` },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['cache-control']).toBe('no-store')
+    expect(response.json()).toMatchObject({
+      clockSource: 'process',
+      database: {
+        available: false,
+        errorCode: 'DATABASE_UNAVAILABLE',
+        snapshotFailuresSinceStart: 1,
+        clusterConnections: null,
+        logicalSizeBytes: null,
+      },
+      profiles: [],
+    })
+    expect(response.body).not.toContain('secret')
+    expect(response.body).not.toContain('internal-host')
+  })
+
+  it('rejects weak or reused operational metrics tokens at construction', async () => {
+    await expect(
+      configuredApp({
+        operationalMetrics: {
+          token: 'too-short',
+          repository: { getSnapshot: async () => Promise.reject(new Error('not called')) },
+        },
+      }),
+    ).rejects.toThrow('operationalMetrics.token must be 32 to 256')
+    await expect(
+      configuredApp({
+        internalSsrToken: METRICS_TOKEN,
+        operationalMetrics: {
+          token: METRICS_TOKEN,
+          repository: { getSnapshot: async () => Promise.reject(new Error('not called')) },
+        },
+      }),
+    ).rejects.toThrow('must be distinct')
   })
 
   it.each([
@@ -322,6 +474,7 @@ describe('read API', () => {
     const instance = await configuredApp({ repository })
     const response = await instance.inject({ method: 'GET', url: '/health/ready' })
     expect(response.statusCode).toBe(503)
+    expect(response.headers['cache-control']).toBe('no-store')
     expect(response.json()).toEqual({ status: 'not_ready', reason })
   })
 
@@ -354,6 +507,151 @@ describe('read API', () => {
     ).toHaveProperty('503')
     expect(paths?.['/v1/verify']?.post?.responses).toHaveProperty('503')
     expect(paths?.['/v1/verify']?.post?.responses).toHaveProperty('404')
+  })
+
+  it('exposes profile-bound signing readiness from one authoritative snapshot', async () => {
+    const repository = new RouteRepository()
+    let snapshotCount = 0
+    repository.withConsistentSnapshot = async (callback) => {
+      snapshotCount += 1
+      return callback(repository)
+    }
+    const instance = await configuredApp({ repository })
+
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/readiness',
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      profileId: 'testnet',
+      status: 'ready',
+      checkpoint: {
+        ledgerIndex: checkpoint.ledgerIndex,
+        ledgerHash: checkpoint.ledgerHash,
+        closeTime: checkpoint.closeTime,
+        transactionRoot: checkpoint.transactionRoot,
+      },
+    })
+    expect(response.headers['cache-control']).toBe('private, no-store')
+    expect(snapshotCount).toBe(1)
+
+    const operation = instance.swagger().paths?.['/v1/networks/{network}/readiness']?.get
+    expect(operation?.responses).toHaveProperty('200')
+    expect(operation?.responses).toHaveProperty('400')
+    expect(operation?.responses).toHaveProperty('404')
+    expect(operation?.responses).toHaveProperty('429')
+    expect(operation?.responses).toHaveProperty('503')
+    expect(operation?.responses).toHaveProperty('500')
+
+    const missing = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/unknown/readiness',
+    })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.headers['cache-control']).toBe('private, no-store')
+    expect(missing.json()).toEqual({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+  })
+
+  it('keeps every profile-readiness outcome non-cacheable', async () => {
+    const unavailableRepository = new RouteRepository()
+    unavailableRepository.getIndexerStatus = async () => undefined
+    const unavailableInstance = await configuredApp({ repository: unavailableRepository })
+    const unavailable = await unavailableInstance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/readiness',
+    })
+    expect(unavailable.statusCode).toBe(503)
+    expect(unavailable.headers['cache-control']).toBe('private, no-store')
+
+    const invalid = await unavailableInstance.inject({
+      method: 'GET',
+      url: '/v1/networks/invalid!/readiness',
+    })
+    expect(invalid.statusCode).toBe(400)
+    expect(invalid.headers['cache-control']).toBe('private, no-store')
+
+    const failingRepository = new RouteRepository()
+    failingRepository.withConsistentSnapshot = async () => {
+      throw new Error('synthetic database failure')
+    }
+    const failingInstance = await configuredApp({ repository: failingRepository })
+    const failed = await failingInstance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/readiness',
+    })
+    expect(failed.statusCode).toBe(500)
+    expect(failed.headers['cache-control']).toBe('private, no-store')
+
+    const limitedInstance = await configuredApp({ globalRateLimit: 1 })
+    expect(
+      (
+        await limitedInstance.inject({
+          method: 'GET',
+          url: '/v1/networks/testnet/readiness',
+        })
+      ).statusCode,
+    ).toBe(200)
+    const limited = await limitedInstance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/readiness',
+    })
+    expect(limited.statusCode).toBe(429)
+    expect(limited.headers['cache-control']).toBe('private, no-store')
+    expect(limited.json()).toMatchObject({ statusCode: 429 })
+  })
+
+  it.each([
+    ['missing status', undefined, 'INDEXER_STATUS_UNAVAILABLE'],
+    ['starting', { ...readyStatus, state: 'starting' as const }, 'INDEXER_NOT_READY'],
+    ['catching up', { ...readyStatus, state: 'catching_up' as const }, 'INDEXER_NOT_READY'],
+    [
+      'halted',
+      { ...readyStatus, state: 'halted' as const, errorCode: 'LEDGER_SOURCE_DIVERGENCE' },
+      'INDEXER_HALTED',
+    ],
+    ['expired lease', { ...readyStatus, leaseExpiresAt: NOW }, 'INDEXER_LEASE_EXPIRED'],
+  ])(
+    'fails profile-bound readiness when the indexer status is %s',
+    async (_label, status, code) => {
+      const repository = new RouteRepository()
+      repository.getIndexerStatus = async () => status
+      const instance = await configuredApp({ repository })
+
+      const response = await instance.inject({
+        method: 'GET',
+        url: '/v1/networks/testnet/readiness',
+      })
+      expect(response.statusCode).toBe(503)
+      expect(response.headers['cache-control']).toBe('private, no-store')
+      expect(response.json()).toMatchObject({ error: code })
+    },
+  )
+
+  it.each([
+    ['missing checkpoint', undefined, 'INDEXER_NOT_INITIALIZED'],
+    ['stale checkpoint', { ...checkpoint, closeTime: NOW_RIPPLE - 121 }, 'INDEXER_STALE'],
+    [
+      'checkpoint hash mismatch',
+      { ...checkpoint, ledgerHash: '9'.repeat(64) },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+    [
+      'missing transaction root',
+      { ...checkpoint, transactionRoot: null },
+      'INDEXER_EVIDENCE_INVALID',
+    ],
+  ])('fails profile-bound readiness for %s', async (_label, storedCheckpoint, code) => {
+    const repository = new RouteRepository()
+    repository.getLatestCheckpoint = async () => storedCheckpoint
+    const instance = await configuredApp({ repository })
+
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/v1/networks/testnet/readiness',
+    })
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: code })
   })
 
   it('documents closed success contracts for the developer verification flow', async () => {
@@ -532,6 +830,7 @@ describe('read API', () => {
           active: 1,
           expired: 1,
           deleted: 1,
+          invalidEvidence: 0,
           minimumCreatedLedgerIndex: network.activationLedgerIndex,
           maximumLastLedgerIndex: checkpoint.ledgerIndex,
         },
@@ -573,6 +872,7 @@ describe('read API', () => {
         active: 0,
         expired: 0,
         deleted: 0,
+        invalidEvidence: 0,
         minimumCreatedLedgerIndex: network.activationLedgerIndex,
         maximumLastLedgerIndex: checkpoint.ledgerIndex,
       },
@@ -585,6 +885,20 @@ describe('read API', () => {
         active: 1,
         expired: 0,
         deleted: 0,
+        invalidEvidence: 0,
+        minimumCreatedLedgerIndex: network.activationLedgerIndex,
+        maximumLastLedgerIndex: checkpoint.ledgerIndex,
+      },
+    ],
+    [
+      'out-of-range lifecycle evidence',
+      {
+        total: 1,
+        pending: 1,
+        active: 0,
+        expired: 0,
+        deleted: 0,
+        invalidEvidence: 1,
         minimumCreatedLedgerIndex: network.activationLedgerIndex,
         maximumLastLedgerIndex: checkpoint.ledgerIndex,
       },
@@ -809,6 +1123,22 @@ describe('read API', () => {
     expect(response.body).not.toContain('snapshot')
     expect(response.body).not.toContain('recordedAt')
     expect(response.body).not.toContain('profileId')
+  })
+
+  it('fails closed when a generation expiration exceeds the XRPL uint32 range', async () => {
+    const repository = new RouteRepository()
+    repository.getCredentialGenerationById = async () => ({
+      ...generation,
+      expiration: 4_294_967_296,
+    })
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/credential-generations/${generation.generationId}`,
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
   })
 
   it('fails closed when a deletion event contradicts the generation acceptance flag', async () => {
@@ -1482,6 +1812,7 @@ describe('read API', () => {
   it.each([
     ['a nullable generation id', { ...credentialEvent, generationId: null }],
     ['a mismatched subject', { ...credentialEvent, subject: ISSUER }],
+    ['an expiration above uint32', { ...credentialEvent, expiration: 4_294_967_296 }],
   ])('fails closed when event history contains %s', async (_label, malformedEvent) => {
     const repository = new RouteRepository()
     repository.getCredentialEvents = async () => [malformedEvent]
@@ -1709,8 +2040,8 @@ describe('read API', () => {
     [
       'invalid',
       { ...checkpoint, closeTime: -1 },
-      'INDEXER_STALE',
-      'The indexed ledger checkpoint is stale or has an invalid timestamp.',
+      'INDEXER_EVIDENCE_INVALID',
+      'The indexer integrity evidence is incomplete or inconsistent.',
     ],
     [
       'implausibly in the future',
@@ -1924,7 +2255,7 @@ describe('read API', () => {
       (
         await trusted.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: trustedHeaders('a'.repeat(64)),
         })
       ).statusCode,
@@ -1933,7 +2264,7 @@ describe('read API', () => {
       (
         await trusted.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: trustedHeaders('b'.repeat(64)),
         })
       ).statusCode,
@@ -1942,7 +2273,7 @@ describe('read API', () => {
       (
         await trusted.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: trustedHeaders('a'.repeat(64)),
         })
       ).statusCode,
@@ -1957,7 +2288,7 @@ describe('read API', () => {
       (
         await spoofed.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: spoofedHeaders('c'.repeat(64)),
         })
       ).statusCode,
@@ -1966,7 +2297,7 @@ describe('read API', () => {
       (
         await spoofed.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: spoofedHeaders('d'.repeat(64)),
         })
       ).statusCode,
@@ -1981,7 +2312,7 @@ describe('read API', () => {
       (
         await nonAscii.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: nonAsciiHeaders('e'.repeat(64)),
         })
       ).statusCode,
@@ -1990,7 +2321,7 @@ describe('read API', () => {
       (
         await nonAscii.inject({
           method: 'GET',
-          url: '/health',
+          url: '/v1/networks',
           headers: nonAsciiHeaders('f'.repeat(64)),
         })
       ).statusCode,
@@ -2005,7 +2336,7 @@ describe('read API', () => {
     const requestFrom = (address: string) =>
       instance.inject({
         method: 'GET',
-        url: '/health',
+        url: '/v1/networks',
         headers: { 'x-forwarded-for': address },
       })
 

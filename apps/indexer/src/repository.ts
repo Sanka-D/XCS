@@ -15,6 +15,7 @@ import {
   type IndexerLeaseToken,
   type XcsDatabase,
 } from '@xcs-protocol/db'
+import { canonicalize, type JsonValue } from '@xcs-protocol/core'
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 
 import { assertLedgerContinuity } from './continuity.js'
@@ -93,6 +94,13 @@ function asRecord(value: unknown): Record<string, unknown> {
     throw new Error('Stored schema value is not an object')
   }
   return value as Record<string, unknown>
+}
+
+function plainDatabaseJson(value: unknown): JsonValue {
+  // Strict JSON intentionally uses null-prototype objects. Drizzle inspects
+  // value prototypes before JSONB encoding, so materialize an equivalent
+  // ordinary JSON value at the persistence boundary.
+  return JSON.parse(canonicalize(value as JsonValue)) as JsonValue
 }
 
 async function ensureNetworkProfile(database: XcsDatabase, profile: NetworkProfile): Promise<void> {
@@ -288,13 +296,13 @@ export class PostgresIndexerRepository implements IndexerRepository {
             ...(registration.status === 'accepted'
               ? {
                   schemaUid: registration.schemaUid,
-                  memoJson: registration.memoJson,
+                  memoJson: plainDatabaseJson(registration.memoJson),
                 }
               : {
                   reasonCode: registration.reasonCode,
                   ...(registration.memoJson === undefined
                     ? {}
-                    : { memoJson: registration.memoJson }),
+                    : { memoJson: plainDatabaseJson(registration.memoJson) }),
                 }),
           })
           .onConflictDoNothing()
@@ -314,8 +322,12 @@ export class PostgresIndexerRepository implements IndexerRepository {
               ...(registration.definition.supersedes === undefined
                 ? {}
                 : { supersedesUid: registration.definition.supersedes }),
-              definition: registration.definition as unknown as Record<string, unknown>,
-              resolvedDefinition: registration.resolved as unknown as Record<string, unknown>,
+              definition: plainDatabaseJson(
+                registration.definition as unknown as JsonValue,
+              ) as Record<string, unknown>,
+              resolvedDefinition: plainDatabaseJson(
+                registration.resolved as unknown as JsonValue,
+              ) as Record<string, unknown>,
               registrationTransactionHash: registration.transactionHash,
               ledgerIndex: projection.ledger.ledgerIndex,
               transactionIndex: registration.transactionIndex,

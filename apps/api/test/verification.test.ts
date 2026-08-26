@@ -17,7 +17,11 @@ import type {
 } from '@xcs-protocol/db'
 import { describe, expect, it } from 'vitest'
 
-import { DisabledPayloadResolver, PayloadUnavailableError } from '../src/payload-resolver.js'
+import {
+  DisabledPayloadResolver,
+  PayloadInvalidError,
+  PayloadUnavailableError,
+} from '../src/payload-resolver.js'
 import type { ApiRepository, PayloadResolver, SchemaProjectionEvidence } from '../src/types.js'
 import { StaticTrustPolicy, verifyCredential } from '../src/verification.js'
 
@@ -244,6 +248,7 @@ class VerificationRepository implements ApiRepository {
         active: 0,
         expired: 0,
         deleted: 0,
+        invalidEvidence: 0,
         minimumCreatedLedgerIndex: null,
         maximumLastLedgerIndex: null,
       },
@@ -400,6 +405,34 @@ describe('verifyCredential', () => {
     })
   })
 
+  it('fails closed when an indexed expiration exceeds the XRPL uint32 range', async () => {
+    await expect(
+      verifyCredential(request, {
+        repository: new VerificationRepository(
+          { ...generation, expiration: 4_294_967_296 },
+          schema,
+        ),
+        resolver: neverResolver,
+        trustPolicy: new StaticTrustPolicy(),
+        ...FRESHNESS,
+      }),
+    ).rejects.toMatchObject({ code: 'INDEXER_EVIDENCE_INVALID', statusCode: 503 })
+  })
+
+  it('fails closed when indexed deletion evidence contradicts the lifecycle timeline', async () => {
+    await expect(
+      verifyCredential(request, {
+        repository: new VerificationRepository(
+          { ...generation, deletedLedgerIndex: generation.lastLedgerIndex, deletionCause: null },
+          schema,
+        ),
+        resolver: neverResolver,
+        trustPolicy: new StaticTrustPolicy(),
+        ...FRESHNESS,
+      }),
+    ).rejects.toMatchObject({ code: 'INDEXER_EVIDENCE_INVALID', statusCode: 503 })
+  })
+
   it('fails closed when an authoritative schema projection drops required fields', async () => {
     const corruptedSchema: SchemaRow = {
       ...schema,
@@ -535,6 +568,39 @@ describe('verifyCredential', () => {
     expect(report.payload).toBe('tampered')
   })
 
+  it('uses the same integrity-first precedence for direct and resolved payloads', async () => {
+    const wrongSubject = {
+      ...payload,
+      subject: ISSUER,
+    }
+    const resolvedBytes = new TextEncoder().encode(canonicalize(wrongSubject))
+    const repository = new VerificationRepository(generation, schema)
+
+    const [direct, resolvedReport] = await Promise.all([
+      verifyCredential(
+        { ...request, payload: wrongSubject },
+        {
+          repository,
+          resolver: neverResolver,
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+      verifyCredential(
+        { ...request, resolvePayload: true },
+        {
+          repository,
+          resolver: { resolve: async () => resolvedBytes },
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+    ])
+
+    expect(direct.payload).toBe('tampered')
+    expect(resolvedReport.payload).toBe(direct.payload)
+  })
+
   it('reports an unreachable resolved payload as unavailable', async () => {
     const report = await verifyCredential(
       { ...request, resolvePayload: true },
@@ -550,6 +616,41 @@ describe('verifyCredential', () => {
       },
     )
     expect(report.payload).toBe('unavailable')
+  })
+
+  it('reports an observed oversized resolved payload as invalid', async () => {
+    const report = await verifyCredential(
+      { ...request, resolvePayload: true },
+      {
+        repository: new VerificationRepository(generation, schema),
+        resolver: {
+          resolve: async () => {
+            throw new PayloadInvalidError('too large')
+          },
+        },
+        trustPolicy: new StaticTrustPolicy(),
+        ...FRESHNESS,
+      },
+    )
+    expect(report.payload).toBe('invalid')
+  })
+
+  it('does not hide an unexpected resolver failure as invalid payload evidence', async () => {
+    await expect(
+      verifyCredential(
+        { ...request, resolvePayload: true },
+        {
+          repository: new VerificationRepository(generation, schema),
+          resolver: {
+            resolve: async () => {
+              throw new Error('resolver invariant failed')
+            },
+          },
+          trustPolicy: new StaticTrustPolicy(),
+          ...FRESHNESS,
+        },
+      ),
+    ).rejects.toThrow('resolver invariant failed')
   })
 
   it('fails closed without network access when server-side fetching is disabled', async () => {

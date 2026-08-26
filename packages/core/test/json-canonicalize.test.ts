@@ -13,6 +13,9 @@ describe('strict JSON and RFC 8785 canonicalization', () => {
     expect(() => parseJsonStrict('"\\ud800"')).toThrowError(
       expect.objectContaining({ code: 'JSON_INVALID_UNICODE' }),
     )
+    expect(() => canonicalize('\ud800')).toThrowError(
+      expect.objectContaining({ code: 'JSON_INVALID_UNICODE' }),
+    )
     expect(() => canonicalize('\udc00')).toThrowError(
       expect.objectContaining({ code: 'JSON_INVALID_UNICODE' }),
     )

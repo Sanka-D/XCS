@@ -26,6 +26,8 @@ import {
 
 import type { ApiRepository } from './types.js'
 
+const MAX_UINT32 = 4_294_967_295
+
 export class PostgresApiRepository implements ApiRepository {
   constructor(private readonly db: XcsDatabase) {}
 
@@ -236,6 +238,22 @@ export class PostgresApiRepository implements ApiRepository {
         ),
         deleted: count(
           sql`CASE WHEN ${credentialGenerations.deletedLedgerIndex} IS NOT NULL THEN 1 END`,
+        ),
+        invalidEvidence: count(
+          sql`CASE WHEN (${credentialGenerations.expiration} IS NOT NULL
+              AND (${credentialGenerations.expiration} < 0 OR ${credentialGenerations.expiration} > ${MAX_UINT32}))
+            OR ${credentialGenerations.createdLedgerIndex} < 0
+            OR ${credentialGenerations.createdLedgerIndex} > ${MAX_UINT32}
+            OR ${credentialGenerations.createdTransactionIndex} < 0
+            OR ${credentialGenerations.lastLedgerIndex} < 0
+            OR ${credentialGenerations.lastLedgerIndex} > ${MAX_UINT32}
+            OR ${credentialGenerations.lastLedgerIndex} < ${credentialGenerations.createdLedgerIndex}
+            OR (${credentialGenerations.deletedLedgerIndex} IS NOT NULL
+              AND (${credentialGenerations.deletedLedgerIndex} < 0
+                OR ${credentialGenerations.deletedLedgerIndex} > ${MAX_UINT32}
+                OR ${credentialGenerations.deletedLedgerIndex} < ${credentialGenerations.createdLedgerIndex}
+                OR ${credentialGenerations.deletedLedgerIndex} <> ${credentialGenerations.lastLedgerIndex}))
+            THEN 1 END`,
         ),
         minimumCreatedLedgerIndex: min(credentialGenerations.createdLedgerIndex),
         maximumLastLedgerIndex: max(credentialGenerations.lastLedgerIndex),

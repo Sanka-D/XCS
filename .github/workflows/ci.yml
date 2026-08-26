@@ -58,6 +58,12 @@ jobs:
         working-directory: verifier-go
       - run: go build ./...
         working-directory: verifier-go
+      - name: Fuzz strict JSON canonical round-trip
+        run: go test -run=^$ -fuzz=^FuzzStrictJSONCanonicalRoundTrip$ -fuzztime=10s -parallel=2 ./xcs
+        working-directory: verifier-go
+      - name: Fuzz schema UID determinism
+        run: go test -run=^$ -fuzz=^FuzzSchemaUIDDeterminism$ -fuzztime=10s -parallel=2 ./xcs
+        working-directory: verifier-go
 
   postgres:
     runs-on: ubuntu-latest

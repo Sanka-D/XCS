@@ -1,0 +1,165 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "ripple-time.unix-epoch-to-zero",
+      "name": "maps the Unix timestamp of the Ripple epoch to zero",
+      "operation": "unix-to-ripple",
+      "input": 946684800,
+      "valid": true,
+      "expected": 0
+    },
+    {
+      "id": "ripple-time.unix-maximum-to-uint32-maximum",
+      "name": "maps the final representable Unix second",
+      "operation": "unix-to-ripple",
+      "input": 5241652095,
+      "valid": true,
+      "expected": 4294967295
+    },
+    {
+      "id": "ripple-time.reject-unix-before-epoch",
+      "name": "rejects a Unix second before the Ripple epoch",
+      "operation": "unix-to-ripple",
+      "input": 946684799,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-unix-after-maximum",
+      "name": "rejects a Unix second beyond the uint32 Ripple range",
+      "operation": "unix-to-ripple",
+      "input": 5241652096,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.zero-to-unix-epoch",
+      "name": "maps Ripple time zero to the Unix epoch timestamp",
+      "operation": "ripple-to-unix",
+      "input": 0,
+      "valid": true,
+      "expected": 946684800
+    },
+    {
+      "id": "ripple-time.uint32-maximum-to-unix",
+      "name": "maps the maximum Ripple time to Unix seconds",
+      "operation": "ripple-to-unix",
+      "input": 4294967295,
+      "valid": true,
+      "expected": 5241652095
+    },
+    {
+      "id": "ripple-time.reject-negative-ripple-time",
+      "name": "rejects a negative Ripple time",
+      "operation": "ripple-to-unix",
+      "input": -1,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-ripple-time-above-uint32",
+      "name": "rejects a Ripple time above uint32",
+      "operation": "ripple-to-unix",
+      "input": 4294967296,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.iso-whole-second-to-ripple",
+      "name": "parses a representative whole-second UTC timestamp",
+      "operation": "iso-to-ripple",
+      "input": "2030-05-06T07:08:09Z",
+      "valid": true,
+      "expected": 957596889
+    },
+    {
+      "id": "ripple-time.iso-zero-milliseconds-to-ripple",
+      "name": "accepts the explicit zero-millisecond UTC form",
+      "operation": "iso-to-ripple",
+      "input": "2030-05-06T07:08:09.000Z",
+      "valid": true,
+      "expected": 957596889
+    },
+    {
+      "id": "ripple-time.iso-maximum-to-ripple",
+      "name": "parses the final representable Ripple second",
+      "operation": "iso-to-ripple",
+      "input": "2136-02-07T06:28:15Z",
+      "valid": true,
+      "expected": 4294967295
+    },
+    {
+      "id": "ripple-time.reject-iso-before-epoch",
+      "name": "rejects an ISO timestamp before the Ripple epoch",
+      "operation": "iso-to-ripple",
+      "input": "1999-12-31T23:59:59Z",
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-iso-after-maximum",
+      "name": "rejects an ISO timestamp beyond the Ripple uint32 range",
+      "operation": "iso-to-ripple",
+      "input": "2136-02-07T06:28:16Z",
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-subsecond-iso",
+      "name": "rejects a non-zero subsecond timestamp",
+      "operation": "iso-to-ripple",
+      "input": "2030-05-06T07:08:09.123Z",
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-offset-iso",
+      "name": "rejects an offset spelling instead of literal UTC Z",
+      "operation": "iso-to-ripple",
+      "input": "2030-05-06T07:08:09+00:00",
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-impossible-calendar-date",
+      "name": "rejects an impossible calendar date",
+      "operation": "iso-to-ripple",
+      "input": "2023-02-29T00:00:00Z",
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.zero-to-canonical-iso",
+      "name": "formats Ripple time zero with explicit milliseconds",
+      "operation": "ripple-to-iso",
+      "input": 0,
+      "valid": true,
+      "expected": "2000-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "ripple-time.maximum-to-canonical-iso",
+      "name": "formats the maximum Ripple time with explicit milliseconds",
+      "operation": "ripple-to-iso",
+      "input": 4294967295,
+      "valid": true,
+      "expected": "2136-02-07T06:28:15.000Z"
+    },
+    {
+      "id": "ripple-time.reject-negative-iso-input",
+      "name": "rejects a negative Ripple time before ISO formatting",
+      "operation": "ripple-to-iso",
+      "input": -1,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    },
+    {
+      "id": "ripple-time.reject-above-uint32-iso-input",
+      "name": "rejects an above-uint32 Ripple time before ISO formatting",
+      "operation": "ripple-to-iso",
+      "input": 4294967296,
+      "valid": false,
+      "errorCode": "RIPPLE_TIME_INVALID"
+    }
+  ]
+}

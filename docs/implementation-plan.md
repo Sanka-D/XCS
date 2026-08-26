@@ -50,9 +50,31 @@ dual-`rippled` preflight/quorum, a fenced PostgreSQL writer,
 transaction-root checkpoints, fail-closed repeatable-read API guards, quorum-verified bounded
 empty-database replay, least-privilege database roles, and a timestamp-free projection digest. The
 browser submission RPC is configured separately from the two private indexer sources.
+Every new browser signature is gated by a profile-bound authoritative readiness snapshot immediately
+before wallet invocation and again before a returned blob can be retained or submitted.
 Unit/conformance suites cover the deterministic protocol, source normalization, worker, API, CLI
-and browser flow; CI contains a PostgreSQL 18 job for the eight migration, role-permission, fencing,
-and replay scenarios.
+and browser flow; CI contains a PostgreSQL 18 job for eleven database-migration, role-permission,
+fencing, replay, and operational-snapshot scenarios. The complete-replay case captures one integrity-bound synthetic
+ledger bundle, validates it twice, runs both copies through the normal worker into empty projections,
+and requires the same fixed full-projection digest and all six deletion causes.
+The v0.1 conformance manifest revision 9 adds boundary, schema-resolution, Ripple-time, lifecycle and
+payload-retrieval cases. Shared payload vectors now cover the four retrieval outcomes, tampering,
+exact 1 MiB limits, HTTPS authority parsing and inherited claims, including fail-closed incomplete
+catalogs. Deterministic
+TypeScript properties exercise strict JSON/JCS, UID invariants and every supported inheritance
+depth; SDK/indexer matrices cover memo encoding and hostile normalized XRPL shapes; and two bounded
+native Go fuzz targets cover canonical JSON and UID preimages. The independent Go library now
+resolves inheritance and supersession from a caller-supplied, previously validated catalog and can
+use that resolution while checking credential payload claims. It also independently converts Ripple
+time and projects Credential lifecycle state from the shared vectors. The indexer and API reject
+ledger-derived indices, `Expiration` and close-time values outside the native uint32 range, and the
+API rejects contradictory generation timelines including in aggregate statistics. Seeds and
+configurable run counts are reproducible and part of the Turbo cache key.
+Database migration `0003_projection_integrity.sql` mirrors those boundaries with 16 additive
+storage constraints. It installs them as `NOT VALID` with a 5-second lock timeout, after which
+`db:migrate` validates one table per transaction after the migration commit. Historical violations
+fail the deployment without weakening future-write checks; rebuilding/replaying the projection and
+rerunning the command resumes validation.
 
 The reference product now also has REST reads for aggregate statistics, schema search and
 registration activity, exact Credential generation timelines, and exact XCS transaction
@@ -60,7 +82,8 @@ projections. The Nuxt application exposes corresponding Explorer pages, a Studio
 a Developers page. Its guided schema editor includes course-completion and diploma templates, while
 advanced JSON remains available for schemas outside the scalar-field editor. Database migration
 `0002_discovery_indexes.sql` adds only the supporting indexes and leaves existing rows and contracts
-unchanged.
+unchanged; `0003_projection_integrity.sql` adds the projection-boundary checks without rewriting
+historical rows.
 
 This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
 the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
@@ -70,9 +93,11 @@ The browser Playwright journey is deterministic and synthetic: it replaces the w
 payload host with fakes and covers schema registration, issuance, and subject acceptance through
 separate issuer and subject accounts. The acceptance path keeps payload consent distinct from the
 subject's generation-bound acknowledgement of an issuer whose trust status is `unknown`, then
-requires exact indexed `accepted` evidence. It is useful CI evidence for application state
-transitions, but it is not evidence for browser-extension compatibility, issuer-hosted CORS
-behavior, a live Commons deployment or validated Testnet pilot transactions.
+requires exact indexed `accepted` evidence. Negative cases also prove that an unavailable or
+mid-wallet-degraded indexer produces no XRPL submission or retained signed blob. It is useful CI
+evidence for application state transitions, but it is not evidence for browser-extension
+compatibility, issuer-hosted CORS behavior, a live Commons deployment or validated Testnet pilot
+transactions.
 
 The public `core`, SDK, and CLI manifests now have a coordinated artifact contract. A fresh-checkout
 CI job builds and twice-packs all three, rejects non-reproducible or workspace-linked tarballs, and
@@ -144,8 +169,10 @@ Work:
   transaction indexes, and provider disagreement instead of treating incomplete input as empty;
 - persist an indexer state (`starting`, `catching_up`, `ready`, or `halted`) and make authoritative API
   reads return `503` immediately while the indexer is halted or lacks quorum;
-- apply the additive integrity migration to a fresh XCS database, then prove transaction rollback,
-  restart, idempotency, and deterministic replay against real PostgreSQL.
+- apply the additive integrity migration to a fresh XCS database and an existing `0002` projection;
+  prove post-commit validation, fail-closed handling of invalid historical rows, retry after a
+  rebuild/replay, transaction rollback, restart, idempotency, and deterministic replay against real
+  PostgreSQL.
 
 Exit criteria:
 
@@ -209,6 +236,14 @@ Work:
   clarification that does not change validity or derived bytes in the ADR/specification;
 - version the conformance vectors and define the compatibility policy for future protocol profiles.
 
+The first local milestone slices now cover additive boundary and shared schema-resolution vectors,
+deterministic TypeScript properties, SDK/indexer mutation matrices, bounded Go fuzzing, independent
+Go inheritance/supersession resolution, inherited-claim payload checks, payload byte/URI boundaries,
+Ripple-time conversion, lifecycle-state parity, shared retrieval classification, all six deletion
+causes, and complete capture/validation/replay comparison through a synthetic ledger bundle. The
+remaining interoperability gates are running that same complete-projection proof against a reviewed
+public Testnet capture, the URI-length released-dependency gate, and external implementation review.
+
 Exit criteria:
 
 - TypeScript and Go pass every v0.1 conformance vector with identical validity outcomes and stable
@@ -242,6 +277,17 @@ Work:
 - perform an internal threat-model and defensive design review, and close release-blocking findings
   before exposing the pilot; this review does not replace the final post-freeze audit in milestone 6;
 - document data retention, public-payload constraints, abuse handling, and incident contacts.
+
+The first local operability slices are implemented: process liveness and deployment readiness have
+separate contracts, all probe outcomes are non-cacheable and outside request budgets, Compose checks
+API liveness, and the web service waits for that health signal. A separately authenticated,
+disabled-by-default JSON snapshot now exposes ledger lag, checkpoint hash/age, the active durable
+continuity halt, accepted/rejected registrations, logical database size, cluster client connections,
+rate-limit outcomes and optional server payload-resolution outcomes without recording request
+identifiers. Its explicit coverage metadata does not mislabel browser-local submissions, physical
+disk capacity, postgres.js pool saturation, or continuity history as observed. Historical
+continuity counters, client-submission observability, infrastructure exporters, objectives, alerts,
+staging drills and release-supply-chain controls above remain open.
 
 Exit criteria:
 

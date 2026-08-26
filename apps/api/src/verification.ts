@@ -1,9 +1,7 @@
 import {
   canonicalize,
+  classifyCredentialPayload,
   decodeUtf8Hex,
-  parseCredentialPayload,
-  validateCredentialPayload,
-  verifyPayloadIntegrity,
   XcsError,
   type JsonValue,
   type ResolvedSchema,
@@ -11,9 +9,11 @@ import {
 } from '@xcs-protocol/core'
 import type { CredentialGenerationRow, SchemaRow } from '@xcs-protocol/db'
 
+import { assertCredentialGenerationEvidence } from './credential-generation-evidence.js'
+import { credentialGenerationState } from './credential-state.js'
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
 import { assertAuthoritativeLedgerEvidence, assertIndexerReady } from './indexer-status.js'
-import { PayloadUnavailableError } from './payload-resolver.js'
+import { PayloadInvalidError, PayloadUnavailableError } from './payload-resolver.js'
 import { authoritativeResolvedSchema, schemaProjectionEvidenceUids } from './schema-projection.js'
 import type { ApiRepository, PayloadResolver, TrustPolicy } from './types.js'
 
@@ -38,18 +38,10 @@ export class VerificationNetworkNotFoundError extends Error {
 
 function onChainStatus(
   generation: CredentialGenerationRow | undefined,
-  closeTime: number | undefined,
+  closeTime: number,
 ): VerificationReport['onChain'] {
   if (generation === undefined) return 'not_found'
-  if (generation.deletedLedgerIndex !== null) return 'deleted'
-  if (
-    generation.expiration !== null &&
-    closeTime !== undefined &&
-    generation.expiration <= closeTime
-  ) {
-    return 'expired'
-  }
-  return generation.accepted ? 'active' : 'pending'
+  return credentialGenerationState(generation, closeTime)
 }
 
 function decodeCredentialUri(generation: CredentialGenerationRow): string | undefined {
@@ -80,23 +72,28 @@ async function payloadStatus(input: {
     schema,
   }
 
-  try {
-    let content: string | Uint8Array
-    if (request.payload !== undefined) {
-      const validated = validateCredentialPayload(request.payload, context)
-      content = canonicalize(validated as JsonValue)
-    } else {
-      content = await resolver.resolve(uri)
-      parseCredentialPayload(content, context)
+  if (request.payload !== undefined) {
+    try {
+      return classifyCredentialPayload(
+        { status: 'retrieved', content: canonicalize(request.payload as JsonValue) },
+        uri,
+        context,
+      )
+    } catch (error) {
+      if (error instanceof XcsError) return 'invalid'
+      throw error
     }
-    const integrity = verifyPayloadIntegrity(content, uri)
-    if (integrity.status === 'tampered') return 'tampered'
-    if (integrity.status === 'invalid_uri') return 'invalid'
-    return 'valid'
+  }
+
+  try {
+    const content = await resolver.resolve(uri)
+    return classifyCredentialPayload({ status: 'retrieved', content }, uri, context)
   } catch (error) {
-    if (error instanceof PayloadUnavailableError) return 'unavailable'
-    if (error instanceof XcsError) return 'invalid'
-    return 'invalid'
+    if (error instanceof PayloadUnavailableError) {
+      return classifyCredentialPayload({ status: 'unavailable' }, uri, context)
+    }
+    if (error instanceof PayloadInvalidError || error instanceof XcsError) return 'invalid'
+    throw error
   }
 }
 
@@ -151,6 +148,16 @@ export async function verifyCredential(
         ],
       }
       assertAuthoritativeLedgerEvidence(evidence)
+      if (generation !== undefined) {
+        assertCredentialGenerationEvidence(generation, {
+          profileId: request.network,
+          activationLedgerIndex: network.activationLedgerIndex,
+          checkpointLedgerIndex: evidence.checkpoint.ledgerIndex,
+          issuer: request.issuer,
+          subject: request.subject,
+          schemaUid: request.schemaUid,
+        })
+      }
       const schema =
         schemaRow === undefined
           ? undefined

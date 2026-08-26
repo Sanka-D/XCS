@@ -88,6 +88,7 @@ export function useWallet() {
     getActiveNetworkProfile,
     getCredential,
     getCredentialEventByTransaction,
+    getNetworkReadiness,
     getSchemaRegistrationByTransaction,
   } = useXcsApi()
 
@@ -321,6 +322,7 @@ export function useWallet() {
           if (!sameProfile(activeProfile, latestProfile)) {
             throw new Error('NETWORK_PROFILE_CHANGED_AFTER_PREVIEW')
           }
+          await getNetworkReadiness(activeProfile.profileId)
           assertWalletContext(transaction, signingAddress, signingSession)
           assertCurrent?.()
           return walletSigner.sign(preparedTransaction)
@@ -345,6 +347,7 @@ export function useWallet() {
             if (!sameProfile(activeProfile, latestProfile)) {
               throw new Error('NETWORK_PROFILE_CHANGED_AFTER_SIGNATURE')
             }
+            await getNetworkReadiness(activeProfile.profileId)
             assertWalletContext(transaction, signingAddress, signingSession)
             assertCurrent?.()
             await operationStore.persistSigned({

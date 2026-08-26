@@ -93,18 +93,33 @@ export interface CredentialPayloadContext {
   issuer: string
   subject: string
   schemaUid: string
-  schema: ResolvedSchema | Record<string, FieldDescriptor>
+  /** A resolved schema, or a complete standalone definition without `extends`. */
+  schema: ResolvedSchema | SchemaDefinition
 }
 
 export type OnChainVerificationStatus = 'pending' | 'active' | 'expired' | 'deleted' | 'not_found'
 
+export type CredentialLifecycleState = Exclude<OnChainVerificationStatus, 'not_found'>
+
+export interface CredentialLifecycleInput {
+  objectExists: boolean
+  accepted: boolean
+  expiration?: number | null
+  closeTime: number
+}
+
 export interface VerificationReport {
   onChain: OnChainVerificationStatus
   schema: 'valid' | 'invalid' | 'unknown'
-  payload: 'valid' | 'unavailable' | 'tampered' | 'invalid' | 'not_checked'
+  payload: PayloadVerificationStatus | 'not_checked'
   issuerTrust: 'trusted' | 'untrusted' | 'unknown'
   generationId?: string
 }
+
+export type PayloadVerificationStatus = 'valid' | 'unavailable' | 'tampered' | 'invalid'
+
+export type PayloadRetrievalEvidence =
+  { status: 'retrieved'; content: string | Uint8Array } | { status: 'unavailable' }
 
 export interface IpfsPayloadUri {
   kind: 'ipfs'

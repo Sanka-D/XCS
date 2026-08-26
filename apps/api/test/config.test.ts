@@ -4,6 +4,7 @@ import { loadApiConfig } from '../src/config.js'
 import { DisabledPayloadResolver, PayloadUnavailableError } from '../src/payload-resolver.js'
 
 const INTERNAL_SSR_TOKEN = 'test-internal-ssr-token-000000000001'
+const METRICS_TOKEN = 'test-operational-metrics-token-00000001'
 
 describe('API configuration', () => {
   it('uses repository-standard XCS variables and disables fetching by default', () => {
@@ -21,6 +22,7 @@ describe('API configuration', () => {
       allowedOrigins: ['http://localhost:3000'],
       payloadFetchEnabled: false,
       readinessMaxLedgerAgeSeconds: 120,
+      operationalMetrics: { enabled: false },
       demoPinning: { enabled: false },
     })
   })
@@ -67,6 +69,47 @@ describe('API configuration', () => {
         XCS_INTERNAL_API_TOKEN: 'xcs-development-internal-token-0001',
       }),
     ).toThrow('32 to 256 URL-safe random characters')
+  })
+
+  it('requires a distinct strong token only when operational metrics are enabled', () => {
+    expect(
+      loadApiConfig({
+        XCS_DATABASE_URL: 'postgres://localhost/xcs',
+        XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+        XCS_METRICS_ENABLED: 'true',
+        XCS_METRICS_TOKEN: METRICS_TOKEN,
+      }).operationalMetrics,
+    ).toEqual({ enabled: true, token: METRICS_TOKEN })
+    expect(() =>
+      loadApiConfig({
+        XCS_DATABASE_URL: 'postgres://localhost/xcs',
+        XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+        XCS_METRICS_ENABLED: 'true',
+      }),
+    ).toThrow('XCS_METRICS_TOKEN is required')
+    expect(() =>
+      loadApiConfig({
+        XCS_DATABASE_URL: 'postgres://localhost/xcs',
+        XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+        XCS_METRICS_ENABLED: 'true',
+        XCS_METRICS_TOKEN: 'too-short',
+      }),
+    ).toThrow('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
+    expect(() =>
+      loadApiConfig({
+        XCS_DATABASE_URL: 'postgres://localhost/xcs',
+        XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+        XCS_METRICS_ENABLED: 'true',
+        XCS_METRICS_TOKEN: INTERNAL_SSR_TOKEN,
+      }),
+    ).toThrow('must be distinct')
+    expect(() =>
+      loadApiConfig({
+        XCS_DATABASE_URL: 'postgres://localhost/xcs',
+        XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+        XCS_METRICS_ENABLED: 'yes',
+      }),
+    ).toThrow('XCS_METRICS_ENABLED must be exactly true or false')
   })
 
   it('rejects an unsafe readiness staleness threshold', () => {

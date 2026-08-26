@@ -28,6 +28,56 @@ go vet ./...
 go build ./...
 ```
 
+Use the repository-pinned Go 1.26 line. XCS v0.1 freezes IDNA to Unicode 15.0.0; the verifier checks
+the selected `x/net/idna` table version and fails closed if a newer toolchain selects different
+tables.
+
+The TypeScript generative suite is deterministic. Its JSON/JCS and UID properties run 512 generated
+cases with seed `0x58435301` by default. Schema resolution exhausts all supported inheritance depths
+from 1 through 16 and the 256/257 resolved-descriptor boundary with deterministic fixtures. Failures
+print the property, seed, case index and generated input context. Reproduce or widen the configurable
+properties without changing committed fixtures:
+
+```bash
+XCS_GENERATIVE_SEED=0x58435301 XCS_GENERATIVE_RUNS=512 \
+  pnpm --filter @xcs-protocol/core exec vitest run test/generative-conformance.test.ts
+```
+
+`XCS_GENERATIVE_SEED` must be a non-zero unsigned 32-bit integer and
+`XCS_GENERATIVE_RUNS` must be between 1 and 10,000. Turbo includes both variables in its test cache
+key. SDK and indexer mutation matrices use their own fixed seed and do not read these overrides.
+
+API tests also exercise the disabled-by-default operational snapshot: bearer authentication occurs
+before database reads, scrapes remain outside public budgets and OpenAPI, PostgreSQL failures do not
+leak details, invalid projection evidence has a distinct stable code, and process counters classify
+only bounded rate-limit and server-resolver outcomes.
+Repository tests reject partial or unsafe durable gauges while accepting profiles that have not yet
+published status/checkpoint rows.
+
+The v0.1 revision 9 manifest is consumed independently by TypeScript and Go. In addition to schema,
+UID, JCS and claim cases, it covers inherited payload resolution, exact 1 MiB payload and 256-byte URI
+boundaries, pinned Unicode 15 UTS #46 authority normalization, port and IP boundaries, canonical
+path/query retrieval URLs, Ripple/Unix/ISO conversion and lifecycle state precedence. Its shared
+retrieval cases also require identical `valid`, `unavailable`, `tampered`, and `invalid` outcomes,
+including invalid-URI precedence and the 1 MiB plus one byte rejection. A runner fails if a declared
+handler is missing or an undeclared vector file is present.
+
+Go's normal test command executes every registered fuzz seed, including those loaded from the
+committed conformance vectors. Run the same bounded campaigns as CI when changing strict JSON,
+canonicalization or UID behavior:
+
+```bash
+cd verifier-go
+go test -run=^$ -fuzz=^FuzzStrictJSONCanonicalRoundTrip$ -fuzztime=10s -parallel=2 ./xcs
+go test -run=^$ -fuzz=^FuzzSchemaUIDDeterminism$ -fuzztime=10s -parallel=2 ./xcs
+```
+
+Fuzz caches are local build artifacts and must not be committed. Reduce and review every real
+counterexample in both implementations. If it only exposes a missing example of frozen v0.1
+semantics, add a language-neutral v0.1 vector and increment the manifest revision. If fixing it
+would change historical validity, a stable error code or derived bytes, create a new protocol
+version and activation profile instead. Existing vector IDs and expected results are immutable.
+
 The deterministic browser gate requires Chromium once, then runs without Testnet, PostgreSQL or
 wallet keys:
 
@@ -38,7 +88,7 @@ pnpm test:e2e
 
 ## Integration tiers
 
-1. Pure unit and conformance tests require no network.
+1. Pure unit, conformance, generative and fuzz-corpus tests require no network.
 2. Database integration tests require an isolated PostgreSQL 18 server and an admin URL configured
    with `XCS_TEST_DATABASE_URL`; the suite creates and removes its own random databases.
 3. Indexer fixture tests consume captured public-ledger bundles produced only after exact agreement
@@ -46,30 +96,41 @@ pnpm test:e2e
 4. Testnet E2E requires a real network profile and externally controlled funded wallets.
 5. The deterministic Playwright browser gate uses explicitly development-only issuer and subject
    wallets plus a fake XRPL client. It proves exact application transitions and indexed business
-   evidence, including the subject's payload consent and separate trust-neutral acknowledgement;
+   evidence, including the subject's payload consent, separate trust-neutral acknowledgement, and
+   the two readiness gates around wallet signing and blob persistence/submission;
    real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
 
 Never use a production seed in tests. A Testnet reset invalidates the activation profile and
 requires a new fixture/profile rather than editing historical expected UIDs.
 
 The destructive PostgreSQL integration suite receives an **admin database URL**, creates random
-databases named `xcs_it_<uuid>` and the fixed `xcs_indexer`/`xcs_api` roles, then removes those exact
-objects after the run. It refuses to run the provisioning case if either role already exists. Use
-only a disposable CI/test cluster; never point this suite at a shared or production PostgreSQL
-instance.
+databases named `xcs_it_<uuid>` or `xcs_api_it_<uuid>` and the fixed `xcs_indexer`/`xcs_api` roles,
+then removes those exact objects after each suite. It refuses to run a provisioning case if either
+role already exists. Use only a disposable CI/test cluster; never point this suite at a shared or
+production PostgreSQL instance.
 
 ```sh
 XCS_TEST_DATABASE_URL=postgres://postgres:password@127.0.0.1:5432/postgres pnpm test:postgres
 ```
 
-It requires PostgreSQL 18 and proves migrations `0000` through `0002`, including the discovery
-indexes, NULL-safe constraints,
-lease takeover/fencing, rollback, restart/idempotence, transaction-root persistence, and equal
-timestamp-free digests across two replays. It also provisions the fixed runtime roles in the
-isolated cluster and proves their positive and denied permissions, then proves that two replays with
-different source tips stop at the same quorum-verified index/hash boundary. The unit suite separately
-proves that a tip advancing during replay cannot move that boundary. Normal `pnpm test` skips these
-eight cases when the admin URL is absent; CI runs them as a required separate job.
+It requires PostgreSQL 18 and proves migrations `0000` through `0003`, including the discovery
+indexes, NULL-safe constraints, and all 16 projection-integrity constraints. The `0003` case proves
+that `CHECK NOT VALID` installation is followed by post-commit, table-by-table validation; invalid
+historical projection data fails closed while preserving a retry path after rebuild/replay. The
+suite also covers lease takeover/fencing, rollback, restart/idempotence, transaction-root
+persistence, and equal timestamp-free digests across two replays. It provisions the fixed runtime
+roles in the isolated cluster, proves their positive and denied permissions, and confirms that the
+least-privilege `xcs_api` role may read logical database size and client-connection gauges. It then
+proves that two replays with different source tips stop at the same quorum-verified index/hash
+boundary. The unit suite separately proves that a tip advancing during replay cannot move that
+boundary. A tenth indexer case captures a deterministic four-ledger bundle, validates and opens it
+independently twice, and runs the normal worker through schema registration, six Credential
+creations, acceptance and all six deletion causes. Both empty projections must match the pinned
+complete digest and exact rows. This exercises the real bundle pipeline locally; a reviewed capture
+from public Testnet remains separate release evidence. An eleventh API case applies the migrations
+to another empty database and executes the operational snapshot's real SQL and runtime type
+normalization. Normal `pnpm test` skips these eleven cases when the admin URL is absent; CI runs them
+as a required separate job.
 
 ## Captured ledger bundles
 

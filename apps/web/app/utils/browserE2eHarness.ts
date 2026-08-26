@@ -12,6 +12,19 @@ export const BROWSER_E2E_ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 export const BROWSER_E2E_SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
 export const BROWSER_E2E_SUBJECT_ACCOUNT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
 
+interface BrowserE2eEffects {
+  walletSignatures: number
+  ledgerSubmissions: number
+}
+
+function browserE2eEffects(): BrowserE2eEffects {
+  const runtime = globalThis as typeof globalThis & {
+    __xcsBrowserE2eEffects?: BrowserE2eEffects
+  }
+  runtime.__xcsBrowserE2eEffects ??= { walletSignatures: 0, ledgerSubmissions: 0 }
+  return runtime.__xcsBrowserE2eEffects
+}
+
 const NETWORK_ID = 1
 const LEDGER_INDEX = 100_001
 const LAST_LEDGER_SEQUENCE = LEDGER_INDEX + 20
@@ -89,6 +102,7 @@ class BrowserE2eWalletManager {
 
   public async sign(transaction: Transaction): Promise<SignedTransaction> {
     if (this.currentAccount === null) throw new Error('BROWSER_E2E_WALLET_NOT_CONNECTED')
+    browserE2eEffects().walletSignatures += 1
     const txBlob = encode({
       ...transaction,
       SigningPubKey: SYNTHETIC_PUBLIC_KEY,
@@ -143,6 +157,7 @@ class BrowserE2eLedgerClient implements BrowserE2eClientShape {
 
   public async submit(txBlob: string): Promise<{ result: Record<string, unknown> }> {
     this.assertConnected()
+    browserE2eEffects().ledgerSubmissions += 1
     this.submitted.add(hashes.hashSignedTx(txBlob).toUpperCase())
     return {
       result: {

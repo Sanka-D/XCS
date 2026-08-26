@@ -61,4 +61,10 @@ describe('schema UID', () => {
     )
     expect(decodeUtf8Hex(encodeUtf8Hex('é'))).toBe('é')
   })
+
+  it('rejects a terminal unpaired high surrogate before UTF-8 encoding', () => {
+    expect(() => encodeUtf8Hex(`invalid${String.fromCharCode(0xd800)}`)).toThrowError(
+      expect.objectContaining({ code: 'UTF8_INVALID' }),
+    )
+  })
 })

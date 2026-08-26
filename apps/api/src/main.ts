@@ -3,6 +3,7 @@ import { createDatabaseClient } from '@xcs-protocol/db'
 import { createApi } from './app.js'
 import { loadApiConfig } from './config.js'
 import { KuboPinStore } from './kubo.js'
+import { PostgresOperationalMetricsRepository } from './operational-metrics-repository.js'
 import { DisabledPayloadResolver, SafePayloadResolver } from './payload-resolver.js'
 import { DemoPinningService } from './pinning.js'
 import { PostgresPinningRepository } from './pinning-repository.js'
@@ -35,6 +36,15 @@ const app = await createApi({
   internalSsrToken: config.internalSsrToken,
   trustedProxyCidrs: config.trustedProxyCidrs,
   readinessMaxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
+  ...(config.operationalMetrics.enabled
+    ? {
+        operationalMetrics: {
+          token: config.operationalMetrics.token,
+          repository: new PostgresOperationalMetricsRepository(database.db),
+          observePayloadResolver: config.payloadFetchEnabled,
+        },
+      }
+    : {}),
   ...(pinningService === undefined ? {} : { pinningService }),
   logger: true,
 })

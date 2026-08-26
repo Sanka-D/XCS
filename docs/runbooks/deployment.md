@@ -117,6 +117,52 @@ deploy the API and web application. A fresh install receives the same migration 
 sequence. If the application must be rolled back, retain the indexes and forward-fix any database
 issue instead of dropping them during the incident.
 
+### Migration 0003: projection integrity
+
+`0003_projection_integrity.sql` is an additive storage-boundary hardening migration. It adds 16
+`CHECK` constraints to `ledger_checkpoints`, `schema_events`, `schemas`,
+`credential_generations`, and `credential_events`. They cover native XRPL uint32 bounds,
+non-negative transaction/node coordinates, non-null event generation IDs, and generation-ledger
+ordering.
+
+The SQL migration sets `lock_timeout` to 5 seconds and adds every constraint as `NOT VALID`. This
+means PostgreSQL enforces it for new or changed rows immediately without scanning all historical
+rows while Drizzle still holds the migration transaction. Once that transaction commits,
+`db:migrate` validates the constraints table by table, in a separate transaction per table and with
+the same 5-second lock timeout plus a configurable statement timeout that defaults to 30 minutes. A
+completed table remains validated if a later table fails, and a subsequent `db:migrate` resumes the
+remaining validation even though `0003` is already recorded in the migration journal.
+
+On an existing populated projection, schedule the migration before deploying the matching services
+and pause indexer writes during the short constraint-addition phase when practical. If the 5-second
+lock timeout expires, no lock is waited on indefinitely: rerun `db:migrate` when write traffic is
+lower. If a table scan exceeds 30 minutes, rerun the same command in a larger maintenance window.
+Increase `XCS_MIGRATION_STATEMENT_TIMEOUT_MS` for that retry as shown below. If historical rows
+violate a constraint, `db:migrate` exits unsuccessfully after installing `0003`; the constraints
+still protect future writes, but the affected table remains unvalidated. The Compose dependency
+chain therefore does not run provisioning or start the API/indexer against that incomplete
+deployment.
+
+The validation scan budget defaults to `1800000` milliseconds. Increase it for a larger projection,
+or set it to `0` only when the maintenance process will monitor and cancel an unbounded scan:
+
+```sh
+XCS_MIGRATION_STATEMENT_TIMEOUT_MS=7200000 pnpm --filter @xcs-protocol/db db:migrate
+```
+
+Do not repair ledger-derived rows by inventing, truncating, or manually rewriting XRPL evidence.
+Retain a backup for diagnosis, rebuild the affected projection (or a fresh complete projection) from
+the audited activation boundary and validated ledgers, compare its deterministic digest, then rerun:
+
+```sh
+pnpm --filter @xcs-protocol/db db:migrate
+pnpm --filter @xcs-protocol/db db:provision
+```
+
+The validation step is intentionally retryable and will skip tables already validated. Application
+rollback can retain this additive migration; forward-fix migration defects instead of editing or
+removing an applied `0003`.
+
 ### Deployment configuration
 
 1. Copy `.env.example` to `.env`, replace all three local PostgreSQL passwords, and generate a
@@ -124,6 +170,9 @@ issue instead of dropping them during the incident.
    privately to the API and Nuxt SSR process; never reuse a database/RPC secret or expose it through
    a `NUXT_PUBLIC_*` variable. It authenticates only the deterministic, network-derived SSR
    rate-limit key—the public API remains unauthenticated and direct browser calls remain IP-limited.
+   Operational metrics stay disabled by default. To enable them, also generate a distinct
+   `XCS_METRICS_TOKEN`, set `XCS_METRICS_ENABLED=true`, and restrict `/internal/metrics` to the
+   monitoring network at the ingress. Never pass that token to Nuxt or any browser variable.
 2. Complete and independently audit the registry blackhole ceremony described in
    `config/networks/README.md`.
 3. Save the immutable result as `config/networks/testnet.json`. Do not edit that file after indexing
@@ -174,11 +223,38 @@ docker compose up --build
 Use `config --quiet` because the fully rendered Compose configuration contains interpolated
 passwords and RPC URLs. The one-shot `migrate` service applies migrations with `xcs_admin`, then the
 one-shot `provision` service establishes runtime grants before the API and indexer start. The API is
-live at `/health/live`, but `/health/ready` stays unavailable until the dual-source indexer owns a
-live lease and its status exactly matches a transaction-root-bearing checkpoint at the effective
-tip. `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` controls readiness and all authoritative ledger-derived
+live at `/health/live`; Compose uses that endpoint for container health and starts the web service
+only after it succeeds. Do not replace this liveness check with `/health/ready`: readiness stays
+unavailable until the dual-source indexer owns a live lease and its status exactly matches a
+transaction-root-bearing checkpoint at the effective tip, and a normal catch-up must not restart the
+API. `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` controls readiness and all authoritative ledger-derived
 routes; stale, inconsistent, or implausibly future evidence returns `503`. OpenAPI documentation is
 served at `/documentation`.
+
+The compatibility alias `/health`, `/health/live`, and `/health/ready` all emit `Cache-Control:
+no-store` and bypass the application rate limiter. Restrict them at the ingress to the load balancer
+and monitoring network so public traffic cannot turn the database-backed readiness check into an
+unbounded read path. Preserve both their status codes and cache policy; never synthesize a cached
+`200` for a `503` readiness response.
+
+When operational metrics are enabled, scrape them with the dedicated bearer token:
+
+```sh
+curl --fail --silent --show-error \
+  --header "Authorization: Bearer ${XCS_METRICS_TOKEN}" \
+  http://127.0.0.1:3001/internal/metrics
+```
+
+The snapshot is JSON schema version 1, carries `Cache-Control: no-store`, and never consumes the
+public rate-limit budget. Alert on `/health/ready` separately: the metrics route intentionally stays
+`200` during a database outage so process-local counters remain observable. Do not interpret
+`logicalSizeBytes` as free disk or `clusterConnections` as API-pool saturation. Obtain physical
+volume capacity and container/process saturation from the deployment monitoring layer; do not mount
+the Docker socket or PostgreSQL volume into the API container. Scrape every 30–60 seconds rather
+than continuously: registration totals are derived from the rebuildable event projection and become
+more expensive as history grows. Alert separately on `database.errorCode`: `DATABASE_UNAVAILABLE`
+means the snapshot query failed, while `METRICS_EVIDENCE_INVALID` means PostgreSQL answered but the
+stored evidence was partial, malformed, or outside the supported bounds.
 
 ### Browser security-header rollout
 

@@ -75,6 +75,7 @@ interface ApiMockOptions {
   readonly credentialLifecycle?: BrowserCredentialLifecycle
   readonly credentialUri?: string
   readonly pendingCredentialRejection?: boolean
+  readonly signingReadiness?: () => 'ready' | 'unavailable' | 'malformed'
 }
 
 interface BrowserCredentialLifecycle {
@@ -145,6 +146,33 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
     }
     if (path === '/v1/networks') {
       await route.fulfill({ json: { items: [PROFILE] } })
+      return
+    }
+    if (path === `/v1/networks/${PROFILE_ID}/readiness`) {
+      const readiness = options.signingReadiness?.() ?? 'ready'
+      if (readiness === 'unavailable') {
+        await route.fulfill({
+          status: 503,
+          json: { error: 'INDEXER_STALE', message: 'Synthetic stale indexer.' },
+        })
+        return
+      }
+      if (readiness === 'malformed') {
+        await route.fulfill({ json: { profileId: 'wrong-profile', status: 'ready' } })
+        return
+      }
+      await route.fulfill({
+        json: {
+          profileId: PROFILE_ID,
+          status: 'ready',
+          checkpoint: {
+            ledgerIndex: 100_001,
+            ledgerHash: LEDGER_HASH,
+            closeTime: 838_857_600,
+            transactionRoot: 'cd'.repeat(32),
+          },
+        },
+      })
       return
     }
     if (path === `/v1/networks/${PROFILE_ID}/stats`) {
@@ -435,6 +463,58 @@ async function downloadText(download: Download): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+async function browserE2eEffects(page: Page): Promise<{
+  walletSignatures: number
+  ledgerSubmissions: number
+}> {
+  return page.evaluate(() => {
+    const runtime = globalThis as typeof globalThis & {
+      __xcsBrowserE2eEffects?: { walletSignatures: number; ledgerSubmissions: number }
+    }
+    return runtime.__xcsBrowserE2eEffects ?? { walletSignatures: 0, ledgerSubmissions: 0 }
+  })
+}
+
+async function browserOperationPersistence(page: Page): Promise<
+  {
+    stage: unknown
+    hasTxBlob: boolean
+    hasTxHash: boolean
+  }[]
+> {
+  return page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('xcs-wallet-journal', 1)
+        request.onerror = () => reject(request.error ?? new Error('INDEXED_DB_OPEN_FAILED'))
+        request.onsuccess = () => {
+          const database = request.result
+          const transaction = database.transaction('operations', 'readonly')
+          const rows = transaction.objectStore('operations').getAll()
+          rows.onerror = () => reject(rows.error ?? new Error('INDEXED_DB_READ_FAILED'))
+          rows.onsuccess = () => {
+            resolve(
+              (rows.result as Record<string, unknown>[]).map((row) => ({
+                stage: row.stage,
+                hasTxBlob: typeof row.txBlob === 'string' && row.txBlob.length > 0,
+                hasTxHash: typeof row.txHash === 'string' && row.txHash.length > 0,
+              })),
+            )
+          }
+        }
+      }),
+  )
+}
+
+function consumeExpectedReadiness503(page: Page): void {
+  const errors = browserErrors.get(page) ?? []
+  const expected =
+    'console:Failed to load resource: the server responded with a status of 503 (Service Unavailable)'
+  const index = errors.indexOf(expected)
+  expect(index).toBeGreaterThanOrEqual(0)
+  errors.splice(index, 1)
+}
+
 test('discovers a schema from aggregate stats and global search', async ({ page }) => {
   await installApiMock(page)
 
@@ -478,6 +558,61 @@ test('registers a schema through XRPL validation and exact indexed XCS finality'
     'href',
     `/schemas/${SCHEMA_UID}`,
   )
+})
+
+test('does not open the wallet when profile readiness is unavailable', async ({ page }) => {
+  let readinessRequests = 0
+  await installApiMock(page, {
+    signingReadiness: () => {
+      readinessRequests += 1
+      return 'unavailable'
+    },
+  })
+
+  await page.goto('/schemas/register')
+  await connectSyntheticWallet(page)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
+  await page.locator('#schema-json').fill(JSON.stringify(SCHEMA, null, 2))
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('transaction-preview')).toContainText('Payment')
+
+  await page.getByTestId('transaction-sign').click()
+
+  await expect(page.locator('.error-box')).toContainText('INDEXER_SIGNING_READINESS_UNAVAILABLE')
+  await expect(page.getByTestId('xrpl-finality')).toHaveCount(0)
+  consumeExpectedReadiness503(page)
+  expect(readinessRequests).toBe(1)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+})
+
+test('does not persist or submit a signature when readiness disappears in the wallet', async ({
+  page,
+}) => {
+  let readinessRequests = 0
+  await installApiMock(page, {
+    signingReadiness: () => {
+      readinessRequests += 1
+      return readinessRequests === 1 ? 'ready' : 'unavailable'
+    },
+  })
+
+  await page.goto('/schemas/register')
+  await connectSyntheticWallet(page)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
+  await page.locator('#schema-json').fill(JSON.stringify(SCHEMA, null, 2))
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('transaction-preview')).toContainText('Payment')
+
+  await page.getByTestId('transaction-sign').click()
+
+  await expect(page.locator('.error-box')).toContainText('INDEXER_SIGNING_READINESS_UNAVAILABLE')
+  await expect(page.getByTestId('xrpl-finality')).toHaveCount(0)
+  consumeExpectedReadiness503(page)
+  expect(readinessRequests).toBe(2)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 1, ledgerSubmissions: 0 })
+  expect(await browserOperationPersistence(page)).toEqual([
+    { stage: 'failed', hasTxBlob: false, hasTxHash: false },
+  ])
 })
 
 test('issues, reconfirms, then accepts a credential with exact indexed evidence', async ({

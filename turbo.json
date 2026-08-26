@@ -20,10 +20,12 @@
     },
     "test": {
       "dependsOn": ["^build"],
+      "env": ["XCS_GENERATIVE_RUNS", "XCS_GENERATIVE_SEED"],
       "outputs": ["coverage/**"]
     },
     "test:coverage": {
       "dependsOn": ["^build"],
+      "env": ["XCS_GENERATIVE_RUNS", "XCS_GENERATIVE_SEED"],
       "outputs": ["coverage/**"]
     },
     "clean": {

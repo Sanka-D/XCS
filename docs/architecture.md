@@ -75,6 +75,13 @@ The public API reads ledger-derived rows and their integrity evidence from one r
 snapshot. It fails with `503` if the writer lease expired, either source disagreed, the status and
 checkpoint differ, transaction-root evidence is absent, or the checkpoint is stale.
 
+An optional internal metrics reader uses its own read-only repeatable-read transaction and a secret
+that is distinct from the Nuxt SSR identity. Its JSON snapshot combines rebuildable database gauges
+with process-local API counters and labels their scope explicitly. It exposes no request identity or
+payload content and is not protocol truth. Client-side wallet submissions, physical disk capacity,
+API pool saturation, and past continuity incidents are outside this first snapshot because the API
+does not reliably observe them.
+
 The initial migration is create-only for a fresh XCS projection database. It is not compatible with
 the database used by the historical `XRPL-Commons/xcs` MVP. Later migrations within this
 architecture must preserve mixed-version reads and use expand/migrate/contract when changing
@@ -105,6 +112,14 @@ ledger history instead of racing a moving network tip.
 ## Submission
 
 Transaction builders return unsigned semantic JSON. The application autofills fees, sequence and `LastLedgerSequence`, previews the complete transaction, asks an external wallet to sign, persists the resulting hash/blob, submits it, and waits for a validated result. A provisional submission response is never treated as success.
+
+The hosted site requires `GET /v1/networks/:profile/readiness` immediately before invoking the
+wallet and again after the wallet returns but before persisting or submitting the blob. That route
+uses the same repeatable-read, DB-time lease, quorum, checkpoint-root and freshness checks as
+authoritative reads. The diagnostic `/status` route and public submission RPC are never fallback
+authority. This is a product safety boundary, not a normative dependency of core XCS or the generic
+SDK. The API marks every readiness outcome `private, no-store`, the browser explicitly bypasses its
+cache, and the deployment ingress must preserve the header and never cache or synthesize the route.
 
 The Testnet beta performs one wallet operation at a time through Crossmark or GemWallet. It has no
 XCS account, server session, batch issuer, team or multi-tenant authorization layer. Recovery state

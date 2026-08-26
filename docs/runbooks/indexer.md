@@ -74,6 +74,11 @@ same target index and hash, then compare both the digest and row counts before a
 deployment. Comparing two runs that each selected their then-current moving tip is not reproducible
 evidence.
 
+CI applies this procedure to a deterministic synthetic bundle and pins its complete projection
+digest, including all six Credential deletion causes. That proves the harness and persistence path;
+release evidence must repeat it with the reviewed public Testnet bundle rather than treating the
+synthetic digest as network evidence.
+
 To replay a captured bundle without any RPC endpoint, supply its directory and the externally
 recorded SHA-256 of its exact canonical manifest. The command derives the immutable target index/hash
 from the bundle's last committed ledger and binds the evidence to the exact profile file bytes:
