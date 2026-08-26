@@ -2,6 +2,11 @@
 
 The CLI prints successful command results as JSON on stdout and structured errors as JSON on stderr.
 
+This alpha package has not yet been published. Maintainers can validate the exact local tarballs
+without network access by running `pnpm package:smoke` at the repository root. Passing
+`--output-dir <directory>` preserves the three validated tarballs for a release workflow; the
+default command removes its temporary artifacts.
+
 It never accepts XRPL seeds or private keys. Transaction-building commands return unsigned JSON for a
 wallet to sign. `xcs tx submit` accepts the resulting signed blob only through stdin or an explicitly
 named file, keeping transaction blobs out of shell history.

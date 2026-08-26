@@ -1,0 +1,105 @@
+name: Stage npm packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install a staged-publishing-capable npm CLI
+        run: npm install --global npm@11.16.0
+      - run: pnpm install --frozen-lockfile
+      - name: Verify the release source tree
+        run: pnpm verify
+      - name: Build and verify release tarballs
+        run: pnpm package:smoke -- --output-dir "$RUNNER_TEMP/xcs-packages"
+      - name: Verify coordinated alpha tag
+        shell: bash
+        run: |
+          VERSION="$(node --input-type=module -e "import root from './package.json' with { type: 'json' }; process.stdout.write(root.version)")"
+          if [[ "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match package version v$VERSION" >&2
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "The alpha workflow refuses non-alpha version $VERSION" >&2
+            exit 1
+          fi
+      - name: Verify the annotated release tag signature
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          read -r OBJECT_TYPE TAG_OBJECT_SHA < <(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '[.object.type, .object.sha] | @tsv')
+          if [[ "$OBJECT_TYPE" != "tag" ]]; then
+            echo "Release tag $GITHUB_REF_NAME must be an annotated signed tag" >&2
+            exit 1
+          fi
+          read -r VERIFIED TAGGED_COMMIT < <(gh api "repos/$GITHUB_REPOSITORY/git/tags/$TAG_OBJECT_SHA" --jq '[.verification.verified, .object.sha] | @tsv')
+          if [[ "$VERIFIED" != "true" ]]; then
+            echo "GitHub did not verify the release tag signature" >&2
+            exit 1
+          fi
+          if [[ "$TAGGED_COMMIT" != "$(git rev-parse HEAD)" ]]; then
+            echo "The verified tag object does not target the checked-out commit" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "The release commit is not part of origin/main" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: xcs-npm-${{ github.event.release.tag_name }}
+          path: ${{ runner.temp }}/xcs-packages/*.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Stage packages for human 2FA approval
+        shell: bash
+        run: |
+          VERSION="$(node --input-type=module -e "import root from './package.json' with { type: 'json' }; process.stdout.write(root.version)")"
+          for PACKAGE in core sdk cli; do
+            TARBALL="$RUNNER_TEMP/xcs-packages/xcs-protocol-$PACKAGE-$VERSION.tgz"
+            PACKAGE_NAME="@xcs-protocol/$PACKAGE"
+            if [[ ! -f "$TARBALL" ]]; then
+              echo "Missing verified tarball: $TARBALL" >&2
+              exit 1
+            fi
+            LOCAL_INTEGRITY="$(node --input-type=module -e "import { createHash } from 'node:crypto'; import { readFileSync } from 'node:fs'; process.stdout.write('sha512-' + createHash('sha512').update(readFileSync(process.argv[1])).digest('base64'))" "$TARBALL")"
+            if PUBLISHED_INTEGRITY="$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity 2>/dev/null)"; then
+              if [[ "$PUBLISHED_INTEGRITY" != "$LOCAL_INTEGRITY" ]]; then
+                echo "$PACKAGE_NAME@$VERSION already exists with different tarball bytes" >&2
+                exit 1
+              fi
+              echo "$PACKAGE_NAME@$VERSION already contains the verified tarball; skipping stage"
+              continue
+            fi
+            npm stage publish "$TARBALL" --access public --tag alpha
+          done

@@ -4,9 +4,25 @@
   "description": "Deterministic, browser-safe primitives for XCS v0.1",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/XRPL-Commons/XCS/tree/main/packages/core#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XRPL-Commons/XCS.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/XRPL-Commons/XCS/issues"
+  },
+  "keywords": [
+    "credentials",
+    "protocol",
+    "xrpl"
+  ],
   "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "exports": {
     ".": {
@@ -18,12 +34,18 @@
     "build": "tsup src/index.ts --format esm --dts --clean",
     "clean": "rm -rf dist coverage",
     "lint": "tsc --noEmit",
+    "prepack": "pnpm build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=24 <27"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
     "tsup": "^8.5.0",

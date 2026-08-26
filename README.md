@@ -67,7 +67,11 @@ replay the same validated ledgers, and compare a deterministic projection digest
 uses issuer-hosted HTTPS payloads and does not store claims; signing keys remain in issuer/subject
 wallets. Protocol and CLI support for IPFS remains available outside that hosted beta boundary.
 
-For the database and indexer workflow, see [`docs/runbooks/indexer.md`](./docs/runbooks/indexer.md). For commands and test tiers, see [`docs/TESTING.md`](./docs/TESTING.md).
+For the database and indexer workflow, see [`docs/runbooks/indexer.md`](./docs/runbooks/indexer.md).
+For commands and test tiers, see [`docs/TESTING.md`](./docs/TESTING.md). The reproducible tarball gate,
+one-time npm scope bootstrap, and OIDC staged-release procedure are documented in
+[`docs/runbooks/npm-packages.md`](./docs/runbooks/npm-packages.md); the three public package names
+must not be presented as registry-installable until that external bootstrap is complete.
 
 The outcome-based path from this Testnet alpha to organizational issuance and a possible Mainnet
 decision is tracked in [`docs/implementation-plan.md`](./docs/implementation-plan.md).

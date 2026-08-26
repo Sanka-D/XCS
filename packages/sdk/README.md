@@ -2,6 +2,11 @@
 
 Signer-agnostic builders and reliable-submission helpers for XCS v0.1.
 
+This alpha package has not yet been published. Maintainers can validate the exact local tarballs
+without network access by running `pnpm package:smoke` at the repository root. Passing
+`--output-dir <directory>` preserves the three validated tarballs for a release workflow; the
+default command removes its temporary artifacts.
+
 The SDK intentionally exposes no API that accepts an XRPL seed or private key. Wallets implement the
 small `Signer` interface and receive an autofilled, unsigned transaction containing a bounded
 `LastLedgerSequence`. A signed blob can also be submitted directly when it was produced out of

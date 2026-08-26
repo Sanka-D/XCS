@@ -25,6 +25,7 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | Account privacy amplification          | Exact shared-coordinate lookup only; no subject feed, account-wide listing or claims search              |
 | Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                    |
 | Public pin abuse                       | Testnet-only, wallet challenge, IP/address rate limit and payload quota                                  |
+| Package substitution or workspace leak | Reproducible tarballs; closed inventory; isolated consumer smoke; signed tag; OIDC staging plus 2FA      |
 
 ## Browser policy rollout boundary
 

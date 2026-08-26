@@ -25,6 +25,10 @@ integrators.
   browser, so clearing site data or moving devices loses that local history.
 - Issuance is one Credential at a time through a supported wallet. Batch issuance, teams, RBAC,
   hosted automation and GraphQL are outside the beta scope.
+- `@xcs-protocol/core`, `@xcs-protocol/sdk`, and `@xcs-protocol/cli` have reproducible tarball and
+  isolated-consumer gates, but they are not registry-installable until XRPL Commons completes the
+  one-time npm scope bootstrap. Developers guidance therefore remains explicitly monorepo-local.
+  Subsequent releases are staged through OIDC and still require human 2FA approval.
 
 ## Network and deployment
 

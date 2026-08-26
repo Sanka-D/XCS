@@ -74,6 +74,12 @@ requires exact indexed `accepted` evidence. It is useful CI evidence for applica
 transitions, but it is not evidence for browser-extension compatibility, issuer-hosted CORS
 behavior, a live Commons deployment or validated Testnet pilot transactions.
 
+The public `core`, SDK, and CLI manifests now have a coordinated artifact contract. A fresh-checkout
+CI job builds and twice-packs all three, rejects non-reproducible or workspace-linked tarballs, and
+smokes them from an isolated offline consumer. This is release evidence, not publication evidence:
+the npm scope bootstrap, first public versions, Trusted Publisher records, and human approval of a
+staged alpha remain external organization gates.
+
 ## Scope boundaries for v0.1
 
 The following are deliberately not v0.1 promises:

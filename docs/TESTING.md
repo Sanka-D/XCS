@@ -8,7 +8,15 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm package:smoke
 ```
+
+`package:smoke` starts from the publishable package manifests rather than workspace links. It builds
+and packs `core`, `sdk`, and `cli`, proves the tarballs are reproducible and contain no `workspace:`
+dependency, then installs them into an isolated offline consumer and exercises their types, ESM
+exports, binary and an offline CLI command. CI runs this in a separate fresh-checkout job so a stale
+local `dist/` cannot hide a missing build step. See
+[`runbooks/npm-packages.md`](./runbooks/npm-packages.md) for retained artifacts and release gates.
 
 The independent verifier is checked separately:
 
