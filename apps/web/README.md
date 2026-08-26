@@ -138,6 +138,17 @@ redirects disabled, then POST the parsed object to the API. Verification never r
 resolution. A link generation constraint is checked before the host fetch and again before the
 result is accepted.
 
+The exact `/credentials/:generationId` permalink applies the same boundary while also showing the
+schema and bounded lifecycle timeline. Its server-rendered response loads only indexed generation,
+schema and four-dimensional metadata. Public claims remain absent until the visitor consents to the
+displayed host; the browser then re-reads the profile, exact generation, tuple and URI before its
+single issuer-host fetch, verifies the locally parsed payload through `/v1/verify`, and renders fields
+in resolved-schema order. Claims remain in memory and are never journaled, cached or included in
+receipt exports. A replaced generation remains readable, but cannot reuse the current tuple
+generation's verification report or enable payload loading. A deleted generation that is still the
+current generation for its tuple may still be checked after consent; its deleted lifecycle state
+remains visible alongside the payload evidence.
+
 ## Durable submission journal
 
 Signed transaction blobs are stored in the origin's IndexedDB database `xcs-wallet-journal` before

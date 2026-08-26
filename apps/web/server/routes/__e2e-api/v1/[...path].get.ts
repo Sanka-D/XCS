@@ -1,6 +1,10 @@
 import {
+  canonicalize,
   computeSchemaUid,
+  createHttpsPayloadUri,
+  encodeUtf8Hex,
   validateSchema,
+  type JsonValue,
   type NetworkProfile,
   type SchemaDefinition,
 } from '@xcs-protocol/core'
@@ -13,11 +17,14 @@ const SUBJECT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
 const LEDGER_HASH = 'cd'.repeat(32)
 const SCHEMA: SchemaDefinition = {
   xcsVersion: '0.1',
-  name: 'Course participation',
-  description: 'Attests participation in one deterministic browser test course.',
+  name: 'Diploma Award',
+  description: 'Attests one deterministic browser test diploma award.',
   fields: {
     programId: { type: 'string' },
-    completedAt: { type: 'string' },
+    programName: { type: 'string' },
+    awardedAt: { type: 'string' },
+    diplomaId: { type: 'string' },
+    honors: { type: 'string', optional: true },
   },
 }
 const SCHEMA_UID = computeSchemaUid({
@@ -28,6 +35,25 @@ const SCHEMA_UID = computeSchemaUid({
   transactionIndex: 1,
   publisher: ISSUER,
 })
+const GENERATION_ID = '34'.repeat(32)
+const ACCEPTED_TRANSACTION_HASH = '78'.repeat(32)
+const HISTORICAL_GENERATION_ID = '56'.repeat(32)
+const DELETED_TRANSACTION_HASH = 'bc'.repeat(32)
+const PAYLOAD_URL = 'https://issuer.xcs.invalid/diploma.json'
+const CANONICAL_PAYLOAD = canonicalize({
+  xcsVersion: '0.1',
+  issuer: ISSUER,
+  subject: SUBJECT,
+  schema: SCHEMA_UID,
+  claims: {
+    programId: 'xcs-protocol-engineering-2026',
+    programName: 'Protocol Engineering',
+    awardedAt: '2026-08-25T10:00:00Z',
+    diplomaId: 'DIP-2026-0042',
+    honors: 'with distinction',
+  },
+} as JsonValue)
+const CREDENTIAL_URI = createHttpsPayloadUri(PAYLOAD_URL, CANONICAL_PAYLOAD)
 const PROFILE: NetworkProfile = {
   profileId: PROFILE_ID,
   xcsVersion: '0.1',
@@ -104,6 +130,108 @@ export default defineEventHandler((event) => {
       registrationTransactionHash: '56'.repeat(32),
       ledgerIndex: 100_001,
       transactionIndex: 1,
+    }
+  }
+
+  if (path === `networks/${PROFILE_ID}/credential-generations/${GENERATION_ID}`) {
+    return {
+      generation: {
+        generationId: GENERATION_ID,
+        ledgerObjectId: '90'.repeat(32),
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        uriHex: encodeUtf8Hex(CREDENTIAL_URI),
+        expiration: null,
+        accepted: true,
+        createdLedgerIndex: 100_001,
+        createdTransactionIndex: 2,
+        lastLedgerIndex: 100_002,
+        deletedLedgerIndex: null,
+        deletionCause: null,
+      },
+      state: 'active',
+      timeline: [
+        {
+          transactionHash: GENERATION_ID,
+          nodeIndex: 0,
+          generationId: GENERATION_ID,
+          ledgerIndex: 100_001,
+          ledgerHash: LEDGER_HASH,
+          transactionIndex: 2,
+          eventType: 'created',
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          accepted: false,
+          deletionCause: null,
+        },
+        {
+          transactionHash: ACCEPTED_TRANSACTION_HASH,
+          nodeIndex: 0,
+          generationId: GENERATION_ID,
+          ledgerIndex: 100_002,
+          ledgerHash: 'de'.repeat(32),
+          transactionIndex: 1,
+          eventType: 'accepted',
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          accepted: true,
+          deletionCause: null,
+        },
+      ],
+    }
+  }
+
+  if (path === `networks/${PROFILE_ID}/credential-generations/${HISTORICAL_GENERATION_ID}`) {
+    return {
+      generation: {
+        generationId: HISTORICAL_GENERATION_ID,
+        ledgerObjectId: '91'.repeat(32),
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        uriHex: encodeUtf8Hex(CREDENTIAL_URI),
+        expiration: null,
+        accepted: true,
+        createdLedgerIndex: 99_990,
+        createdTransactionIndex: 2,
+        lastLedgerIndex: 99_992,
+        deletedLedgerIndex: 99_992,
+        deletionCause: 'issuer_revoked',
+      },
+      state: 'deleted',
+      timeline: [
+        {
+          transactionHash: HISTORICAL_GENERATION_ID,
+          nodeIndex: 0,
+          generationId: HISTORICAL_GENERATION_ID,
+          ledgerIndex: 99_990,
+          ledgerHash: 'aa'.repeat(32),
+          transactionIndex: 2,
+          eventType: 'created',
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          accepted: false,
+          deletionCause: null,
+        },
+        {
+          transactionHash: DELETED_TRANSACTION_HASH,
+          nodeIndex: 0,
+          generationId: HISTORICAL_GENERATION_ID,
+          ledgerIndex: 99_992,
+          ledgerHash: 'bb'.repeat(32),
+          transactionIndex: 1,
+          eventType: 'deleted',
+          issuer: ISSUER,
+          subject: SUBJECT,
+          schemaUid: SCHEMA_UID,
+          accepted: true,
+          deletionCause: 'issuer_revoked',
+        },
+      ],
     }
   }
 

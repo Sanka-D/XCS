@@ -21,11 +21,14 @@ const SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
 const LEDGER_HASH = 'cd'.repeat(32)
 const SCHEMA: SchemaDefinition = {
   xcsVersion: '0.1',
-  name: 'Course participation',
-  description: 'Attests participation in one deterministic browser test course.',
+  name: 'Diploma Award',
+  description: 'Attests one deterministic browser test diploma award.',
   fields: {
     programId: { type: 'string' },
-    completedAt: { type: 'string' },
+    programName: { type: 'string' },
+    awardedAt: { type: 'string' },
+    diplomaId: { type: 'string' },
+    honors: { type: 'string', optional: true },
   },
 }
 const SCHEMA_UID = computeSchemaUid({
@@ -37,10 +40,24 @@ const SCHEMA_UID = computeSchemaUid({
   publisher: ISSUER,
 })
 const CLAIMS = {
-  programId: 'xcs-browser-e2e',
-  completedAt: '2026-08-25T10:00:00Z',
+  programId: 'xcs-protocol-engineering-2026',
+  programName: 'Protocol Engineering',
+  awardedAt: '2026-08-25T10:00:00Z',
+  diplomaId: 'DIP-2026-0042',
+  honors: 'with distinction',
 }
-const PAYLOAD_URL = 'https://issuer.xcs.invalid/c.json'
+const PAYLOAD_URL = 'https://issuer.xcs.invalid/diploma.json'
+const PERMALINK_GENERATION_ID = '34'.repeat(32)
+const PERMALINK_ACCEPTED_TRANSACTION_HASH = '78'.repeat(32)
+const HISTORICAL_GENERATION_ID = '56'.repeat(32)
+const CANONICAL_PAYLOAD = canonicalize({
+  xcsVersion: '0.1',
+  issuer: ISSUER,
+  subject: SUBJECT,
+  schema: SCHEMA_UID,
+  claims: CLAIMS,
+} as JsonValue)
+const CREDENTIAL_URI = createHttpsPayloadUri(PAYLOAD_URL, CANONICAL_PAYLOAD)
 const PROFILE: NetworkProfile = {
   profileId: PROFILE_ID,
   xcsVersion: '0.1',
@@ -95,9 +112,17 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
         body.network !== PROFILE_ID ||
         body.issuer !== ISSUER ||
         body.subject !== SUBJECT ||
-        body.schemaUid !== SCHEMA_UID
+        body.schemaUid !== SCHEMA_UID ||
+        body.resolvePayload === true
       ) {
         await route.fulfill({ status: 400, json: { error: 'BROWSER_E2E_VERIFY_INPUT_INVALID' } })
+        return
+      }
+      if (
+        Object.hasOwn(body, 'payload') &&
+        canonicalize(body.payload as JsonValue) !== CANONICAL_PAYLOAD
+      ) {
+        await route.fulfill({ status: 400, json: { error: 'BROWSER_E2E_VERIFY_PAYLOAD_INVALID' } })
         return
       }
       await route.fulfill({
@@ -177,6 +202,71 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
           registrationTransactionHash: '56'.repeat(32),
           ledgerIndex: 100_001,
           transactionIndex: 1,
+        },
+      })
+      return
+    }
+    const generationMatch = path.match(
+      new RegExp(`^/v1/networks/${PROFILE_ID}/credential-generations/([0-9a-f]{64})$`, 'u'),
+    )
+    if (generationMatch) {
+      const lifecycle = options.credentialLifecycle
+      const requestedGenerationId = generationMatch[1]!
+      if (
+        !lifecycle?.generationId ||
+        requestedGenerationId !== lifecycle.generationId ||
+        !options.credentialUri
+      ) {
+        await route.fulfill({ status: 404, json: { error: 'CREDENTIAL_GENERATION_NOT_FOUND' } })
+        return
+      }
+      const createdEvent = {
+        transactionHash: lifecycle.generationId,
+        nodeIndex: 0,
+        generationId: lifecycle.generationId,
+        ledgerIndex: 100_001,
+        ledgerHash: LEDGER_HASH,
+        transactionIndex: 2,
+        eventType: 'created',
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        accepted: false,
+        deletionCause: null,
+      }
+      const acceptedEvent = {
+        transactionHash: lifecycle.acceptedTransactionHash ?? PERMALINK_ACCEPTED_TRANSACTION_HASH,
+        nodeIndex: 0,
+        generationId: lifecycle.generationId,
+        ledgerIndex: 100_002,
+        ledgerHash: 'de'.repeat(32),
+        transactionIndex: 1,
+        eventType: 'accepted',
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: SCHEMA_UID,
+        accepted: true,
+        deletionCause: null,
+      }
+      await route.fulfill({
+        json: {
+          generation: {
+            generationId: lifecycle.generationId,
+            ledgerObjectId: '90'.repeat(32),
+            issuer: ISSUER,
+            subject: SUBJECT,
+            schemaUid: SCHEMA_UID,
+            uriHex: encodeUtf8Hex(options.credentialUri),
+            expiration: null,
+            accepted: lifecycle.state === 'active',
+            createdLedgerIndex: 100_001,
+            createdTransactionIndex: 2,
+            lastLedgerIndex: lifecycle.state === 'active' ? 100_002 : 100_001,
+            deletedLedgerIndex: null,
+            deletionCause: null,
+          },
+          state: lifecycle.state,
+          timeline: lifecycle.state === 'active' ? [createdEvent, acceptedEvent] : [createdEvent],
         },
       })
       return
@@ -306,10 +396,10 @@ test('discovers a schema from aggregate stats and global search', async ({ page 
 
   await page.locator('[data-client-ready="true"]').waitFor()
   const search = page.locator('.explorer-search').filter({ has: page.locator('#explorer-search') })
-  await search.getByRole('searchbox').fill('Course')
+  await search.getByRole('searchbox').fill('Diploma')
   await expect(search.getByRole('button')).toBeEnabled()
   await search.getByRole('button').click()
-  await expect(page).toHaveURL(/\/(?:en\/)?search\?q=Course$/u)
+  await expect(page).toHaveURL(/\/(?:en\/)?search\?q=Diploma$/u)
   const result = page.locator('.result-card').filter({ hasText: SCHEMA.name })
   await expect(result).toContainText(SCHEMA_UID)
   await result.click()
@@ -497,4 +587,144 @@ test('issues, reconfirms, then accepts a credential with exact indexed evidence'
       accepted: true,
     },
   })
+})
+
+test('reveals an exact diploma permalink only after bound payload consent', async ({ page }) => {
+  const credentialLifecycle: BrowserCredentialLifecycle = {
+    generationId: PERMALINK_GENERATION_ID,
+    state: 'active',
+    acceptedTransactionHash: PERMALINK_ACCEPTED_TRANSACTION_HASH,
+  }
+  await installApiMock(page, {
+    credentialLifecycle,
+    credentialUri: CREDENTIAL_URI,
+  })
+
+  let payloadRequestCount = 0
+  const requestTrace: string[] = []
+  const verifyBodies: Record<string, unknown>[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.href === PAYLOAD_URL) {
+      requestTrace.push('issuer')
+      return
+    }
+    if (!url.pathname.startsWith(`${API_PREFIX}/v1/`)) return
+    const apiPath = url.pathname.slice(API_PREFIX.length)
+    if (apiPath === '/v1/networks') requestTrace.push('networks')
+    if (apiPath.includes('/credential-generations/')) requestTrace.push('generation')
+    if (apiPath.includes('/schemas/')) requestTrace.push('schema')
+    if (apiPath === '/v1/verify') {
+      const body = request.postDataJSON() as Record<string, unknown>
+      verifyBodies.push(body)
+      requestTrace.push(Object.hasOwn(body, 'payload') ? 'verify:payload' : 'verify:metadata')
+    }
+  })
+  await page.route(PAYLOAD_URL, async (route) => {
+    payloadRequestCount += 1
+    await route.fulfill({
+      body: CANONICAL_PAYLOAD,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+    })
+  })
+
+  await page.goto(`/credentials/${PERMALINK_GENERATION_ID}`)
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await expect(page.getByRole('heading', { level: 1, name: SCHEMA.name })).toBeVisible()
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex,nofollow')
+  await expect(page.getByTestId('credential-dimension-on-chain')).toContainText('active')
+  await expect(page.getByTestId('credential-dimension-schema')).toContainText('valid')
+  await expect(page.getByTestId('credential-dimension-payload')).toContainText('not_checked')
+  await expect(page.getByTestId('credential-dimension-trust')).toContainText('unknown')
+  await expect(page.getByTestId('credential-claims')).toHaveCount(0)
+  expect(payloadRequestCount).toBe(0)
+
+  const consent = page
+    .getByTestId('credential-consent')
+    .getByRole('checkbox', { name: /Je consens au chargement|I consent to fetching/u })
+  await expect(consent).not.toBeChecked()
+  await consent.check()
+  expect(payloadRequestCount).toBe(0)
+  const postConsentTraceStart = requestTrace.length
+  await page
+    .getByRole('button', {
+      name: /Charger et vérifier le payload public|Fetch and verify public payload/u,
+    })
+    .click()
+
+  await expect(page.getByTestId('credential-payload-checked')).toBeVisible()
+  await expect(page.getByTestId('credential-claims')).toBeVisible()
+  expect(payloadRequestCount).toBe(1)
+  const postConsentTrace = requestTrace.slice(postConsentTraceStart)
+  const issuerIndex = postConsentTrace.indexOf('issuer')
+  expect(issuerIndex).toBeGreaterThan(-1)
+  for (const metadataRequest of ['networks', 'generation', 'schema', 'verify:metadata']) {
+    const metadataIndex = postConsentTrace.indexOf(metadataRequest)
+    expect(metadataIndex, `${metadataRequest} must be re-read before issuer fetch`).toBeGreaterThan(
+      -1,
+    )
+    expect(metadataIndex).toBeLessThan(issuerIndex)
+  }
+  expect(postConsentTrace.indexOf('verify:payload')).toBeGreaterThan(issuerIndex)
+  expect(verifyBodies.some((body) => body.resolvePayload === true)).toBe(false)
+  const payloadVerifications = verifyBodies.filter((body) => Object.hasOwn(body, 'payload'))
+  expect(payloadVerifications).toHaveLength(1)
+  expect(payloadVerifications[0]).toEqual({
+    network: PROFILE_ID,
+    issuer: ISSUER,
+    subject: SUBJECT,
+    schemaUid: SCHEMA_UID,
+    payload: JSON.parse(CANONICAL_PAYLOAD),
+  })
+
+  for (const [name, type, value] of [
+    ['programId', 'string', CLAIMS.programId],
+    ['programName', 'string', CLAIMS.programName],
+    ['awardedAt', 'string', CLAIMS.awardedAt],
+    ['diplomaId', 'string', CLAIMS.diplomaId],
+    ['honors', 'string', CLAIMS.honors],
+  ] as const) {
+    const row = page.getByTestId(`credential-claim-${name}`)
+    await expect(row).toContainText(type)
+    await expect(row).toContainText(value)
+  }
+  await expect(page.getByTestId('credential-dimension-on-chain')).toContainText('active')
+  await expect(page.getByTestId('credential-dimension-schema')).toContainText('valid')
+  await expect(page.getByTestId('credential-dimension-payload')).toContainText('valid')
+  await expect(page.getByTestId('credential-dimension-trust')).toContainText('unknown')
+})
+
+test('keeps a replaced historical generation readable without payload consent', async ({
+  page,
+}) => {
+  await installApiMock(page, {
+    credentialLifecycle: {
+      generationId: PERMALINK_GENERATION_ID,
+      state: 'active',
+      acceptedTransactionHash: PERMALINK_ACCEPTED_TRANSACTION_HASH,
+    },
+    credentialUri: CREDENTIAL_URI,
+  })
+  let payloadRequestCount = 0
+  await page.route(PAYLOAD_URL, async (route) => {
+    payloadRequestCount += 1
+    await route.fulfill({
+      body: CANONICAL_PAYLOAD,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+    })
+  })
+
+  await page.goto(`/credentials/${HISTORICAL_GENERATION_ID}`)
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await expect(page.getByRole('heading', { level: 1, name: SCHEMA.name })).toBeVisible()
+  await expect(
+    page.locator('.explorer-metadata').getByText(HISTORICAL_GENERATION_ID, { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByTestId('credential-verification-unavailable')).toBeVisible()
+  await expect(page.getByTestId('credential-consent')).toHaveCount(0)
+  await expect(page.getByTestId('credential-dimensions')).toHaveCount(0)
+  await expect(page.getByText('issuer_revoked', { exact: true })).toBeVisible()
+  expect(payloadRequestCount).toBe(0)
 })
