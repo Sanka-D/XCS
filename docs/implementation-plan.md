@@ -43,6 +43,11 @@ same validated ledgers must reach the same protocol result as the shared service
 
 These choices are recorded in [`ADR 0002`](./adr/0002-public-product-and-discovery.md).
 
+Before the irreversible beta ceremony, [`ADR 0003`](./adr/0003-disposable-controlled-testnet-registry.md)
+allows one private staging profile, `commons-testnet-xcs-v0.1-controlled-pilot`, whose registry is
+still controlled. The profile and its fresh database are disposable and cannot be promoted; this
+operational exception changes no v0.1 semantics or beta exit criterion.
+
 ## Current implementation evidence
 
 The repository now contains the frozen v0.1 specification and conformance contract, strict
@@ -88,6 +93,13 @@ historical rows.
 This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
 the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
 captured ledger fixtures, and two-entity pilot evidence remain external gates.
+
+The controlled-pilot deployment configuration is now explicit: it is guarded by an exact policy
+and acknowledgement, uses a Commons-operated primary, Ripple's public Testnet secondary and XRPL
+Labs' browser-only submission endpoint, and requires profile
+`commons-testnet-xcs-v0.1-controlled-pilot` plus a fresh private-staging database. Those public
+services have no XCS SLA. Evidence from this deployment is useful for staging drills and wallet
+feedback, but it is not blackhole, provider-retention, public-beta or Mainnet evidence.
 
 The browser Playwright journey is deterministic and synthetic: it replaces the wallet, RPC, API and
 payload host with fakes and covers schema registration, issuance, and subject acceptance through
@@ -152,6 +164,9 @@ database. Never point the former application at the new projection database.
 
 Work:
 
+- treat any run of `commons-testnet-xcs-v0.1-controlled-pilot` as disposable pre-beta staging; do
+  not reuse its registry, profile, activation boundary, events or PostgreSQL database for this
+  milestone;
 - perform the dedicated registry-account blackhole ceremony in
   `config/networks/README.md`, using `ACCOUNT_ZERO` unless a documented reason requires
   `ACCOUNT_ONE`, and retain public transaction and ledger evidence;
@@ -382,6 +397,7 @@ The critical path is:
 
 ```text
 baseline adopted
+  → disposable private controlled-registry staging
   → immutable Testnet profile
   → real wallet and ledger journey
   → frozen v0.1 interoperability proof

@@ -18,6 +18,7 @@
   },
   "common": {
     "testnetWarning": "Alpha Testnet — n’utilisez aucune donnée personnelle ni fonds réels.",
+    "controlledPilotWarning": "Pilote Testnet contrôlé par Commons — données jetables.",
     "close": "Fermer",
     "loading": "Chargement…",
     "working": "Traitement…",

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 const { locale, locales, setLocale } = useI18n()
+const config = useRuntimeConfig()
 const clientReady = ref(false)
+const controlledPilot = computed(() => hasControlledPilotProfileId(config.public.profileId))
 
 const availableLocales = computed(() =>
   locales.value.map((item) => (typeof item === 'string' ? { code: item, name: item } : item)),
@@ -43,6 +45,16 @@ onMounted(() => {
     </header>
 
     <div class="testnet-banner" role="status">{{ $t('common.testnetWarning') }}</div>
+    <div
+      v-if="controlledPilot"
+      class="controlled-pilot-banner"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      data-testid="controlled-pilot-banner"
+    >
+      {{ $t('common.controlledPilotWarning') }}
+    </div>
 
     <main>
       <NuxtPage />

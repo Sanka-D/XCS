@@ -31,6 +31,7 @@ export default defineConfig({
       NUXT_API_INTERNAL_TOKEN: 'xcs-security-production-e2e-token-0001',
       NUXT_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_BROWSER_E2E_MODE: 'disabled',
+      NUXT_PUBLIC_PROFILE_ID: 'commons-testnet-xcs-v0.1-controlled-pilot',
       XCS_BROWSER_E2E: '0',
     },
   },

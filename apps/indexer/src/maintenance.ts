@@ -14,12 +14,14 @@ import { count, eq } from 'drizzle-orm'
 
 import {
   loadIndexerConfig,
+  loadIndexerPreflightConfig,
   loadIndexerRuntimeConfig,
   type IndexerConfig,
   type IndexerRuntimeConfig,
 } from './config.js'
 import { LedgerFixtureBundleError } from './fixture-bundle.js'
 import { prepareFixtureReplay } from './fixture-replay.js'
+import { createPreflightAudit } from './preflight-audit.js'
 import { computeProjectionDigest } from './projection-digest.js'
 import { QuorumLedgerSource } from './quorum-ledger-source.js'
 import { loadReplayTarget, type ReplayTarget } from './replay-target.js'
@@ -63,32 +65,22 @@ function databaseUrl(): string {
   )
 }
 
-function quorumSource(config: IndexerConfig): QuorumLedgerSource {
+function quorumSource(
+  config: Pick<IndexerConfig, 'xrplRpcUrlPrimary' | 'xrplRpcUrlSecondary' | 'registryPolicy'>,
+): QuorumLedgerSource {
   return new QuorumLedgerSource(
-    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary'),
-    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary'),
+    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary', config.registryPolicy),
+    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary', config.registryPolicy),
   )
 }
 
 async function runPreflight(): Promise<void> {
-  const config = await loadIndexerConfig()
+  const config = await loadIndexerPreflightConfig()
   const source = quorumSource(config)
   await source.connect()
   try {
     const result = await source.preflight(config.profile)
-    process.stdout.write(
-      `${JSON.stringify({
-        ok: true,
-        profileId: config.profile.profileId,
-        networkId: result.networkId,
-        activationLedger: {
-          ledgerIndex: result.activationLedger.ledgerIndex,
-          ledgerHash: result.activationLedger.ledgerHash,
-          transactionRoot: result.activationLedger.transactionRoot,
-        },
-        sourceTips: result.tips,
-      })}\n`,
-    )
+    process.stdout.write(`${JSON.stringify(createPreflightAudit(config, result))}\n`)
   } finally {
     await source.disconnect()
   }

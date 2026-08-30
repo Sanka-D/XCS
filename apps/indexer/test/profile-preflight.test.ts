@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   assertRegistryBlackholed,
+  assertRegistryPolicy,
   assertSourceCoversProfile,
   normalizeAccountObjectsPage,
   normalizeServerInfo,
@@ -234,6 +235,63 @@ describe('registry blackhole preflight', () => {
     ]) {
       expect(() =>
         assertRegistryBlackholed({ accountInfo: invalid, accountObjects: [], profile }),
+      ).toThrow()
+    }
+  })
+})
+
+describe('controlled Testnet pilot registry preflight', () => {
+  it('allows active signing paths while the registry remains directly receivable', () => {
+    expect(() =>
+      assertRegistryPolicy({
+        accountInfo: accountInfo({
+          result: { signer_lists: [{ SignerQuorum: 1 }] },
+          accountData: { Flags: 0, RegularKey: REGISTRY },
+        }),
+        accountObjects: [
+          { LedgerEntryType: 'SignerList' },
+          { LedgerEntryType: 'Delegate', Account: REGISTRY, Authorize: OTHER_ACCOUNT },
+        ],
+        profile,
+        policy: 'controlled-testnet-pilot',
+      }),
+    ).not.toThrow()
+  })
+
+  it.each([
+    ['DepositAuth', LSF_DEPOSIT_AUTH, 'deposit_auth_enabled'],
+    ['RequireDestTag', LSF_REQUIRE_DEST_TAG, 'destination_tag_required'],
+  ])('rejects %s with the stable non-receivable code', (_name, flags, failure) => {
+    expect(() =>
+      assertRegistryPolicy({
+        accountInfo: accountInfo({ accountData: { Flags: flags } }),
+        accountObjects: [],
+        profile,
+        policy: 'controlled-testnet-pilot',
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'SOURCE_REGISTRY_NOT_RECEIVABLE',
+        details: { failures: [failure] },
+      }),
+    )
+  })
+
+  it('retains AccountRoot and activation binding checks', () => {
+    for (const invalid of [
+      accountInfo({ result: { validated: false } }),
+      accountInfo({ result: { ledger_hash: 'f'.repeat(64) } }),
+      accountInfo({ result: { ledger_index: 101 } }),
+      accountInfo({ accountData: { Account: XRPL_ACCOUNT_ONE } }),
+      accountInfo({ accountData: { LedgerEntryType: 'Credential' } }),
+    ]) {
+      expect(() =>
+        assertRegistryPolicy({
+          accountInfo: invalid,
+          accountObjects: [],
+          profile,
+          policy: 'controlled-testnet-pilot',
+        }),
       ).toThrow()
     }
   })

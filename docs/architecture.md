@@ -37,6 +37,28 @@ The shared public service is convenient, not authoritative. XRPL Commons operate
 web, indexer, API and PostgreSQL deployment for the Testnet beta, but a self-hosted indexer
 reconstructing the same validated ledgers must produce the same protocol result.
 
+## Private controlled-pilot exception
+
+The pre-beta staging profile `commons-testnet-xcs-v0.1-controlled-pilot` is the sole exception to
+the blackholed-registry deployment invariant. As recorded in
+[`ADR 0003`](./adr/0003-disposable-controlled-testnet-registry.md), it requires the explicit
+`controlled-testnet-pilot` registry policy plus the
+`DISPOSABLE_PROFILE_AND_DATABASE` acknowledgement, Testnet network ID `1`, and a dedicated fresh
+PostgreSQL projection. The exception changes operational trust only; it does not change any XCS
+v0.1 parsing, UID, payload, registration or lifecycle result.
+
+That staging deployment is private and non-promotable. Its registry controller may retain master,
+regular-key, SignerList or delegate authority, although the account must remain able to receive a
+one-drop Payment. The controller can therefore change account controls or impede future
+registrations, so the profile cannot supply the neutrality evidence required of the public beta.
+
+The pilot indexer compares a Commons-operated complete-history primary with Ripple's public Testnet
+secondary. The browser submits through XRPL Labs' public Testnet endpoint. Endpoint URLs are not
+profile fields: the two public services carry no XCS SLA, and the browser endpoint never
+participates in authoritative reads or quorum. Before beta, Commons creates and audits a different
+blackholed registry, publishes a new profile and activation boundary, and rebuilds into another
+fresh database. No pilot registry, profile or projection is renamed or promoted.
+
 ## Product surface and discovery
 
 The accountless Nuxt application is one site with three navigation surfaces: Explorer for public

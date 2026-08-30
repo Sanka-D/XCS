@@ -118,6 +118,15 @@ main {
   font-size: 0.88rem;
   font-weight: 650;
 }
+.controlled-pilot-banner {
+  padding: 0.55rem 4vw;
+  text-align: center;
+  color: #30285b;
+  background: #ebe8ff;
+  border-bottom: 1px solid #c8c0f0;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
 .section-wrap {
   width: min(1120px, 92vw);
   margin: 0 auto;

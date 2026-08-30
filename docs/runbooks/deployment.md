@@ -5,6 +5,63 @@ default and refuses to index with the placeholder network profile.
 
 ## Required preparation
 
+### Commons private controlled pilot
+
+[`ADR 0003`](../adr/0003-disposable-controlled-testnet-registry.md) permits one disposable
+controlled registry for private staging before the irreversible public-beta ceremony. This is a
+deployment exception, not a change to XCS v0.1 and not a weaker default. The only permitted profile
+ID is `commons-testnet-xcs-v0.1-controlled-pilot` on Testnet network ID `1`.
+
+Create `config/networks/commons-testnet-xcs-v0.1-controlled-pilot.json` from the example only after
+the dedicated registry address and activation ledger index/hash are known. Keep
+`registrationAmountDrops` at `"1"` and use the existing v0.1 Credentials amendment ID. The
+controlled account may retain master, regular-key, signer-list or delegate authority, but
+`DepositAuth` and `RequireDestTag` must remain disabled so it can receive registration Payments.
+
+Set the following exact non-secret values in the pilot `.env`:
+
+```dotenv
+XCS_NETWORK_PROFILE=./config/networks/commons-testnet-xcs-v0.1-controlled-pilot.json
+XCS_PUBLIC_PROFILE_ID=commons-testnet-xcs-v0.1-controlled-pilot
+XCS_REGISTRY_POLICY=controlled-testnet-pilot
+XCS_CONTROLLED_PILOT_ACK=DISPOSABLE_PROFILE_AND_DATABASE
+XCS_RPC_URL_SECONDARY=wss://s.altnet.rippletest.net:51233
+XCS_PUBLIC_RPC_URL=wss://testnet.xrpl-labs.com/
+```
+
+The primary value is deliberately not committed. A Commons operator must replace the visibly
+non-deployable placeholder below with the WSS URL of the dedicated complete-history service,
+supplying it out of band without embedding credentials:
+
+```dotenv
+XCS_RPC_URL_PRIMARY=wss://<replace-with-commons-controlled-pilot-rippled>
+```
+
+Ripple's secondary endpoint and XRPL Labs' browser endpoint are public Testnet conveniences listed
+by the [XRPL public-server documentation](https://xrpl.org/docs/tutorials/public-servers). Neither
+has an availability, history-retention or support SLA for XCS. The secondary must still prove
+contiguous history from activation and agree exactly with the Commons primary. The XRPL Labs
+endpoint is used only for browser submission and never for authoritative verification.
+
+Run the first pilot deployment under a dedicated Compose project only after confirming its named
+PostgreSQL volume is new. Never delete an unfamiliar or legacy volume to make this check pass:
+
+```sh
+docker volume inspect xcs-controlled-pilot_xcs-postgres
+docker compose -p xcs-controlled-pilot config --quiet
+docker compose -p xcs-controlled-pilot up --build
+```
+
+The initial `docker volume inspect` is expected to report that the volume does not exist. If it
+already exists, identify and preserve its owner and data instead of reusing it. Private ingress
+must restrict the pilot to named participants using disposable Testnet accounts and non-sensitive
+payloads.
+
+This registry, profile and database cannot be promoted. Before public beta, create a different
+registry, complete and independently audit the normal blackhole ceremony, publish a new profile ID
+and activation boundary, and start another fresh PostgreSQL database. Keep the controlled pilot
+artifacts only as explicitly labelled staging evidence.
+
 ### Replacing the legacy `XRPL-Commons/xcs` MVP
 
 The migration in `packages/db/drizzle/0000_initial.sql` is the initial schema for the new XCS
@@ -174,9 +231,12 @@ removing an applied `0003`.
    `XCS_METRICS_TOKEN`, set `XCS_METRICS_ENABLED=true`, and restrict `/internal/metrics` to the
    monitoring network at the ingress. Never pass that token to Nuxt or any browser variable.
 2. Complete and independently audit the registry blackhole ceremony described in
-   `config/networks/README.md`.
-3. Save the immutable result as `config/networks/testnet.json`. Do not edit that file after indexing
-   starts; a Testnet reset requires a new profile ID and database history.
+   `config/networks/README.md`. The only exception is the private, disposable profile governed by
+   ADR 0003 and the two exact environment acknowledgements above.
+3. Save a normal immutable result as `config/networks/testnet.json`. The controlled pilot instead
+   uses `config/networks/commons-testnet-xcs-v0.1-controlled-pilot.json`. Do not edit either file
+   after indexing starts; a Testnet reset or changed profile field requires a new profile ID and
+   database history.
 4. Set `XCS_PUBLIC_API_BASE_URL` and `XCS_ALLOWED_ORIGINS` to the browser-visible HTTPS origins when
    deploying behind a reverse proxy. The Compose web service uses `http://api:3001` separately for
    server-side rendering, so the public URL is never reused for container-to-container traffic.
@@ -202,8 +262,8 @@ removing an applied `0003`.
 8. Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes and at least three times the
    polling interval. Run `pnpm --filter @xcs-protocol/indexer preflight` before enabling the service.
 
-For the Commons-hosted Testnet beta, also enforce the product boundary from
-[`ADR 0002`](../adr/0002-public-product-and-discovery.md):
+For both the private controlled pilot and the Commons-hosted Testnet beta, also enforce the product
+boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):
 
 - leave `XCS_TRUSTED_ISSUERS` and `XCS_UNTRUSTED_ISSUERS` empty so Commons publishes no trust badge
   or issuer allowlist decision;

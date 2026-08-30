@@ -21,8 +21,37 @@ pnpm --filter @xcs-protocol/indexer start
 
 The idempotent provisioner reapplies the indexer's projection-only grants after migrations without
 printing database URLs or passwords. The preflight checks network ID, contiguous retained history,
-the amendment, activation ledger and registry blackhole policy on both sources. It prints no
-endpoint or credential.
+the amendment, activation ledger and selected registry policy on both sources. The default
+`blackholed` policy requires the complete blackhole invariant. It prints no endpoint or credential.
+
+### Disposable Commons controlled pilot
+
+The private staging exception in
+[`ADR 0003`](../adr/0003-disposable-controlled-testnet-registry.md) uses only profile
+`commons-testnet-xcs-v0.1-controlled-pilot`, Testnet network ID `1`, and a new empty projection
+database. It must set both exact values before `preflight` or `start`:
+
+```sh
+export XCS_REGISTRY_POLICY=controlled-testnet-pilot
+export XCS_CONTROLLED_PILOT_ACK=DISPOSABLE_PROFILE_AND_DATABASE
+```
+
+In this mode the activation-bound `account_info` and every `account_objects` page must still be
+validated and match the configured account, ledger index and ledger hash. `DepositAuth` or
+`RequireDestTag` fails with `SOURCE_REGISTRY_NOT_RECEIVABLE`; master, regular-key, SignerList and
+delegate authority are accepted only because this profile is controlled and disposable. The
+normal policy remains fail-closed with `SOURCE_REGISTRY_NOT_BLACKHOLED`.
+
+Use the Commons-operated complete-history source as primary and
+`wss://s.altnet.rippletest.net:51233` as the Ripple-operated secondary. The latter is a public
+service without an XCS availability or retention SLA; preflight must prove that it currently covers
+the complete range from activation. Configure `wss://testnet.xrpl-labs.com/` only as the browser
+submission endpoint, never as an indexer authority or quorum fallback.
+
+Do not run this mode against a legacy, blackholed-profile or future-beta database. Captures and
+digests from it remain labelled controlled-pilot evidence. Before beta, return to the default policy
+with a different, independently audited blackholed registry, a different immutable profile ID and a
+new empty database; never update this profile in place.
 
 ## Healthy state
 

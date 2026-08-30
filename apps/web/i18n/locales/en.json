@@ -18,6 +18,7 @@
   },
   "common": {
     "testnetWarning": "Testnet alpha — do not use personal data or real funds.",
+    "controlledPilotWarning": "Commons controlled Testnet pilot — disposable data.",
     "close": "Close",
     "loading": "Loading…",
     "working": "Working…",

@@ -1,7 +1,7 @@
 import { Client } from 'xrpl'
 
 import {
-  assertRegistryBlackholed,
+  assertRegistryPolicy,
   assertSourceCoversProfile,
   normalizeAccountObjectsPage,
   normalizeServerInfo,
@@ -13,6 +13,7 @@ import type {
   LedgerSourceTips,
   LedgerTransaction,
   NetworkProfile,
+  RegistryPolicy,
   ValidatedLedger,
 } from './types.js'
 
@@ -202,6 +203,7 @@ export class XrplLedgerSource implements LedgerSource {
   constructor(
     url: string,
     private readonly sourceId = 'xrpl',
+    private readonly registryPolicy: RegistryPolicy = 'blackholed',
   ) {
     this.client = new Client(url)
   }
@@ -240,7 +242,12 @@ export class XrplLedgerSource implements LedgerSource {
         strict: true,
       })
       const accountObjects = await this.getAllAccountObjects(profile)
-      assertRegistryBlackholed({ accountInfo, accountObjects, profile })
+      assertRegistryPolicy({
+        accountInfo,
+        accountObjects,
+        profile,
+        policy: this.registryPolicy,
+      })
 
       return {
         networkId: status.networkId,

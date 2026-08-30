@@ -19,8 +19,8 @@ const worker = new IndexerWorker({
   profile: config.profile,
   repository: new PostgresIndexerRepository(database.db),
   source: new QuorumLedgerSource(
-    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary'),
-    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary'),
+    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary', config.registryPolicy),
+    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary', config.registryPolicy),
   ),
   pollIntervalMs: config.pollIntervalMs,
   leaseDurationMs: config.leaseDurationMs,

@@ -1,6 +1,6 @@
 import { isClassicAddress } from '@xcs-protocol/core'
 
-import type { LedgerRange, NetworkProfile } from './types.js'
+import type { LedgerRange, NetworkProfile, RegistryPolicy } from './types.js'
 import { sourceFailure } from './source-errors.js'
 
 export const XRPL_ACCOUNT_ZERO = 'rrrrrrrrrrrrrrrrrrrrrhoLvTp'
@@ -157,11 +157,16 @@ function classicAddress(value: unknown, label: string): string {
   return value
 }
 
-export function assertRegistryBlackholed(input: {
+interface RegistryAccountRoot {
+  result: Record<string, unknown>
+  accountData: Record<string, unknown>
+  flags: number
+}
+
+function registryAccountRoot(input: {
   accountInfo: unknown
-  accountObjects: unknown[]
   profile: NetworkProfile
-}): void {
+}): RegistryAccountRoot {
   const result = record(input.accountInfo, 'account_info result')
   if (result.validated !== true) {
     return sourceFailure('SOURCE_RESPONSE_INVALID', 'Registry account_info is not validated')
@@ -194,7 +199,19 @@ export function assertRegistryBlackholed(input: {
       'account_info account does not match the configured registry',
     )
   }
-  const flags = uint32(accountData.Flags, 'account_info.account_data.Flags')
+  return {
+    result,
+    accountData,
+    flags: uint32(accountData.Flags, 'account_info.account_data.Flags'),
+  }
+}
+
+export function assertRegistryBlackholed(input: {
+  accountInfo: unknown
+  accountObjects: unknown[]
+  profile: NetworkProfile
+}): void {
+  const { result, accountData, flags } = registryAccountRoot(input)
   const regularKey = accountData.RegularKey
   const failures: string[] = []
   if ((flags & LSF_DISABLE_MASTER) === 0) failures.push('master_key_enabled')
@@ -222,6 +239,35 @@ export function assertRegistryBlackholed(input: {
       { failures: [...new Set(failures)] },
     )
   }
+}
+
+export function assertRegistryReceivable(input: {
+  accountInfo: unknown
+  profile: NetworkProfile
+}): void {
+  const { flags } = registryAccountRoot(input)
+  const failures: string[] = []
+  if ((flags & LSF_DEPOSIT_AUTH) !== 0) failures.push('deposit_auth_enabled')
+  if ((flags & LSF_REQUIRE_DEST_TAG) !== 0) failures.push('destination_tag_required')
+  if (failures.length > 0) {
+    return sourceFailure(
+      'SOURCE_REGISTRY_NOT_RECEIVABLE',
+      'Registry account cannot receive registration payments without extra authorization',
+      { failures },
+    )
+  }
+}
+
+export function assertRegistryPolicy(input: {
+  accountInfo: unknown
+  accountObjects: unknown[]
+  profile: NetworkProfile
+  policy: RegistryPolicy
+}): void {
+  if (input.policy === 'controlled-testnet-pilot') {
+    return assertRegistryReceivable(input)
+  }
+  return assertRegistryBlackholed(input)
 }
 
 export function normalizeAccountObjectsPage(

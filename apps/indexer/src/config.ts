@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises'
 
-import { validateNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
+import { sha256Hex, validateNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
+
+import type { RegistryPolicy } from './types.js'
+
+export const CONTROLLED_PILOT_ACKNOWLEDGEMENT = 'DISPOSABLE_PROFILE_AND_DATABASE' as const
 
 export interface IndexerRuntimeConfig {
   databaseUrl: string
@@ -8,6 +12,7 @@ export interface IndexerRuntimeConfig {
   leaseDurationMs: number
   batchSize: number
   profile: NetworkProfile
+  registryPolicy: RegistryPolicy
 }
 
 export interface IndexerConfig extends IndexerRuntimeConfig {
@@ -20,6 +25,18 @@ export interface IndexerConfig extends IndexerRuntimeConfig {
 export interface LedgerRpcConfig {
   xrplRpcUrlPrimary: string
   xrplRpcUrlSecondary: string
+}
+
+export interface IndexerPreflightConfig extends LedgerRpcConfig {
+  profile: NetworkProfile
+  profileSha256: string
+  registryPolicy: RegistryPolicy
+}
+
+interface LoadedProfileConfig {
+  profile: NetworkProfile
+  profileSha256: string
+  registryPolicy: RegistryPolicy
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -79,6 +96,56 @@ export function loadLedgerRpcConfig(environment: NodeJS.ProcessEnv = process.env
   return { xrplRpcUrlPrimary: primary, xrplRpcUrlSecondary: secondary }
 }
 
+export function resolveRegistryPolicy(
+  profile: NetworkProfile,
+  environment: NodeJS.ProcessEnv = process.env,
+): RegistryPolicy {
+  const policy = environment.XCS_REGISTRY_POLICY ?? 'blackholed'
+  if (policy !== 'blackholed' && policy !== 'controlled-testnet-pilot') {
+    throw new Error('XCS_REGISTRY_POLICY must be either blackholed or controlled-testnet-pilot')
+  }
+  const controlledPilotProfile = profile.profileId.endsWith('-controlled-pilot')
+  if (policy === 'blackholed') {
+    if (controlledPilotProfile) {
+      throw new Error(
+        'A profileId ending in -controlled-pilot requires XCS_REGISTRY_POLICY=controlled-testnet-pilot',
+      )
+    }
+    return policy
+  }
+  if (environment.XCS_CONTROLLED_PILOT_ACK !== CONTROLLED_PILOT_ACKNOWLEDGEMENT) {
+    throw new Error(
+      `XCS_CONTROLLED_PILOT_ACK must equal ${CONTROLLED_PILOT_ACKNOWLEDGEMENT} for controlled-testnet-pilot`,
+    )
+  }
+  if (profile.networkId !== 1) {
+    throw new Error('controlled-testnet-pilot requires networkId 1')
+  }
+  if (!controlledPilotProfile) {
+    throw new Error('controlled-testnet-pilot requires a profileId ending in -controlled-pilot')
+  }
+  return policy
+}
+
+async function loadProfileConfig(environment: NodeJS.ProcessEnv): Promise<LoadedProfileConfig> {
+  const profilePath = required(environment, 'XCS_NETWORK_PROFILE')
+  const profileFileBytes = await readFile(profilePath)
+  const profileJson: unknown = JSON.parse(profileFileBytes.toString('utf8'))
+  const profile = validateNetworkProfile(profileJson)
+  return {
+    profile,
+    profileSha256: sha256Hex(profileFileBytes),
+    registryPolicy: resolveRegistryPolicy(profile, environment),
+  }
+}
+
+export async function loadIndexerPreflightConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<IndexerPreflightConfig> {
+  const loaded = await loadProfileConfig(environment)
+  return { ...loaded, ...loadLedgerRpcConfig(environment) }
+}
+
 export async function loadIndexerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<IndexerConfig> {
@@ -95,8 +162,7 @@ export async function loadIndexerConfig(
 export async function loadIndexerRuntimeConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<IndexerRuntimeConfig> {
-  const profilePath = required(environment, 'XCS_NETWORK_PROFILE')
-  const profileJson: unknown = JSON.parse(await readFile(profilePath, 'utf8'))
+  const { profile, registryPolicy } = await loadProfileConfig(environment)
   const pollIntervalMs = Number(
     environment.XCS_INDEXER_POLL_INTERVAL_MS ?? environment.INDEXER_POLL_INTERVAL_MS ?? '4000',
   )
@@ -122,6 +188,7 @@ export async function loadIndexerRuntimeConfig(
     pollIntervalMs,
     leaseDurationMs,
     batchSize,
-    profile: validateNetworkProfile(profileJson),
+    profile,
+    registryPolicy,
   }
 }

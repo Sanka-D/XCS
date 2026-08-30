@@ -10,6 +10,8 @@ import type { AcquiredIndexerLease, IndexerLeaseToken } from '@xcs-protocol/db'
 export type { NetworkProfile, RegisteredSchema, ResolvedSchema, SchemaDefinition }
 export type { AcquiredIndexerLease, IndexerLeaseToken }
 
+export type RegistryPolicy = 'blackholed' | 'controlled-testnet-pilot'
+
 export interface LedgerTransaction {
   hash: string
   transaction: Record<string, unknown>

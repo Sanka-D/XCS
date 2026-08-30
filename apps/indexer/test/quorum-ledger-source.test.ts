@@ -100,6 +100,10 @@ describe('QuorumLedgerSource', () => {
       networkId: 1,
       activationLedger: { ledgerHash: LEDGER_HASH },
       tips: { primary: 110, secondary: 108, effective: 108 },
+      sources: {
+        primary: { tip: 110, completeLedgerRanges: [{ min: 90, max: 110 }] },
+        secondary: { tip: 108, completeLedgerRanges: [{ min: 90, max: 108 }] },
+      },
     })
     await expect(source.assertAmendmentEnabled(profile.requiredAmendment)).resolves.toBeUndefined()
     expect(primary.amendmentChecks).toBe(1)
@@ -191,6 +195,9 @@ describe('QuorumLedgerSource', () => {
 
 describe('sourceErrorCode', () => {
   it('allows only declared stable codes', () => {
+    expect(sourceErrorCode({ code: 'SOURCE_REGISTRY_NOT_RECEIVABLE' })).toBe(
+      'SOURCE_REGISTRY_NOT_RECEIVABLE',
+    )
     expect(sourceErrorCode({ code: 'SOURCE_TIP_REGRESSION' })).toBe('SOURCE_TIP_REGRESSION')
     expect(sourceErrorCode({ code: 'LEDGER_PARENT_MISMATCH' })).toBe('LEDGER_PARENT_MISMATCH')
     expect(sourceErrorCode({ code: '23505' })).toBe('INDEXER_FAILED')

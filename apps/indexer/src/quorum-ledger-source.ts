@@ -4,10 +4,23 @@ import { sourceFailure, XrplSourceError } from './source-errors.js'
 import type {
   LedgerSource,
   LedgerSourcePreflight,
+  LedgerRange,
   LedgerSourceTips,
   NetworkProfile,
   ValidatedLedger,
 } from './types.js'
+
+export interface QuorumSourcePreflightAudit {
+  tip: number
+  completeLedgerRanges: LedgerRange[]
+}
+
+export interface QuorumLedgerSourcePreflight extends LedgerSourcePreflight {
+  sources: {
+    primary: QuorumSourcePreflightAudit
+    secondary: QuorumSourcePreflightAudit
+  }
+}
 
 async function both<T>(primary: Promise<T>, secondary: Promise<T>, operation: string) {
   const [primaryResult, secondaryResult] = await Promise.allSettled([primary, secondary])
@@ -85,7 +98,7 @@ export class QuorumLedgerSource implements LedgerSource {
     }
   }
 
-  async preflight(profile: NetworkProfile): Promise<LedgerSourcePreflight> {
+  async preflight(profile: NetworkProfile): Promise<QuorumLedgerSourcePreflight> {
     const [primary, secondary] = await both(
       this.primary.preflight(profile),
       this.secondary.preflight(profile),
@@ -115,6 +128,16 @@ export class QuorumLedgerSource implements LedgerSource {
       completeLedgerRanges: primary.completeLedgerRanges,
       activationLedger: primary.activationLedger,
       tips,
+      sources: {
+        primary: {
+          tip: primary.tips.effective,
+          completeLedgerRanges: primary.completeLedgerRanges,
+        },
+        secondary: {
+          tip: secondary.tips.effective,
+          completeLedgerRanges: secondary.completeLedgerRanges,
+        },
+      },
     }
   }
 

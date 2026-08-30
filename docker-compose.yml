@@ -119,9 +119,11 @@ services:
         XCS_PACKAGE: '@xcs-protocol/indexer'
     environment:
       XCS_INDEXER_DATABASE_URL: postgres://xcs_indexer:${XCS_INDEXER_DATABASE_PASSWORD:?Set XCS_INDEXER_DATABASE_PASSWORD in .env}@postgres:5432/xcs
-      XCS_NETWORK_PROFILE: /workspace/config/networks/testnet.json
+      XCS_NETWORK_PROFILE: ${XCS_NETWORK_PROFILE:-/workspace/config/networks/testnet.json}
       XCS_RPC_URL_PRIMARY: ${XCS_RPC_URL_PRIMARY:?Set XCS_RPC_URL_PRIMARY to a complete-history provider}
       XCS_RPC_URL_SECONDARY: ${XCS_RPC_URL_SECONDARY:?Set XCS_RPC_URL_SECONDARY to an independently operated provider}
+      XCS_REGISTRY_POLICY: ${XCS_REGISTRY_POLICY:-blackholed}
+      XCS_CONTROLLED_PILOT_ACK: ${XCS_CONTROLLED_PILOT_ACK:-}
       XCS_INDEXER_POLL_INTERVAL_MS: ${XCS_INDEXER_POLL_INTERVAL_MS:-4000}
       XCS_INDEXER_BATCH_SIZE: ${XCS_INDEXER_BATCH_SIZE:-20}
       XCS_INDEXER_LEASE_DURATION_MS: ${XCS_INDEXER_LEASE_DURATION_MS:-30000}

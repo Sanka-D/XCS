@@ -1,14 +1,22 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { loadIndexerConfig, loadIndexerRuntimeConfig, loadLedgerRpcConfig } from '../src/config.js'
+import { sha256Hex } from '@xcs-protocol/core'
+
+import {
+  CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+  loadIndexerConfig,
+  loadIndexerPreflightConfig,
+  loadIndexerRuntimeConfig,
+  loadLedgerRpcConfig,
+} from '../src/config.js'
 
 const paths: string[] = []
 
-async function profilePath(): Promise<string> {
+async function profilePath(overrides: Record<string, unknown> = {}): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'xcs-indexer-test-'))
   paths.push(directory)
   const path = join(directory, 'profile.json')
@@ -23,6 +31,7 @@ async function profilePath(): Promise<string> {
       registrationAmountDrops: '1',
       activationLedgerIndex: 100,
       activationLedgerHash: 'b'.repeat(64),
+      ...overrides,
     }),
   )
   return path
@@ -53,7 +62,101 @@ describe('indexer configuration', () => {
       pollIntervalMs: 4_000,
       leaseDurationMs: 30_000,
       batchSize: 20,
+      registryPolicy: 'blackholed',
     })
+  })
+
+  it('loads audit preflight configuration without a database URL and hashes exact profile bytes', async () => {
+    const input = await environment({
+      XCS_DATABASE_URL: undefined,
+      DATABASE_URL: undefined,
+      XCS_INDEXER_DATABASE_URL: undefined,
+    })
+    const path = input.XCS_NETWORK_PROFILE
+    if (path === undefined) throw new Error('profile fixture path is missing')
+
+    await expect(loadIndexerPreflightConfig(input)).resolves.toMatchObject({
+      profileSha256: sha256Hex(await readFile(path)),
+      registryPolicy: 'blackholed',
+      xrplRpcUrlPrimary: 'wss://primary.example.test/',
+      xrplRpcUrlSecondary: 'wss://secondary.example.test/',
+    })
+  })
+
+  it('enables the disposable controlled Testnet pilot only with every acknowledgement guard', async () => {
+    const controlledProfile = await profilePath({
+      profileId: 'commons-testnet-xcs-v0.1-controlled-pilot',
+    })
+    const config = await loadIndexerConfig(
+      await environment({
+        XCS_NETWORK_PROFILE: controlledProfile,
+        XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+        XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+      }),
+    )
+
+    expect(config.registryPolicy).toBe('controlled-testnet-pilot')
+  })
+
+  it('rejects a controlled-pilot profile when the explicit policy is absent', async () => {
+    const controlledProfile = await profilePath({ profileId: 'x-controlled-pilot' })
+
+    await expect(
+      loadIndexerRuntimeConfig(
+        await environment({
+          XCS_NETWORK_PROFILE: controlledProfile,
+          XCS_REGISTRY_POLICY: undefined,
+          XCS_CONTROLLED_PILOT_ACK: undefined,
+        }),
+      ),
+    ).rejects.toThrow('requires XCS_REGISTRY_POLICY=controlled-testnet-pilot')
+  })
+
+  it.each([undefined, '', 'I_UNDERSTAND'])(
+    'rejects controlled pilot without the exact acknowledgement %j',
+    async (acknowledgement) => {
+      const controlledProfile = await profilePath({ profileId: 'x-controlled-pilot' })
+      await expect(
+        loadIndexerConfig(
+          await environment({
+            XCS_NETWORK_PROFILE: controlledProfile,
+            XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+            XCS_CONTROLLED_PILOT_ACK: acknowledgement,
+          }),
+        ),
+      ).rejects.toThrow('XCS_CONTROLLED_PILOT_ACK')
+    },
+  )
+
+  it('rejects controlled pilot outside network 1 or without the profile suffix', async () => {
+    const wrongNetwork = await profilePath({
+      profileId: 'x-controlled-pilot',
+      networkId: 2,
+    })
+    await expect(
+      loadIndexerConfig(
+        await environment({
+          XCS_NETWORK_PROFILE: wrongNetwork,
+          XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+          XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+        }),
+      ),
+    ).rejects.toThrow('networkId 1')
+
+    await expect(
+      loadIndexerConfig(
+        await environment({
+          XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+          XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+        }),
+      ),
+    ).rejects.toThrow('ending in -controlled-pilot')
+  })
+
+  it('rejects an unknown registry policy', async () => {
+    await expect(
+      loadIndexerConfig(await environment({ XCS_REGISTRY_POLICY: 'controlled' })),
+    ).rejects.toThrow('XCS_REGISTRY_POLICY')
   })
 
   it('prefers the dedicated indexer database role URL', async () => {

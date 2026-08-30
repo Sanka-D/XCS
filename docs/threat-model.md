@@ -19,6 +19,7 @@ Untrusted inputs include schema memos, all XRPL metadata, API path/query/body va
 | Private RPC credential disclosure      | Dedicated no-secret public browser RPC; both indexer quorum settings remain server-only                  |
 | SSRF                                   | Fetch disabled by default; on-ledger URI only; HTTPS; DNS/IP checks; redirect, timeout and size limits   |
 | History gaps or inconsistent providers | Two full-history sources; deep normalized comparison; transaction-root checkpoint; fail-closed status    |
+| Accidental controlled-registry rollout | Exact Testnet profile suffix, explicit policy plus acknowledgement, private staging and disposable DB    |
 | Stale/concurrent indexer writer        | PostgreSQL lease epoch, row lock and status/checkpoint update in the same transaction                    |
 | Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard    |
 | Wallet signing against stale state     | Non-cacheable profile readiness before wallet invocation and again before blob persistence/submission    |
@@ -63,8 +64,19 @@ a separate data-flow, retention and access review.
 - Demo pinning blocks common PII-shaped field names but cannot recognize sensitive values under arbitrary schema fields.
 - Public IPFS content cannot be reliably deleted after another node retrieves it.
 - A blackholed registry prevents governance capture but cannot enforce anti-spam moderation.
+- The private profile `commons-testnet-xcs-v0.1-controlled-pilot` is deliberately not blackholed.
+  Its controller may retain master, regular-key, SignerList and delegate authority and can change
+  account controls or prevent later registrations. The exact policy/acknowledgement pair, Testnet
+  profile suffix and receivability checks make the exception explicit, while private ingress and a
+  fresh disposable database bound its accepted use; they do not technically make that registry
+  trustless or prevent an operator from misusing it. A different blackholed registry, profile and
+  database are mandatory before public beta.
 - Two URLs do not prove independent infrastructure; correlated or colluding providers can still agree
   on false input. Provider ownership is an operational review requirement.
+- The pilot's Ripple secondary and XRPL Labs browser-submission endpoint are public convenience
+  services with no XCS availability, history-retention or support SLA. Secondary history gaps halt
+  indexing; browser-endpoint failure blocks submission but must never be bypassed by treating it as
+  authoritative evidence. Neither service satisfies the beta provider or recovery objectives.
 - Readiness is a point-in-time guard, not an XRPL transaction precondition. The indexer can degrade
   after the final browser check, so validated ledger and exact indexed business confirmation remain
   mandatory before the site reports XCS success. The ingress must preserve `private, no-store` and

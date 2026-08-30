@@ -174,6 +174,10 @@ profile is fetched from the XCS API, parsed by the SDK, and matched against the 
 than XRPL Testnet (`networkId: 1`). If `NUXT_PUBLIC_PROFILE_ID` is omitted, exactly one Testnet
 profile must be returned by the API.
 
+When the configured API profile selector ends in `-controlled-pilot`, the site renders a persistent
+Commons controlled-pilot warning. The suffix is the only UI signal: there is no separate browser
+feature flag, and profile/API mismatches still fail through the normal active-profile checks.
+
 `NUXT_PUBLIC_RPC_URL` is serialized into browser-visible runtime configuration. A Nitro startup
 guard and every wallet submission boundary reject embedded username/password values and require
 `wss://` (`ws://` is accepted only for loopback development). They cannot determine whether an

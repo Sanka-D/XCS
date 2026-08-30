@@ -7,7 +7,7 @@ import {
   type NetworkProfile,
 } from '@xcs-protocol/core'
 
-import { loadLedgerRpcConfig } from './config.js'
+import { loadLedgerRpcConfig, resolveRegistryPolicy } from './config.js'
 import {
   captureLedgerFixtureBundle,
   ledgerFixtureBundleDigest,
@@ -64,9 +64,10 @@ async function runCapture(): Promise<void> {
   const profileFileBytes = await readFile(profilePath)
   const profile = parseProfileFile(profileFileBytes)
   const config = loadLedgerRpcConfig()
+  const registryPolicy = resolveRegistryPolicy(profile)
   const source = new QuorumLedgerSource(
-    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary'),
-    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary'),
+    new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary', registryPolicy),
+    new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary', registryPolicy),
   )
   const manifest = await captureLedgerFixtureBundle({
     outputDirectory: required('XCS_FIXTURE_OUTPUT'),

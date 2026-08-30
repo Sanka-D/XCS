@@ -42,6 +42,9 @@ test('serves the production page and error document with canonical fresh nonces'
   const navigation = await page.goto('/learn')
   expect(navigation?.status()).toBe(200)
   await page.locator('[data-client-ready="true"]').waitFor()
+  await expect(page.getByTestId('controlled-pilot-banner')).toHaveText(
+    'Pilote Testnet contrôlé par Commons — données jetables.',
+  )
   expect(browserFailures).toEqual([])
 })
 
