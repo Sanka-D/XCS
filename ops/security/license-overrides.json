@@ -1,0 +1,13 @@
+{
+  "overrides": [
+    {
+      "package": "tosource",
+      "version": "2.0.0-alpha.3",
+      "reportedLicense": "Unknown",
+      "reviewedLicense": "Zlib",
+      "licenseFile": "LICENSE",
+      "licenseSha256": "22cfaab2256435450e4375ef5593354cc3d53501f0ead3564336415b3909bae4",
+      "rationale": "The bundled LICENSE is the permissive zlib license although the package manifest omits its SPDX field."
+    }
+  ]
+}

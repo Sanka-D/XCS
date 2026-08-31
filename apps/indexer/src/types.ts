@@ -1,11 +1,17 @@
 import type {
+  JsonValue,
   NetworkProfile,
   RegisteredSchema,
   ResolvedSchema,
   SchemaDefinition,
 } from '@xcs-protocol/core'
+import type { AcquiredIndexerLease, IndexerLeaseToken } from '@xcs-protocol/db'
 
 export type { NetworkProfile, RegisteredSchema, ResolvedSchema, SchemaDefinition }
+export type { AcquiredIndexerLease, IndexerLeaseToken }
+
+export type RegistryPolicy = 'blackholed' | 'controlled-testnet-pilot'
+export type DatabaseScope = 'shared' | 'exclusive-profile'
 
 export interface LedgerTransaction {
   hash: string
@@ -18,8 +24,32 @@ export interface ValidatedLedger {
   ledgerIndex: number
   ledgerHash: string
   parentHash: string
+  accountRoot: string
+  transactionRoot: string
+  parentCloseTime: number
   closeTime: number
+  closeTimeResolution: number
+  closeFlags: number
+  totalCoins: string
   transactions: LedgerTransaction[]
+}
+
+export interface LedgerRange {
+  min: number
+  max: number
+}
+
+export interface LedgerSourceTips {
+  primary: number
+  secondary: number
+  effective: number
+}
+
+export interface LedgerSourcePreflight {
+  networkId: number
+  completeLedgerRanges: LedgerRange[]
+  activationLedger: ValidatedLedger
+  tips: LedgerSourceTips
 }
 
 export type SchemaRegistrationResult =
@@ -29,6 +59,8 @@ export type SchemaRegistrationResult =
       transactionIndex: number
       publisher: string
       schemaUid: string
+      /** Exact parsed JCS memo committed by the XRPL transaction. */
+      memoJson: JsonValue
       definition: SchemaDefinition
       resolved: ResolvedSchema
     }
@@ -84,6 +116,25 @@ export interface Checkpoint {
   ledgerHash: string
   parentHash: string
   closeTime: number
+  transactionCount: number
+  transactionRoot: string | null
+}
+
+export type IndexerRuntimeState = 'starting' | 'catching_up' | 'ready' | 'halted'
+
+export interface IndexerStatusUpdate {
+  state: Exclude<IndexerRuntimeState, 'halted'>
+  primarySourceTip?: number
+  secondarySourceTip?: number
+  lastAgreedLedgerIndex?: number
+  lastAgreedLedgerHash?: string
+}
+
+export interface IndexerHaltStatus {
+  primarySourceTip?: number
+  secondarySourceTip?: number
+  lastAgreedLedgerIndex?: number
+  lastAgreedLedgerHash?: string
 }
 
 export interface SchemaCatalogEntry extends RegisteredSchema {
@@ -94,18 +145,32 @@ export interface SchemaCatalogEntry extends RegisteredSchema {
 }
 
 export interface IndexerRepository {
+  initializeProfile(profile: NetworkProfile): Promise<void>
+  acquireLease(
+    profileId: string,
+    writerId: string,
+    leaseDurationMs: number,
+  ): Promise<AcquiredIndexerLease>
+  renewLease(token: IndexerLeaseToken, leaseDurationMs: number): Promise<AcquiredIndexerLease>
+  updateIndexerStatus(token: IndexerLeaseToken, status: IndexerStatusUpdate): Promise<void>
+  releaseLease(token: IndexerLeaseToken): Promise<void>
+  haltIndexer(token: IndexerLeaseToken, status: IndexerHaltStatus, errorCode: string): Promise<void>
   getLastCheckpoint(profileId: string): Promise<Checkpoint | undefined>
   getSchemaCatalog(profileId: string): Promise<SchemaCatalogEntry[]>
   persistLedger(
     profile: NetworkProfile,
     projection: LedgerProjection,
+    token: IndexerLeaseToken,
+    status: IndexerStatusUpdate,
   ): Promise<'inserted' | 'already_processed'>
 }
 
 export interface LedgerSource {
   connect(): Promise<void>
   disconnect(): Promise<void>
+  preflight(profile: NetworkProfile): Promise<LedgerSourcePreflight>
   assertAmendmentEnabled(amendmentId: string): Promise<void>
   getValidatedLedgerIndex(): Promise<number>
+  getValidatedLedgerTips(): Promise<LedgerSourceTips>
   getLedger(ledgerIndex: number): Promise<ValidatedLedger>
 }

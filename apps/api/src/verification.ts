@@ -1,10 +1,7 @@
 import {
   canonicalize,
+  classifyCredentialPayload,
   decodeUtf8Hex,
-  parseCredentialPayload,
-  validateCredentialPayload,
-  validateSchema,
-  verifyPayloadIntegrity,
   XcsError,
   type JsonValue,
   type ResolvedSchema,
@@ -12,8 +9,12 @@ import {
 } from '@xcs-protocol/core'
 import type { CredentialGenerationRow, SchemaRow } from '@xcs-protocol/db'
 
-import { assertFreshLedgerCheckpoint, DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
-import { PayloadUnavailableError } from './payload-resolver.js'
+import { assertCredentialGenerationEvidence } from './credential-generation-evidence.js'
+import { credentialGenerationState } from './credential-state.js'
+import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
+import { assertAuthoritativeLedgerEvidence, assertIndexerReady } from './indexer-status.js'
+import { PayloadInvalidError, PayloadUnavailableError } from './payload-resolver.js'
+import { authoritativeResolvedSchema, schemaProjectionEvidenceUids } from './schema-projection.js'
 import type { ApiRepository, PayloadResolver, TrustPolicy } from './types.js'
 
 export interface VerifyRequest {
@@ -25,39 +26,22 @@ export interface VerifyRequest {
   resolvePayload?: boolean
 }
 
-function onChainStatus(
-  generation: CredentialGenerationRow | undefined,
-  closeTime: number | undefined,
-): VerificationReport['onChain'] {
-  if (generation === undefined) return 'not_found'
-  if (generation.deletedLedgerIndex !== null) return 'deleted'
-  if (
-    generation.expiration !== null &&
-    closeTime !== undefined &&
-    generation.expiration <= closeTime
-  ) {
-    return 'expired'
+export class VerificationNetworkNotFoundError extends Error {
+  readonly code = 'NETWORK_NOT_FOUND'
+  readonly statusCode = 404
+
+  constructor() {
+    super('Network not found')
+    this.name = 'VerificationNetworkNotFoundError'
   }
-  return generation.accepted ? 'active' : 'pending'
 }
 
-function resolvedSchema(row: SchemaRow): ResolvedSchema {
-  validateSchema(row.definition)
-  const value: unknown = row.resolvedDefinition
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error('Resolved schema projection is invalid')
-  }
-  const candidate = value as Partial<ResolvedSchema>
-  if (
-    typeof candidate.definition !== 'object' ||
-    candidate.definition === null ||
-    typeof candidate.fields !== 'object' ||
-    candidate.fields === null ||
-    !Array.isArray(candidate.lineage)
-  ) {
-    throw new Error('Resolved schema projection is invalid')
-  }
-  return candidate as ResolvedSchema
+function onChainStatus(
+  generation: CredentialGenerationRow | undefined,
+  closeTime: number,
+): VerificationReport['onChain'] {
+  if (generation === undefined) return 'not_found'
+  return credentialGenerationState(generation, closeTime)
 }
 
 function decodeCredentialUri(generation: CredentialGenerationRow): string | undefined {
@@ -88,23 +72,28 @@ async function payloadStatus(input: {
     schema,
   }
 
-  try {
-    let content: string | Uint8Array
-    if (request.payload !== undefined) {
-      const validated = validateCredentialPayload(request.payload, context)
-      content = canonicalize(validated as JsonValue)
-    } else {
-      content = await resolver.resolve(uri)
-      parseCredentialPayload(content, context)
+  if (request.payload !== undefined) {
+    try {
+      return classifyCredentialPayload(
+        { status: 'retrieved', content: canonicalize(request.payload as JsonValue) },
+        uri,
+        context,
+      )
+    } catch (error) {
+      if (error instanceof XcsError) return 'invalid'
+      throw error
     }
-    const integrity = verifyPayloadIntegrity(content, uri)
-    if (integrity.status === 'tampered') return 'tampered'
-    if (integrity.status === 'invalid_uri') return 'invalid'
-    return 'valid'
+  }
+
+  try {
+    const content = await resolver.resolve(uri)
+    return classifyCredentialPayload({ status: 'retrieved', content }, uri, context)
   } catch (error) {
-    if (error instanceof PayloadUnavailableError) return 'unavailable'
-    if (error instanceof XcsError) return 'invalid'
-    return 'invalid'
+    if (error instanceof PayloadUnavailableError) {
+      return classifyCredentialPayload({ status: 'unavailable' }, uri, context)
+    }
+    if (error instanceof PayloadInvalidError || error instanceof XcsError) return 'invalid'
+    throw error
   }
 }
 
@@ -118,36 +107,74 @@ export async function verifyCredential(
     now?: () => Date
   },
 ): Promise<VerificationReport> {
-  const [generation, schemaRow, checkpoint] = await Promise.all([
-    dependencies.repository.getCredential({
-      profileId: request.network,
-      issuer: request.issuer,
-      subject: request.subject,
-      schemaUid: request.schemaUid,
-    }),
-    dependencies.repository.getSchema(request.network, request.schemaUid),
-    dependencies.repository.getLatestCheckpoint(request.network),
-  ])
+  const { generation, schema, checkpoint } = await dependencies.repository.withConsistentSnapshot(
+    async (repository) => {
+      const network = await repository.getNetwork(request.network)
+      if (network === undefined) throw new VerificationNetworkNotFoundError()
 
-  assertFreshLedgerCheckpoint(
-    checkpoint?.closeTime,
-    dependencies.now?.() ?? new Date(),
-    dependencies.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+      const now = dependencies.now?.() ?? (await repository.getDatabaseTime())
+      const status = await repository.getIndexerStatus(request.network)
+      assertIndexerReady(status, now)
+
+      const [generation, schemaRow] = await Promise.all([
+        repository.getCredential({
+          profileId: request.network,
+          issuer: request.issuer,
+          subject: request.subject,
+          schemaUid: request.schemaUid,
+        }),
+        repository.getSchema(request.network, request.schemaUid),
+      ])
+      const schemaEvidence =
+        schemaRow === undefined
+          ? []
+          : await repository.getSchemaProjectionEvidence({
+              profileId: request.network,
+              schemaUids: schemaProjectionEvidenceUids([schemaRow], request.network),
+            })
+      const checkpoint = await repository.getLatestCheckpoint(request.network)
+      const evidence = {
+        expectedProfileId: request.network,
+        status,
+        checkpoint,
+        now,
+        maxLedgerAgeSeconds: dependencies.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+        minimumLedgerIndex: network.activationLedgerIndex,
+        projectionLedgerIndexes: [
+          ...(generation === undefined
+            ? []
+            : [generation.createdLedgerIndex, generation.lastLedgerIndex]),
+          ...schemaEvidence.map((item) => item.schema.ledgerIndex),
+        ],
+      }
+      assertAuthoritativeLedgerEvidence(evidence)
+      if (generation !== undefined) {
+        assertCredentialGenerationEvidence(generation, {
+          profileId: request.network,
+          activationLedgerIndex: network.activationLedgerIndex,
+          checkpointLedgerIndex: evidence.checkpoint.ledgerIndex,
+          issuer: request.issuer,
+          subject: request.subject,
+          schemaUid: request.schemaUid,
+        })
+      }
+      const schema =
+        schemaRow === undefined
+          ? undefined
+          : authoritativeResolvedSchema(schemaRow, schemaEvidence, {
+              profileId: request.network,
+              schemaUid: request.schemaUid,
+              networkId: network.networkId,
+              activationLedgerIndex: network.activationLedgerIndex,
+            })
+      return { generation, schema, checkpoint: evidence.checkpoint }
+    },
   )
 
-  let schema: ResolvedSchema | undefined
-  let schemaStatus: VerificationReport['schema'] = 'unknown'
-  if (schemaRow !== undefined) {
-    try {
-      schema = resolvedSchema(schemaRow)
-      schemaStatus = 'valid'
-    } catch {
-      schemaStatus = 'invalid'
-    }
-  }
+  const schemaStatus: VerificationReport['schema'] = schema === undefined ? 'unknown' : 'valid'
 
   const report: VerificationReport = {
-    onChain: onChainStatus(generation, checkpoint?.closeTime),
+    onChain: onChainStatus(generation, checkpoint.closeTime),
     schema: schemaStatus,
     payload: await payloadStatus({ request, generation, schema, resolver: dependencies.resolver }),
     issuerTrust: dependencies.trustPolicy.evaluate(request.issuer),

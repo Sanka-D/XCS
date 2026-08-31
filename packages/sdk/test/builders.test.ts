@@ -5,6 +5,7 @@ import {
   decodeUtf8Hex,
   type JsonValue,
 } from '@xcs-protocol/core'
+import { decode, encode, type Payment } from 'xrpl'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -14,6 +15,8 @@ import {
   buildSchemaRegistrationPayment,
   credentialHexToUri,
   deriveSchemaUid,
+  MAX_XRPL_MEMO_BYTES,
+  measureSchemaRegistrationMemoBytes,
   schemaUidToCredentialType,
   XCS_SCHEMA_MEMO_FORMAT,
   XCS_SCHEMA_MEMO_TYPE,
@@ -46,6 +49,20 @@ const schema = {
   },
 }
 
+function schemaAtMemoBoundary(descriptionBytes: number) {
+  return {
+    xcsVersion: '0.1' as const,
+    name: 'S',
+    description: 'd'.repeat(descriptionBytes),
+    fields: Object.fromEntries(
+      Array.from({ length: 28 }, (_, index) => [
+        `f${String(index).padStart(2, '0')}`,
+        { type: 'string' as const },
+      ]),
+    ),
+  }
+}
+
 describe('schema transaction builders', () => {
   it('builds the exact one-drop registration payment with a canonical memo', () => {
     const built = buildSchemaRegistrationPayment({ publisher: ISSUER, profile, schema })
@@ -60,6 +77,10 @@ describe('schema transaction builders', () => {
     expect(decodeUtf8Hex(memo?.MemoType ?? '')).toBe(XCS_SCHEMA_MEMO_TYPE)
     expect(decodeUtf8Hex(memo?.MemoFormat ?? '')).toBe(XCS_SCHEMA_MEMO_FORMAT)
     expect(decodeUtf8Hex(memo?.MemoData ?? '')).toBe(canonicalize(schema as unknown as JsonValue))
+    expect(built.memoByteLength).toBe(measureSchemaRegistrationMemoBytes(built.canonicalSchema))
+    expect(built.memoByteLength).toBeGreaterThan(
+      new TextEncoder().encode(built.canonicalSchema).byteLength,
+    )
     expect(built.transaction).not.toHaveProperty('Sequence')
     expect(built.transaction).not.toHaveProperty('SigningPubKey')
   })
@@ -98,6 +119,53 @@ describe('schema transaction builders', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(XcsSdkError)
       expect((error as XcsSdkError).code).toBe('XCS_SDK_MEMO_TOO_LARGE')
+      expect((error as XcsSdkError).details?.byteLength).toBe(
+        measureSchemaRegistrationMemoBytes(
+          canonicalize({ ...schema, fields } as unknown as JsonValue),
+        ),
+      )
+    }
+  })
+
+  it('matches rippled memo accounting at the exact 1,024-byte boundary', () => {
+    const exactLimitSchema = schemaAtMemoBoundary(249)
+    const exactLimitCanonical = canonicalize(exactLimitSchema as unknown as JsonValue)
+
+    expect(measureSchemaRegistrationMemoBytes(exactLimitCanonical)).toBe(MAX_XRPL_MEMO_BYTES)
+
+    const built = buildSchemaRegistrationPayment({
+      publisher: ISSUER,
+      profile,
+      schema: exactLimitSchema,
+    })
+    const serializableTransaction: Payment = {
+      ...built.transaction,
+      Fee: '12',
+      Sequence: 1,
+      SigningPubKey: '',
+    }
+    const { Memos, ...transactionWithoutMemos } = serializableTransaction
+    const encoded = encode(serializableTransaction)
+
+    expect(decode(encoded)).toMatchObject({ Memos })
+    expect((encoded.length - encode(transactionWithoutMemos).length) / 2).toBe(
+      MAX_XRPL_MEMO_BYTES + 2,
+    )
+
+    const overLimitSchema = schemaAtMemoBoundary(250)
+    const overLimitCanonical = canonicalize(overLimitSchema as unknown as JsonValue)
+    expect(measureSchemaRegistrationMemoBytes(overLimitCanonical)).toBe(MAX_XRPL_MEMO_BYTES + 1)
+
+    try {
+      buildSchemaRegistrationPayment({ publisher: ISSUER, profile, schema: overLimitSchema })
+      throw new Error('Expected a 1,025-byte memo to be rejected')
+    } catch (error) {
+      expect(error).toBeInstanceOf(XcsSdkError)
+      expect((error as XcsSdkError).code).toBe('XCS_SDK_MEMO_TOO_LARGE')
+      expect((error as XcsSdkError).details).toMatchObject({
+        byteLength: MAX_XRPL_MEMO_BYTES + 1,
+        maxByteLength: MAX_XRPL_MEMO_BYTES,
+      })
     }
   })
 })

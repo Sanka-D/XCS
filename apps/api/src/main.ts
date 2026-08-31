@@ -3,6 +3,7 @@ import { createDatabaseClient } from '@xcs-protocol/db'
 import { createApi } from './app.js'
 import { loadApiConfig } from './config.js'
 import { KuboPinStore } from './kubo.js'
+import { PostgresOperationalMetricsRepository } from './operational-metrics-repository.js'
 import { DisabledPayloadResolver, SafePayloadResolver } from './payload-resolver.js'
 import { DemoPinningService } from './pinning.js'
 import { PostgresPinningRepository } from './pinning-repository.js'
@@ -19,6 +20,7 @@ const pinningService = config.demoPinning.enabled
       store: new KuboPinStore(config.demoPinning.kuboRpcUrl),
       ipHashSecret: config.demoPinning.ipHashSecret,
       enabledNetworks: new Set(config.demoPinning.networks),
+      maxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
     })
   : undefined
 const app = await createApi({
@@ -31,7 +33,18 @@ const app = await createApi({
     untrusted: config.untrustedIssuers,
   }),
   allowedOrigins: config.allowedOrigins,
+  internalSsrToken: config.internalSsrToken,
+  trustedProxyCidrs: config.trustedProxyCidrs,
   readinessMaxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
+  ...(config.operationalMetrics.enabled
+    ? {
+        operationalMetrics: {
+          token: config.operationalMetrics.token,
+          repository: new PostgresOperationalMetricsRepository(database.db),
+          observePayloadResolver: config.payloadFetchEnabled,
+        },
+      }
+    : {}),
   ...(pinningService === undefined ? {} : { pinningService }),
   logger: true,
 })

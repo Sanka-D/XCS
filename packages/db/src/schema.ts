@@ -18,6 +18,11 @@ import {
 // a bound parameter inside a CHECK expression would produce invalid DDL.
 const HASH_PATTERN = sql.raw("'^[0-9a-f]{64}$'")
 const ADDRESS_PATTERN = sql.raw("'^r[1-9A-HJ-NP-Za-km-z]{24,34}$'")
+const ERROR_CODE_PATTERN = sql.raw("'^[A-Z][A-Z0-9_]{0,63}$'")
+const WRITER_ID_PATTERN = sql.raw("'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'")
+
+export const INDEXER_STATUS_STATES = ['starting', 'catching_up', 'ready', 'halted'] as const
+export type IndexerStatusState = (typeof INDEXER_STATUS_STATES)[number]
 
 export const networkProfiles = pgTable(
   'network_profiles',
@@ -61,6 +66,7 @@ export const ledgerCheckpoints = pgTable(
     parentHash: text('parent_hash').notNull(),
     closeTime: bigint('close_time', { mode: 'number' }).notNull(),
     transactionCount: integer('transaction_count').notNull(),
+    transactionRoot: text('transaction_root'),
     processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -70,10 +76,140 @@ export const ledgerCheckpoints = pgTable(
     }),
     uniqueIndex('ledger_checkpoints_profile_hash_uq').on(table.profileId, table.ledgerHash),
     check('ledger_checkpoints_index', sql`${table.ledgerIndex} >= 0`),
+    check('ledger_checkpoints_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
     check('ledger_checkpoints_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
     check('ledger_checkpoints_parent', sql`${table.parentHash} ~ ${HASH_PATTERN}`),
     check('ledger_checkpoints_close_time', sql`${table.closeTime} >= 0`),
+    check('ledger_checkpoints_close_time_uint32', sql`${table.closeTime} BETWEEN 0 AND 4294967295`),
     check('ledger_checkpoints_tx_count', sql`${table.transactionCount} >= 0`),
+    check(
+      'ledger_checkpoints_transaction_root',
+      sql`${table.transactionRoot} IS NULL OR ${table.transactionRoot} ~ ${HASH_PATTERN}`,
+    ),
+  ],
+)
+
+export const indexerStatuses = pgTable(
+  'indexer_status',
+  {
+    profileId: text('profile_id')
+      .primaryKey()
+      .references(() => networkProfiles.profileId, { onDelete: 'restrict' }),
+    state: text('state').$type<IndexerStatusState>().notNull(),
+    primarySourceTip: bigint('primary_source_tip', { mode: 'number' }),
+    secondarySourceTip: bigint('secondary_source_tip', { mode: 'number' }),
+    lastAgreedLedgerIndex: bigint('last_agreed_ledger_index', { mode: 'number' }),
+    lastAgreedLedgerHash: text('last_agreed_ledger_hash'),
+    errorCode: text('error_code'),
+    writerId: text('writer_id'),
+    writerEpoch: bigint('writer_epoch', { mode: 'number' }).notNull(),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'indexer_status_state',
+      sql`${table.state} IN ('starting', 'catching_up', 'ready', 'halted')`,
+    ),
+    check(
+      'indexer_status_primary_tip',
+      sql`${table.primarySourceTip} IS NULL OR ${table.primarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_status_secondary_tip',
+      sql`${table.secondarySourceTip} IS NULL OR ${table.secondarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_status_agreed_ledger',
+      sql`(${table.lastAgreedLedgerIndex} IS NULL AND ${table.lastAgreedLedgerHash} IS NULL)
+          OR (${table.lastAgreedLedgerIndex} IS NOT NULL
+          AND ${table.lastAgreedLedgerHash} IS NOT NULL
+          AND ${table.lastAgreedLedgerIndex} BETWEEN 0 AND 4294967295
+          AND ${table.lastAgreedLedgerHash} ~ ${HASH_PATTERN})`,
+    ),
+    check(
+      'indexer_status_agreed_not_ahead',
+      sql`${table.state} = 'halted'
+          OR ${table.lastAgreedLedgerIndex} IS NULL
+          OR ((${table.primarySourceTip} IS NULL OR ${table.lastAgreedLedgerIndex} <= ${table.primarySourceTip})
+          AND (${table.secondarySourceTip} IS NULL OR ${table.lastAgreedLedgerIndex} <= ${table.secondarySourceTip}))`,
+    ),
+    check(
+      'indexer_status_ready_shape',
+      sql`${table.state} <> 'ready'
+          OR (${table.primarySourceTip} IS NOT NULL
+          AND ${table.secondarySourceTip} IS NOT NULL
+          AND ${table.lastAgreedLedgerIndex} IS NOT NULL
+          AND ${table.lastAgreedLedgerHash} IS NOT NULL
+          AND ${table.writerId} IS NOT NULL
+          AND ${table.leaseExpiresAt} IS NOT NULL
+          AND ${table.lastAgreedLedgerIndex} = LEAST(${table.primarySourceTip}, ${table.secondarySourceTip}))`,
+    ),
+    check(
+      'indexer_status_error_code',
+      sql`${table.errorCode} IS NULL OR ${table.errorCode} ~ ${ERROR_CODE_PATTERN}`,
+    ),
+    check(
+      'indexer_status_error_shape',
+      sql`(${table.state} = 'halted' AND ${table.errorCode} IS NOT NULL)
+          OR (${table.state} <> 'halted' AND ${table.errorCode} IS NULL)`,
+    ),
+    check(
+      'indexer_status_writer_id',
+      sql`${table.writerId} IS NULL OR ${table.writerId} ~ ${WRITER_ID_PATTERN}`,
+    ),
+    check('indexer_status_writer_epoch', sql`${table.writerEpoch} BETWEEN 1 AND 9007199254740991`),
+    check(
+      'indexer_status_lease_window',
+      sql`(${table.writerId} IS NULL AND ${table.leaseExpiresAt} IS NULL)
+          OR (${table.writerId} IS NOT NULL
+          AND ${table.leaseExpiresAt} IS NOT NULL
+          AND ${table.leaseExpiresAt} >= ${table.updatedAt}
+          AND ${table.leaseExpiresAt} <= ${table.updatedAt} + interval '5 minutes')`,
+    ),
+  ],
+)
+
+export const indexerIncidents = pgTable(
+  'indexer_incidents',
+  {
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => networkProfiles.profileId, { onDelete: 'restrict' }),
+    writerEpoch: bigint('writer_epoch', { mode: 'number' }).notNull(),
+    errorCode: text('error_code').notNull(),
+    primarySourceTip: bigint('primary_source_tip', { mode: 'number' }),
+    secondarySourceTip: bigint('secondary_source_tip', { mode: 'number' }),
+    lastAgreedLedgerIndex: bigint('last_agreed_ledger_index', { mode: 'number' }),
+    lastAgreedLedgerHash: text('last_agreed_ledger_hash'),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'indexer_incidents_pk',
+      columns: [table.profileId, table.writerEpoch],
+    }),
+    check(
+      'indexer_incidents_writer_epoch',
+      sql`${table.writerEpoch} BETWEEN 1 AND 9007199254740991`,
+    ),
+    check('indexer_incidents_error_code', sql`${table.errorCode} ~ ${ERROR_CODE_PATTERN}`),
+    check(
+      'indexer_incidents_primary_tip',
+      sql`${table.primarySourceTip} IS NULL OR ${table.primarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_incidents_secondary_tip',
+      sql`${table.secondarySourceTip} IS NULL OR ${table.secondarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_incidents_agreed_ledger',
+      sql`(${table.lastAgreedLedgerIndex} IS NULL AND ${table.lastAgreedLedgerHash} IS NULL)
+          OR (${table.lastAgreedLedgerIndex} IS NOT NULL
+          AND ${table.lastAgreedLedgerHash} IS NOT NULL
+          AND ${table.lastAgreedLedgerIndex} BETWEEN 0 AND 4294967295
+          AND ${table.lastAgreedLedgerHash} ~ ${HASH_PATTERN})`,
+    ),
   ],
 )
 
@@ -104,9 +240,16 @@ export const schemaEvents = pgTable(
       table.ledgerIndex,
       table.transactionIndex,
     ),
+    index('schema_events_activity_idx').on(
+      table.profileId,
+      table.ledgerIndex,
+      table.transactionIndex,
+      table.transactionHash,
+    ),
     index('schema_events_publisher_idx').on(table.profileId, table.publisher),
     check('schema_events_tx_hash', sql`${table.transactionHash} ~ ${HASH_PATTERN}`),
     check('schema_events_ledger_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
+    check('schema_events_ledger_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
     check('schema_events_tx_index', sql`${table.transactionIndex} >= 0`),
     check('schema_events_status', sql`${table.status} IN ('accepted', 'rejected')`),
     check(
@@ -160,6 +303,16 @@ export const schemas = pgTable(
       table.ledgerIndex,
       table.transactionIndex,
     ),
+    index('schemas_order_idx').on(
+      table.profileId,
+      table.ledgerIndex,
+      table.transactionIndex,
+      table.schemaUid,
+    ),
+    index('schemas_search_idx').using(
+      'gin',
+      sql`to_tsvector('simple', ${table.name} || ' ' || ${table.description})`,
+    ),
     check('schemas_uid', sql`${table.schemaUid} ~ ${HASH_PATTERN}`),
     check(
       'schemas_parent_uid',
@@ -173,6 +326,8 @@ export const schemas = pgTable(
       'schemas_registration_tx_hash',
       sql`${table.registrationTransactionHash} ~ ${HASH_PATTERN}`,
     ),
+    check('schemas_ledger_index_uint32', sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`),
+    check('schemas_transaction_index', sql`${table.transactionIndex} >= 0`),
   ],
 )
 
@@ -218,12 +373,43 @@ export const credentialGenerations = pgTable(
       table.schemaUid,
       table.createdLedgerIndex,
     ),
+    index('credential_generations_stats_idx').on(
+      table.profileId,
+      table.deletedLedgerIndex,
+      table.accepted,
+      table.expiration,
+    ),
     check('credential_generations_id', sql`${table.generationId} ~ ${HASH_PATTERN}`),
     check('credential_generations_object', sql`${table.ledgerObjectId} ~ ${HASH_PATTERN}`),
     check('credential_generations_schema', sql`${table.schemaUid} ~ ${HASH_PATTERN}`),
     check(
       'credential_generations_expiration',
       sql`${table.expiration} IS NULL OR ${table.expiration} >= 0`,
+    ),
+    check(
+      'credential_generations_expiration_uint32',
+      sql`${table.expiration} IS NULL OR ${table.expiration} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_created_ledger_uint32',
+      sql`${table.createdLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_created_transaction_index',
+      sql`${table.createdTransactionIndex} >= 0`,
+    ),
+    check(
+      'credential_generations_last_ledger_uint32',
+      sql`${table.lastLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_deleted_ledger_uint32',
+      sql`${table.deletedLedgerIndex} IS NULL OR ${table.deletedLedgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'credential_generations_ledger_order',
+      sql`${table.lastLedgerIndex} >= ${table.createdLedgerIndex}
+          AND (${table.deletedLedgerIndex} IS NULL OR ${table.deletedLedgerIndex} = ${table.lastLedgerIndex})`,
     ),
     check(
       'credential_generations_deletion',
@@ -294,6 +480,17 @@ export const credentialEvents = pgTable(
     check('credential_events_object', sql`${table.ledgerObjectId} ~ ${HASH_PATTERN}`),
     check('credential_events_ledger_hash', sql`${table.ledgerHash} ~ ${HASH_PATTERN}`),
     check('credential_events_schema', sql`${table.schemaUid} ~ ${HASH_PATTERN}`),
+    check('credential_events_generation_id', sql`${table.generationId} IS NOT NULL`),
+    check('credential_events_node_index', sql`${table.nodeIndex} >= 0`),
+    check(
+      'credential_events_ledger_index_uint32',
+      sql`${table.ledgerIndex} BETWEEN 0 AND 4294967295`,
+    ),
+    check('credential_events_transaction_index', sql`${table.transactionIndex} >= 0`),
+    check(
+      'credential_events_expiration_uint32',
+      sql`${table.expiration} IS NULL OR ${table.expiration} BETWEEN 0 AND 4294967295`,
+    ),
     check('credential_events_type', sql`${table.eventType} IN ('created', 'accepted', 'deleted')`),
     check(
       'credential_events_delete_shape',
@@ -377,6 +574,10 @@ export const demoPins = pgTable(
 export type NetworkProfileRow = typeof networkProfiles.$inferSelect
 export type NewNetworkProfileRow = typeof networkProfiles.$inferInsert
 export type LedgerCheckpointRow = typeof ledgerCheckpoints.$inferSelect
+export type IndexerStatusRow = typeof indexerStatuses.$inferSelect
+export type NewIndexerStatusRow = typeof indexerStatuses.$inferInsert
+export type IndexerIncidentRow = typeof indexerIncidents.$inferSelect
+export type NewIndexerIncidentRow = typeof indexerIncidents.$inferInsert
 export type SchemaEventRow = typeof schemaEvents.$inferSelect
 export type SchemaRow = typeof schemas.$inferSelect
 export type CredentialGenerationRow = typeof credentialGenerations.$inferSelect

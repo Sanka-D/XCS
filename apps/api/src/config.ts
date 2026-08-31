@@ -1,7 +1,10 @@
 import { isClassicAddress } from '@xcs-protocol/core'
+import { isIP } from 'node:net'
 
 export interface ApiConfig {
   databaseUrl: string
+  internalSsrToken: string
+  trustedProxyCidrs: string[]
   host: string
   port: number
   ipfsGateway: string
@@ -10,6 +13,12 @@ export interface ApiConfig {
   allowedOrigins: string[]
   payloadFetchEnabled: boolean
   readinessMaxLedgerAgeSeconds: number
+  operationalMetrics:
+    | { enabled: false }
+    | {
+        enabled: true
+        token: string
+      }
   demoPinning:
     | { enabled: false }
     | {
@@ -18,6 +27,31 @@ export interface ApiConfig {
         ipHashSecret: string
         networks: string[]
       }
+}
+
+function internalSsrToken(environment: NodeJS.ProcessEnv): string {
+  const value = required(environment, 'XCS_INTERNAL_API_TOKEN')
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(value) || value === 'xcs-development-internal-token-0001') {
+    throw new Error('XCS_INTERNAL_API_TOKEN must be 32 to 256 URL-safe random characters')
+  }
+  return value
+}
+
+function operationalMetrics(
+  environment: NodeJS.ProcessEnv,
+  internalToken: string,
+): ApiConfig['operationalMetrics'] {
+  const enabled = strictBoolean(environment.XCS_METRICS_ENABLED, false, 'XCS_METRICS_ENABLED')
+  if (!enabled) return { enabled: false }
+
+  const token = required(environment, 'XCS_METRICS_TOKEN')
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
+    throw new Error('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
+  }
+  if (token === internalToken) {
+    throw new Error('XCS_METRICS_TOKEN must be distinct from XCS_INTERNAL_API_TOKEN')
+  }
+  return { enabled: true, token }
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -67,6 +101,22 @@ function list(value: string | undefined, defaults: string[] = []): string[] {
   ]
 }
 
+function trustedProxyCidrs(value: string | undefined): string[] {
+  return list(value).map((entry) => {
+    const [address, prefix, ...rest] = entry.split('/')
+    const version = address === undefined ? 0 : isIP(address)
+    const validPrefix =
+      prefix === undefined ||
+      (/^[0-9]{1,3}$/u.test(prefix) &&
+        Number(prefix) > 0 &&
+        Number(prefix) <= (version === 4 ? 32 : 128))
+    if (version === 0 || rest.length > 0 || !validPrefix) {
+      throw new Error('XCS_TRUSTED_PROXY_CIDRS must contain only explicit IP addresses or CIDRs')
+    }
+    return entry
+  })
+}
+
 function strictBoolean(value: string | undefined, defaultValue: boolean, name: string): boolean {
   if (value === undefined) return defaultValue
   if (value === 'true') return true
@@ -89,6 +139,7 @@ function origins(value: string | undefined): string[] {
 }
 
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+  const configuredInternalSsrToken = internalSsrToken(environment)
   const port = Number(environment.XCS_API_PORT ?? environment.API_PORT ?? '3001')
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('API_PORT must be an integer between 1 and 65535')
@@ -123,6 +174,8 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
   }
   return {
     databaseUrl: compatibleRequired(environment, 'XCS_DATABASE_URL', 'DATABASE_URL'),
+    internalSsrToken: configuredInternalSsrToken,
+    trustedProxyCidrs: trustedProxyCidrs(environment.XCS_TRUSTED_PROXY_CIDRS),
     host: environment.XCS_API_HOST ?? environment.API_HOST ?? '0.0.0.0',
     port,
     ipfsGateway:
@@ -136,6 +189,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       'XCS_PAYLOAD_FETCH_ENABLED',
     ),
     readinessMaxLedgerAgeSeconds,
+    operationalMetrics: operationalMetrics(environment, configuredInternalSsrToken),
     demoPinning,
   }
 }

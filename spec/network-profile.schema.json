@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xcs.dev/schema/network-profile-v0.1.json",
   "title": "XCS v0.1 Network Profile",
+  "$comment": "Structural aid only. XCS-0001 and conforming protocol validators are normative for address checksums, normalization, immutability, and cross-field rules.",
   "type": "object",
   "additionalProperties": false,
   "required": [

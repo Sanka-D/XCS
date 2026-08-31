@@ -1,7 +1,10 @@
+import tr46 from 'tr46'
+
 import { isClassicAddress } from './address.js'
 import { canonicalize } from './canonicalize.js'
 import { validateClaims } from './claims.js'
 import { fail, XcsError } from './errors.js'
+import { validateSchema } from './schema.js'
 import { parseJsonStrict } from './strict-json.js'
 import { sha256, sha256Hex } from './sha256.js'
 import type {
@@ -10,6 +13,8 @@ import type {
   JsonValue,
   ParsedPayloadUri,
   PayloadIntegrityResult,
+  PayloadRetrievalEvidence,
+  PayloadVerificationStatus,
 } from './types.js'
 import { bytesToHex, decodeUtf8, encodeUtf8 } from './utf8.js'
 
@@ -17,9 +22,161 @@ const MAX_PAYLOAD_BYTES = 1024 * 1024
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567'
 const PAYLOAD_KEYS = new Set(['xcsVersion', 'issuer', 'subject', 'schema', 'claims'])
 const SCHEMA_UID = /^[0-9a-f]{64}$/
+const INVALID_RAW_HTTPS_CHARACTER = /[\u0000-\u0020\u007f\\]/
+const INVALID_NORMALIZED_HOST_ASCII = '/?#@:[]\\%<>^|`{}'
+const CANONICAL_HTTPS_PATH_ASCII =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&'()*+,;=:@/"
+const CANONICAL_HTTPS_QUERY_ASCII =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&()*+,;=:@/?'
+const HTTPS_PREFIX = 'https://'
+const IPV4_MAPPED_IPV6_HOST = /^\[::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}\]$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function payloadSchemaFields(context: CredentialPayloadContext) {
+  if ('definition' in context.schema && 'lineage' in context.schema) {
+    return context.schema.fields
+  }
+  const definition = validateSchema(context.schema)
+  if (definition.extends !== undefined) {
+    return fail(
+      'SCHEMA_PARENT_NOT_FOUND',
+      'Cannot validate payload claims against an unresolved inherited schema',
+      '$.extends',
+    )
+  }
+  return definition.fields
+}
+
+function hasValidRawHttpsEnvelope(uri: string): boolean {
+  if (!uri.startsWith(HTTPS_PREFIX) || INVALID_RAW_HTTPS_CHARACTER.test(uri)) return false
+  const remainder = uri.slice(HTTPS_PREFIX.length)
+  const delimiterIndex = remainder.search(/[/?#]/)
+  const authority = delimiterIndex === -1 ? remainder : remainder.slice(0, delimiterIndex)
+  return authority.length > 0 && !authority.includes('@')
+}
+
+function normalizeHttpsPortSuffix(portSuffix: string): string | undefined {
+  if (portSuffix === '') return ''
+  if (!/^:\d*$/.test(portSuffix)) return undefined
+  const digits = portSuffix.slice(1)
+  if (digits === '') return ''
+  let port = 0
+  for (const digit of digits) {
+    port = port * 10 + Number(digit)
+    if (port > 65535) return undefined
+  }
+  return port === 443 ? '' : `:${String(port)}`
+}
+
+function hasInvalidNormalizedHostCharacter(host: string): boolean {
+  for (const character of host) {
+    const codePoint = character.codePointAt(0) ?? 0
+    if (
+      codePoint <= 0x20 ||
+      codePoint === 0x7f ||
+      INVALID_NORMALIZED_HOST_ASCII.includes(character)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function normalizeHttpsAuthority(uri: string): string | undefined {
+  const remainder = uri.slice(HTTPS_PREFIX.length)
+  const delimiterIndex = remainder.search(/[/?#]/)
+  const authority = delimiterIndex === -1 ? remainder : remainder.slice(0, delimiterIndex)
+  const suffix = delimiterIndex === -1 ? '' : remainder.slice(delimiterIndex)
+
+  if (authority.startsWith('[')) {
+    const closingBracket = authority.indexOf(']')
+    if (closingBracket === -1 || authority.includes('%')) return undefined
+    const portSuffix = authority.slice(closingBracket + 1)
+    const normalizedPort = normalizeHttpsPortSuffix(portSuffix)
+    if (normalizedPort === undefined) return undefined
+    try {
+      const addressUrl = new URL(`${HTTPS_PREFIX}${authority}/`)
+      if (IPV4_MAPPED_IPV6_HOST.test(addressUrl.hostname)) return undefined
+      return `${HTTPS_PREFIX}${addressUrl.hostname}${normalizedPort}${suffix}`
+    } catch {
+      return undefined
+    }
+  }
+  if ([...authority].filter((character) => character === ':').length > 1) return undefined
+
+  const portSeparator = authority.lastIndexOf(':')
+  const host = portSeparator === -1 ? authority : authority.slice(0, portSeparator)
+  const portSuffix = portSeparator === -1 ? '' : authority.slice(portSeparator)
+  const normalizedPort = normalizeHttpsPortSuffix(portSuffix)
+  if (normalizedPort === undefined) return undefined
+
+  let decodedHost: string
+  try {
+    decodedHost = decodeURIComponent(host)
+  } catch {
+    return undefined
+  }
+  const asciiHost = tr46.toASCII(decodedHost, {
+    checkBidi: true,
+    checkHyphens: false,
+    checkJoiners: true,
+    transitionalProcessing: false,
+    useSTD3ASCIIRules: false,
+    verifyDNSLength: false,
+  })
+  if (asciiHost === null || asciiHost === '' || hasInvalidNormalizedHostCharacter(asciiHost)) {
+    return undefined
+  }
+  try {
+    const hostUrl = new URL(`${HTTPS_PREFIX}${asciiHost}${normalizedPort}/`)
+    return `${HTTPS_PREFIX}${hostUrl.host}${suffix}`
+  } catch {
+    return undefined
+  }
+}
+
+function hasCanonicalHttpsComponent(value: string, allowedAscii: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? ''
+    if (character === '%') {
+      const escape = value.slice(index + 1, index + 3)
+      if (!/^[0-9A-Fa-f]{2}$/.test(escape)) return false
+      index += 2
+    } else if (!allowedAscii.includes(character)) {
+      return false
+    }
+  }
+  return true
+}
+
+function canonicalHttpsFetchUrl(normalizedUri: string): string | undefined {
+  const fragmentIndex = normalizedUri.indexOf('#')
+  if (fragmentIndex === -1) return undefined
+  const withoutFragment = normalizedUri.slice(0, fragmentIndex)
+  const remainder = withoutFragment.slice(HTTPS_PREFIX.length)
+  const resourceIndex = remainder.search(/[/?]/)
+  const authority = resourceIndex === -1 ? remainder : remainder.slice(0, resourceIndex)
+  const resource = resourceIndex === -1 ? '' : remainder.slice(resourceIndex)
+  const queryIndex = resource.indexOf('?')
+  const path = queryIndex === -1 ? resource : resource.slice(0, queryIndex)
+  const query = queryIndex === -1 ? undefined : resource.slice(queryIndex + 1)
+
+  if (
+    !hasCanonicalHttpsComponent(path, CANONICAL_HTTPS_PATH_ASCII) ||
+    (query !== undefined && !hasCanonicalHttpsComponent(query, CANONICAL_HTTPS_QUERY_ASCII)) ||
+    path.split('/').some((segment) => {
+      const normalizedDots = segment.replaceAll(/%2e/gi, '.')
+      return normalizedDots === '.' || normalizedDots === '..'
+    })
+  ) {
+    return undefined
+  }
+  return `${HTTPS_PREFIX}${authority}${path === '' ? '/' : path}${
+    query === undefined ? '' : `?${query}`
+  }`
 }
 
 function decodeBase32(value: string): Uint8Array | undefined {
@@ -108,9 +265,26 @@ export function inspectPayloadUri(uri: string): ParsedPayloadUri {
     }
   }
 
+  if (!hasValidRawHttpsEnvelope(uri)) {
+    return fail(
+      'PAYLOAD_URI_INVALID',
+      'HTTPS URI must use literal https://, a non-empty authority without userinfo, and no raw ASCII whitespace, control, or backslash',
+      '$uri',
+    )
+  }
+
+  const normalizedUri = normalizeHttpsAuthority(uri)
+  if (normalizedUri === undefined) {
+    return fail('PAYLOAD_URI_INVALID', 'HTTPS authority is invalid', '$uri')
+  }
+  const fetchUrl = canonicalHttpsFetchUrl(normalizedUri)
+  if (fetchUrl === undefined) {
+    return fail('PAYLOAD_URI_INVALID', 'HTTPS path or query is not canonical', '$uri')
+  }
+
   let parsed: URL
   try {
-    parsed = new URL(uri)
+    parsed = new URL(normalizedUri)
   } catch (cause) {
     return fail('PAYLOAD_URI_INVALID', 'Payload URI is not a valid URL', '$uri', {
       cause: String(cause),
@@ -129,8 +303,7 @@ export function inspectPayloadUri(uri: string): ParsedPayloadUri {
     )
   }
   const digestHex = parsed.hash.slice('#xcs-sha256='.length)
-  parsed.hash = ''
-  return { kind: 'https', uri, fetchUrl: parsed.toString(), digestHex }
+  return { kind: 'https', uri, fetchUrl, digestHex }
 }
 
 export function createHttpsPayloadUri(baseUrl: string, content: string | Uint8Array): string {
@@ -184,6 +357,32 @@ export function verifyPayloadIntegrity(
   }
 }
 
+export function classifyCredentialPayload(
+  retrieval: PayloadRetrievalEvidence,
+  uri: string,
+  context: CredentialPayloadContext,
+): PayloadVerificationStatus {
+  try {
+    inspectPayloadUri(uri)
+  } catch (error) {
+    if (error instanceof XcsError) return 'invalid'
+    throw error
+  }
+
+  if (retrieval.status === 'unavailable') return 'unavailable'
+
+  try {
+    const integrity = verifyPayloadIntegrity(retrieval.content, uri)
+    if (integrity.status === 'tampered') return 'tampered'
+    if (integrity.status === 'invalid_uri') return 'invalid'
+    parseCredentialPayload(retrieval.content, context)
+    return 'valid'
+  } catch (error) {
+    if (error instanceof XcsError) return 'invalid'
+    throw error
+  }
+}
+
 export function validateCredentialPayload(
   input: unknown,
   context: CredentialPayloadContext,
@@ -223,7 +422,7 @@ export function validateCredentialPayload(
     issuer: input.issuer,
     subject: input.subject,
     schema: input.schema,
-    claims: validateClaims(input.claims, context.schema),
+    claims: validateClaims(input.claims, payloadSchemaFields(context)),
   }
 }
 

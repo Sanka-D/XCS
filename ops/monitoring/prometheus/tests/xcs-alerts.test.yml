@@ -1,0 +1,53 @@
+rule_files:
+  - ../rules/xcs-alerts.yml
+
+evaluation_interval: 30s
+
+tests:
+  - name: authoritative availability counts outage gap and recovery
+    interval: 30s
+    input_series:
+      - series: 'up{job="xcs-api",instance="api:3001"}'
+        values: '1 0 stale 1'
+      - series: 'xcs_indexer_ready{profile_id="pilot"}'
+        values: '1 stale stale 1'
+    promql_expr_test:
+      - expr: xcs:indexer_authoritative_available
+        eval_time: 0s
+        exp_samples:
+          - labels: 'xcs:indexer_authoritative_available{profile_id="pilot"}'
+            value: 1
+      - expr: xcs:indexer_authoritative_available
+        eval_time: 30s
+        exp_samples:
+          - labels: 'xcs:indexer_authoritative_available{profile_id="pilot"}'
+            value: 0
+      - expr: xcs:indexer_authoritative_available
+        eval_time: 1m
+        exp_samples:
+          - labels: 'xcs:indexer_authoritative_available{profile_id="pilot"}'
+            value: 0
+      - expr: xcs:indexer_authoritative_available
+        eval_time: 1m30s
+        exp_samples:
+          - labels: 'xcs:indexer_authoritative_available{profile_id="pilot"}'
+            value: 1
+
+  - name: sustained API outage consumes the readiness SLO
+    interval: 30s
+    input_series:
+      - series: 'up{job="xcs-api",instance="api:3001"}'
+        values: '1 0x32'
+      - series: 'xcs_indexer_ready{profile_id="pilot"}'
+        values: '1 stale'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: XcsAuthoritativeReadinessSloAtRisk
+        exp_alerts:
+          - exp_labels:
+              profile_id: pilot
+              severity: warning
+              slo: authoritative-readiness-99.5
+            exp_annotations:
+              summary: XCS 30-day authoritative readiness is below 99.5 percent
+              description: Profile pilot is below the Testnet beta readiness objective.

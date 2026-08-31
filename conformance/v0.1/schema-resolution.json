@@ -1,0 +1,3506 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "schema-resolution.multi-level-cross-publisher-intra-ledger",
+      "name": "resolves prior same-ledger parents across publishers",
+      "valid": true,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Cross-publisher leaf",
+        "description": "Cross-publisher leaf conformance schema.",
+        "extends": "0202020202020202020202020202020202020202020202020202020202020202",
+        "fields": {
+          "leaf": {
+            "type": "bool"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv",
+        "networkId": 1,
+        "ledgerIndex": 100,
+        "transactionIndex": 2
+      },
+      "catalog": [
+        {
+          "uid": "0101010101010101010101010101010101010101010101010101010101010101",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Cross-publisher root",
+            "description": "Cross-publisher root conformance schema.",
+            "fields": {
+              "root": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 100,
+          "transactionIndex": 0
+        },
+        {
+          "uid": "0202020202020202020202020202020202020202020202020202020202020202",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Cross-publisher middle",
+            "description": "Cross-publisher middle conformance schema.",
+            "extends": "0101010101010101010101010101010101010101010101010101010101010101",
+            "fields": {
+              "middle": {
+                "type": "uint"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 100,
+          "transactionIndex": 1
+        }
+      ],
+      "expected": {
+        "fields": {
+          "root": {
+            "type": "string"
+          },
+          "middle": {
+            "type": "uint"
+          },
+          "leaf": {
+            "type": "bool"
+          }
+        },
+        "lineage": [
+          "0101010101010101010101010101010101010101010101010101010101010101",
+          "0202020202020202020202020202020202020202020202020202020202020202"
+        ]
+      }
+    },
+    {
+      "id": "schema-resolution.supersedes-valid-without-field-effect",
+      "name": "retains supersedes in the definition without inheriting fields",
+      "valid": true,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Valid replacement",
+        "description": "Valid replacement conformance schema.",
+        "supersedes": "0303030303030303030303030303030303030303030303030303030303030303",
+        "fields": {
+          "replacement": {
+            "type": "bool"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 101,
+        "transactionIndex": 0
+      },
+      "catalog": [
+        {
+          "uid": "0303030303030303030303030303030303030303030303030303030303030303",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Superseded schema",
+            "description": "Superseded schema conformance schema.",
+            "fields": {
+              "historical": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 100,
+          "transactionIndex": 9
+        }
+      ],
+      "expected": {
+        "fields": {
+          "replacement": {
+            "type": "bool"
+          }
+        },
+        "lineage": []
+      }
+    },
+    {
+      "id": "schema-resolution.reject-parent-not-found",
+      "name": "rejects a missing parent",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Missing parent child",
+        "description": "Missing parent child conformance schema.",
+        "extends": "0404040404040404040404040404040404040404040404040404040404040404",
+        "fields": {
+          "child": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 102,
+        "transactionIndex": 0
+      },
+      "catalog": [],
+      "errorCode": "SCHEMA_PARENT_NOT_FOUND"
+    },
+    {
+      "id": "schema-resolution.reject-parent-network-mismatch",
+      "name": "rejects a parent from another network",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Wrong-network child",
+        "description": "Wrong-network child conformance schema.",
+        "extends": "0505050505050505050505050505050505050505050505050505050505050505",
+        "fields": {
+          "child": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 102,
+        "transactionIndex": 0
+      },
+      "catalog": [
+        {
+          "uid": "0505050505050505050505050505050505050505050505050505050505050505",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Wrong-network parent",
+            "description": "Wrong-network parent conformance schema.",
+            "fields": {
+              "parent": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 2,
+          "ledgerIndex": 101,
+          "transactionIndex": 0
+        }
+      ],
+      "errorCode": "SCHEMA_PARENT_NETWORK_MISMATCH"
+    },
+    {
+      "id": "schema-resolution.reject-future-parent",
+      "name": "rejects a parent later in the same ledger",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Future-parent child",
+        "description": "Future-parent child conformance schema.",
+        "extends": "0606060606060606060606060606060606060606060606060606060606060606",
+        "fields": {
+          "child": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 103,
+        "transactionIndex": 2
+      },
+      "catalog": [
+        {
+          "uid": "0606060606060606060606060606060606060606060606060606060606060606",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Future parent",
+            "description": "Future parent conformance schema.",
+            "fields": {
+              "parent": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 103,
+          "transactionIndex": 3
+        }
+      ],
+      "errorCode": "SCHEMA_PARENT_NOT_PRIOR"
+    },
+    {
+      "id": "schema-resolution.reject-inherited-override",
+      "name": "rejects a child field that overrides its parent",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Override child",
+        "description": "Override child conformance schema.",
+        "extends": "0707070707070707070707070707070707070707070707070707070707070707",
+        "fields": {
+          "shared": {
+            "type": "bool"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 105,
+        "transactionIndex": 0
+      },
+      "catalog": [
+        {
+          "uid": "0707070707070707070707070707070707070707070707070707070707070707",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Override parent",
+            "description": "Override parent conformance schema.",
+            "fields": {
+              "shared": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 104,
+          "transactionIndex": 0
+        }
+      ],
+      "errorCode": "SCHEMA_OVERRIDE_FORBIDDEN"
+    },
+    {
+      "id": "schema-resolution.reject-inheritance-cycle",
+      "name": "rejects a cycle in the parent catalog",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Cycle leaf",
+        "description": "Cycle leaf conformance schema.",
+        "extends": "0808080808080808080808080808080808080808080808080808080808080808",
+        "fields": {
+          "leaf": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 106,
+        "transactionIndex": 2
+      },
+      "catalog": [
+        {
+          "uid": "0808080808080808080808080808080808080808080808080808080808080808",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Cycle A",
+            "description": "Cycle A conformance schema.",
+            "extends": "0909090909090909090909090909090909090909090909090909090909090909",
+            "fields": {
+              "a": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 106,
+          "transactionIndex": 1
+        },
+        {
+          "uid": "0909090909090909090909090909090909090909090909090909090909090909",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Cycle B",
+            "description": "Cycle B conformance schema.",
+            "extends": "0808080808080808080808080808080808080808080808080808080808080808",
+            "fields": {
+              "b": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 106,
+          "transactionIndex": 0
+        }
+      ],
+      "errorCode": "SCHEMA_INHERITANCE_CYCLE"
+    },
+    {
+      "id": "schema-resolution.accept-inheritance-depth-16",
+      "name": "accepts sixteen schemas in one inheritance chain",
+      "valid": true,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Depth 15",
+        "description": "Depth 15 conformance schema.",
+        "extends": "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e",
+        "fields": {
+          "level_15": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv",
+        "networkId": 1,
+        "ledgerIndex": 200,
+        "transactionIndex": 15
+      },
+      "catalog": [
+        {
+          "uid": "2020202020202020202020202020202020202020202020202020202020202020",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 0",
+            "description": "Depth 0 conformance schema.",
+            "fields": {
+              "level_0": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 0
+        },
+        {
+          "uid": "2121212121212121212121212121212121212121212121212121212121212121",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 1",
+            "description": "Depth 1 conformance schema.",
+            "extends": "2020202020202020202020202020202020202020202020202020202020202020",
+            "fields": {
+              "level_1": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 1
+        },
+        {
+          "uid": "2222222222222222222222222222222222222222222222222222222222222222",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 2",
+            "description": "Depth 2 conformance schema.",
+            "extends": "2121212121212121212121212121212121212121212121212121212121212121",
+            "fields": {
+              "level_2": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 2
+        },
+        {
+          "uid": "2323232323232323232323232323232323232323232323232323232323232323",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 3",
+            "description": "Depth 3 conformance schema.",
+            "extends": "2222222222222222222222222222222222222222222222222222222222222222",
+            "fields": {
+              "level_3": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 3
+        },
+        {
+          "uid": "2424242424242424242424242424242424242424242424242424242424242424",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 4",
+            "description": "Depth 4 conformance schema.",
+            "extends": "2323232323232323232323232323232323232323232323232323232323232323",
+            "fields": {
+              "level_4": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 4
+        },
+        {
+          "uid": "2525252525252525252525252525252525252525252525252525252525252525",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 5",
+            "description": "Depth 5 conformance schema.",
+            "extends": "2424242424242424242424242424242424242424242424242424242424242424",
+            "fields": {
+              "level_5": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 5
+        },
+        {
+          "uid": "2626262626262626262626262626262626262626262626262626262626262626",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 6",
+            "description": "Depth 6 conformance schema.",
+            "extends": "2525252525252525252525252525252525252525252525252525252525252525",
+            "fields": {
+              "level_6": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 6
+        },
+        {
+          "uid": "2727272727272727272727272727272727272727272727272727272727272727",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 7",
+            "description": "Depth 7 conformance schema.",
+            "extends": "2626262626262626262626262626262626262626262626262626262626262626",
+            "fields": {
+              "level_7": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 7
+        },
+        {
+          "uid": "2828282828282828282828282828282828282828282828282828282828282828",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 8",
+            "description": "Depth 8 conformance schema.",
+            "extends": "2727272727272727272727272727272727272727272727272727272727272727",
+            "fields": {
+              "level_8": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 8
+        },
+        {
+          "uid": "2929292929292929292929292929292929292929292929292929292929292929",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 9",
+            "description": "Depth 9 conformance schema.",
+            "extends": "2828282828282828282828282828282828282828282828282828282828282828",
+            "fields": {
+              "level_9": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 9
+        },
+        {
+          "uid": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 10",
+            "description": "Depth 10 conformance schema.",
+            "extends": "2929292929292929292929292929292929292929292929292929292929292929",
+            "fields": {
+              "level_10": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 10
+        },
+        {
+          "uid": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 11",
+            "description": "Depth 11 conformance schema.",
+            "extends": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+            "fields": {
+              "level_11": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 11
+        },
+        {
+          "uid": "2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 12",
+            "description": "Depth 12 conformance schema.",
+            "extends": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+            "fields": {
+              "level_12": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 12
+        },
+        {
+          "uid": "2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 13",
+            "description": "Depth 13 conformance schema.",
+            "extends": "2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c",
+            "fields": {
+              "level_13": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 13
+        },
+        {
+          "uid": "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 14",
+            "description": "Depth 14 conformance schema.",
+            "extends": "2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d",
+            "fields": {
+              "level_14": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 200,
+          "transactionIndex": 14
+        }
+      ],
+      "expected": {
+        "fields": {
+          "level_0": {
+            "type": "string"
+          },
+          "level_1": {
+            "type": "string"
+          },
+          "level_2": {
+            "type": "string"
+          },
+          "level_3": {
+            "type": "string"
+          },
+          "level_4": {
+            "type": "string"
+          },
+          "level_5": {
+            "type": "string"
+          },
+          "level_6": {
+            "type": "string"
+          },
+          "level_7": {
+            "type": "string"
+          },
+          "level_8": {
+            "type": "string"
+          },
+          "level_9": {
+            "type": "string"
+          },
+          "level_10": {
+            "type": "string"
+          },
+          "level_11": {
+            "type": "string"
+          },
+          "level_12": {
+            "type": "string"
+          },
+          "level_13": {
+            "type": "string"
+          },
+          "level_14": {
+            "type": "string"
+          },
+          "level_15": {
+            "type": "string"
+          }
+        },
+        "lineage": [
+          "2020202020202020202020202020202020202020202020202020202020202020",
+          "2121212121212121212121212121212121212121212121212121212121212121",
+          "2222222222222222222222222222222222222222222222222222222222222222",
+          "2323232323232323232323232323232323232323232323232323232323232323",
+          "2424242424242424242424242424242424242424242424242424242424242424",
+          "2525252525252525252525252525252525252525252525252525252525252525",
+          "2626262626262626262626262626262626262626262626262626262626262626",
+          "2727272727272727272727272727272727272727272727272727272727272727",
+          "2828282828282828282828282828282828282828282828282828282828282828",
+          "2929292929292929292929292929292929292929292929292929292929292929",
+          "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+          "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+          "2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c",
+          "2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d",
+          "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e"
+        ]
+      }
+    },
+    {
+      "id": "schema-resolution.reject-inheritance-depth-17",
+      "name": "rejects seventeen schemas in one inheritance chain",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Depth 16",
+        "description": "Depth 16 conformance schema.",
+        "extends": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+        "fields": {
+          "level_16": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv",
+        "networkId": 1,
+        "ledgerIndex": 210,
+        "transactionIndex": 16
+      },
+      "catalog": [
+        {
+          "uid": "4040404040404040404040404040404040404040404040404040404040404040",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 0",
+            "description": "Depth 0 conformance schema.",
+            "fields": {
+              "level_0": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 0
+        },
+        {
+          "uid": "4141414141414141414141414141414141414141414141414141414141414141",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 1",
+            "description": "Depth 1 conformance schema.",
+            "extends": "4040404040404040404040404040404040404040404040404040404040404040",
+            "fields": {
+              "level_1": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 1
+        },
+        {
+          "uid": "4242424242424242424242424242424242424242424242424242424242424242",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 2",
+            "description": "Depth 2 conformance schema.",
+            "extends": "4141414141414141414141414141414141414141414141414141414141414141",
+            "fields": {
+              "level_2": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 2
+        },
+        {
+          "uid": "4343434343434343434343434343434343434343434343434343434343434343",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 3",
+            "description": "Depth 3 conformance schema.",
+            "extends": "4242424242424242424242424242424242424242424242424242424242424242",
+            "fields": {
+              "level_3": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 3
+        },
+        {
+          "uid": "4444444444444444444444444444444444444444444444444444444444444444",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 4",
+            "description": "Depth 4 conformance schema.",
+            "extends": "4343434343434343434343434343434343434343434343434343434343434343",
+            "fields": {
+              "level_4": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 4
+        },
+        {
+          "uid": "4545454545454545454545454545454545454545454545454545454545454545",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 5",
+            "description": "Depth 5 conformance schema.",
+            "extends": "4444444444444444444444444444444444444444444444444444444444444444",
+            "fields": {
+              "level_5": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 5
+        },
+        {
+          "uid": "4646464646464646464646464646464646464646464646464646464646464646",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 6",
+            "description": "Depth 6 conformance schema.",
+            "extends": "4545454545454545454545454545454545454545454545454545454545454545",
+            "fields": {
+              "level_6": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 6
+        },
+        {
+          "uid": "4747474747474747474747474747474747474747474747474747474747474747",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 7",
+            "description": "Depth 7 conformance schema.",
+            "extends": "4646464646464646464646464646464646464646464646464646464646464646",
+            "fields": {
+              "level_7": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 7
+        },
+        {
+          "uid": "4848484848484848484848484848484848484848484848484848484848484848",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 8",
+            "description": "Depth 8 conformance schema.",
+            "extends": "4747474747474747474747474747474747474747474747474747474747474747",
+            "fields": {
+              "level_8": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 8
+        },
+        {
+          "uid": "4949494949494949494949494949494949494949494949494949494949494949",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 9",
+            "description": "Depth 9 conformance schema.",
+            "extends": "4848484848484848484848484848484848484848484848484848484848484848",
+            "fields": {
+              "level_9": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 9
+        },
+        {
+          "uid": "4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 10",
+            "description": "Depth 10 conformance schema.",
+            "extends": "4949494949494949494949494949494949494949494949494949494949494949",
+            "fields": {
+              "level_10": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 10
+        },
+        {
+          "uid": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 11",
+            "description": "Depth 11 conformance schema.",
+            "extends": "4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a",
+            "fields": {
+              "level_11": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 11
+        },
+        {
+          "uid": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 12",
+            "description": "Depth 12 conformance schema.",
+            "extends": "4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b",
+            "fields": {
+              "level_12": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 12
+        },
+        {
+          "uid": "4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 13",
+            "description": "Depth 13 conformance schema.",
+            "extends": "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+            "fields": {
+              "level_13": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 13
+        },
+        {
+          "uid": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 14",
+            "description": "Depth 14 conformance schema.",
+            "extends": "4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d",
+            "fields": {
+              "level_14": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 14
+        },
+        {
+          "uid": "4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Depth 15",
+            "description": "Depth 15 conformance schema.",
+            "extends": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
+            "fields": {
+              "level_15": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 210,
+          "transactionIndex": 15
+        }
+      ],
+      "errorCode": "SCHEMA_DEPTH_EXCEEDED"
+    },
+    {
+      "id": "schema-resolution.reject-supersedes-not-found",
+      "name": "rejects a missing superseded schema",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Missing replacement target",
+        "description": "Missing replacement target conformance schema.",
+        "supersedes": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+        "fields": {
+          "replacement": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 301,
+        "transactionIndex": 0
+      },
+      "catalog": [],
+      "errorCode": "SCHEMA_SUPERSEDES_NOT_FOUND"
+    },
+    {
+      "id": "schema-resolution.reject-future-supersedes",
+      "name": "rejects a superseded schema later in the same ledger",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Future replacement",
+        "description": "Future replacement conformance schema.",
+        "supersedes": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+        "fields": {
+          "replacement": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 302,
+        "transactionIndex": 1
+      },
+      "catalog": [
+        {
+          "uid": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Future superseded schema",
+            "description": "Future superseded schema conformance schema.",
+            "fields": {
+              "historical": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+          "networkId": 1,
+          "ledgerIndex": 302,
+          "transactionIndex": 2
+        }
+      ],
+      "errorCode": "SCHEMA_SUPERSEDES_NOT_PRIOR"
+    },
+    {
+      "id": "schema-resolution.reject-supersedes-publisher-mismatch",
+      "name": "rejects superseding another publisher's schema",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Foreign replacement",
+        "description": "Foreign replacement conformance schema.",
+        "supersedes": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+        "fields": {
+          "replacement": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 304,
+        "transactionIndex": 0
+      },
+      "catalog": [
+        {
+          "uid": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Foreign superseded schema",
+            "description": "Foreign superseded schema conformance schema.",
+            "fields": {
+              "historical": {
+                "type": "string"
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 303,
+          "transactionIndex": 0
+        }
+      ],
+      "errorCode": "SCHEMA_SUPERSEDES_PUBLISHER_MISMATCH"
+    },
+    {
+      "id": "schema-resolution.accept-256-resolved-descriptors",
+      "name": "accepts exactly 256 descriptors after inheritance",
+      "valid": true,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Resolved descriptor limit",
+        "description": "Adds two descriptors to a parent containing 254.",
+        "extends": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+        "fields": {
+          "child": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 400,
+        "transactionIndex": 1
+      },
+      "catalog": [
+        {
+          "uid": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Resolved descriptor parent 254",
+            "description": "Contributes descriptor nodes at the resolved field-count boundary.",
+            "fields": {
+              "parent_000": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_001": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_002": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_003": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_004": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_005": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_006": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_007": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_008": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_009": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_010": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_011": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_012": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_013": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_014": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_015": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_016": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_017": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_018": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_019": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_020": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_021": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_022": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_023": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_024": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_025": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_026": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_027": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_028": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_029": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_030": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_031": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_032": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_033": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_034": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_035": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_036": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_037": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_038": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_039": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_040": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_041": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_042": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_043": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_044": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_045": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_046": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_047": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_048": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_049": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_050": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_051": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_052": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_053": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_054": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_055": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_056": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_057": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_058": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_059": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_060": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_061": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_062": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_063": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_064": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_065": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_066": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_067": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_068": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_069": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_070": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_071": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_072": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_073": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_074": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_075": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_076": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_077": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_078": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_079": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_080": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_081": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_082": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_083": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_084": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_085": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_086": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_087": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_088": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_089": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_090": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_091": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_092": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_093": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_094": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_095": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_096": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_097": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_098": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_099": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_100": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_101": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_102": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_103": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_104": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_105": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_106": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_107": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_108": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_109": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_110": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_111": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_112": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_113": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_114": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_115": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_116": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_117": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_118": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_119": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_120": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_121": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_122": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_123": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_124": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_125": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_126": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 400,
+          "transactionIndex": 0
+        }
+      ],
+      "expected": {
+        "fields": {
+          "parent_000": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_001": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_002": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_003": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_004": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_005": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_006": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_007": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_008": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_009": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_010": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_011": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_012": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_013": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_014": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_015": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_016": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_017": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_018": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_019": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_020": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_021": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_022": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_023": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_024": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_025": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_026": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_027": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_028": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_029": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_030": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_031": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_032": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_033": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_034": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_035": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_036": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_037": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_038": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_039": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_040": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_041": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_042": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_043": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_044": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_045": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_046": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_047": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_048": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_049": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_050": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_051": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_052": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_053": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_054": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_055": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_056": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_057": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_058": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_059": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_060": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_061": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_062": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_063": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_064": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_065": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_066": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_067": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_068": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_069": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_070": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_071": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_072": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_073": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_074": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_075": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_076": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_077": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_078": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_079": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_080": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_081": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_082": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_083": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_084": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_085": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_086": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_087": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_088": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_089": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_090": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_091": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_092": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_093": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_094": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_095": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_096": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_097": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_098": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_099": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_100": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_101": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_102": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_103": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_104": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_105": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_106": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_107": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_108": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_109": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_110": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_111": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_112": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_113": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_114": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_115": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_116": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_117": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_118": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_119": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_120": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_121": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_122": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_123": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_124": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_125": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent_126": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "child": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "lineage": ["d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0"]
+      }
+    },
+    {
+      "id": "schema-resolution.reject-257-resolved-descriptors",
+      "name": "rejects 257 descriptors after inheritance",
+      "valid": false,
+      "input": {
+        "xcsVersion": "0.1",
+        "name": "Above resolved descriptor limit",
+        "description": "Adds one descriptor to a parent already containing 256.",
+        "extends": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+        "fields": {
+          "child": {
+            "type": "string"
+          }
+        }
+      },
+      "context": {
+        "publisher": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "networkId": 1,
+        "ledgerIndex": 400,
+        "transactionIndex": 1
+      },
+      "catalog": [
+        {
+          "uid": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+          "definition": {
+            "xcsVersion": "0.1",
+            "name": "Resolved descriptor parent 256",
+            "description": "Contributes descriptor nodes at the resolved field-count boundary.",
+            "fields": {
+              "parent_000": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_001": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_002": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_003": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_004": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_005": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_006": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_007": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_008": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_009": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_010": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_011": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_012": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_013": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_014": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_015": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_016": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_017": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_018": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_019": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_020": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_021": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_022": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_023": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_024": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_025": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_026": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_027": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_028": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_029": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_030": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_031": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_032": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_033": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_034": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_035": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_036": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_037": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_038": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_039": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_040": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_041": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_042": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_043": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_044": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_045": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_046": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_047": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_048": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_049": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_050": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_051": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_052": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_053": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_054": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_055": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_056": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_057": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_058": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_059": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_060": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_061": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_062": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_063": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_064": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_065": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_066": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_067": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_068": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_069": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_070": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_071": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_072": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_073": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_074": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_075": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_076": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_077": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_078": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_079": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_080": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_081": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_082": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_083": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_084": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_085": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_086": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_087": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_088": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_089": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_090": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_091": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_092": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_093": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_094": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_095": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_096": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_097": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_098": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_099": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_100": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_101": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_102": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_103": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_104": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_105": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_106": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_107": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_108": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_109": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_110": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_111": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_112": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_113": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_114": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_115": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_116": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_117": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_118": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_119": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_120": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_121": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_122": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_123": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_124": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_125": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_126": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "parent_127": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "publisher": "rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn",
+          "networkId": 1,
+          "ledgerIndex": 400,
+          "transactionIndex": 0
+        }
+      ],
+      "errorCode": "SCHEMA_FIELD_LIMIT_EXCEEDED"
+    }
+  ]
+}

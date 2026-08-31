@@ -4,6 +4,20 @@
   "description": "JSON-first command line interface for XCS",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/XRPL-Commons/XCS/tree/main/packages/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XRPL-Commons/XCS.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/XRPL-Commons/XCS/issues"
+  },
+  "keywords": [
+    "cli",
+    "credentials",
+    "xrpl"
+  ],
   "bin": {
     "xcs": "./dist/bin.js"
   },
@@ -15,12 +29,14 @@
   },
   "files": [
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist coverage",
     "lint": "tsc --noEmit",
+    "prepack": "pnpm build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
@@ -39,5 +55,10 @@
   },
   "engines": {
     "node": ">=24 <27"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
   }
 }

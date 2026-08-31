@@ -1,5 +1,12 @@
 import type { NetworkProfile, ResolvedSchema, SchemaDefinition } from '@xcs-protocol/core'
-import { exactCredentialPath } from '~/utils/transactions'
+import type { VerificationDimensions } from '../utils/credentialReview'
+import {
+  exactCredentialEventPath,
+  exactCredentialPath,
+  exactSchemaRegistrationPath,
+} from '../utils/transactions'
+import type { InternalSsrRateLimitContext } from '../utils/internalSsrRateLimit'
+import { parseSigningReadiness, type SigningReadiness } from '../utils/signingReadiness'
 
 export interface ApiSchemaSummary {
   uid: string
@@ -7,6 +14,11 @@ export interface ApiSchemaSummary {
   description: string
   publisher: string
   valid: boolean
+  parentUid: string | null
+  supersedesUid: string | null
+  registrationTransactionHash: string
+  ledgerIndex: number
+  transactionIndex: number
 }
 
 export interface ApiSchemaDetail extends ApiSchemaSummary {
@@ -19,25 +31,173 @@ interface SchemaRow {
   name: string
   description: string
   publisher: string
+  parentUid: string | null
+  supersedesUid: string | null
   definition: SchemaDefinition
   resolvedDefinition: ResolvedSchema
+  registrationTransactionHash: string
+  ledgerIndex: number
+  transactionIndex: number
 }
 
-export interface VerificationResponse {
-  onChain: 'pending' | 'active' | 'expired' | 'deleted' | 'not_found'
-  schema: 'valid' | 'invalid' | 'unknown'
-  payload: 'valid' | 'unavailable' | 'tampered' | 'invalid' | 'not_checked'
-  issuerTrust: 'trusted' | 'untrusted' | 'unknown'
-  generationId?: string
-  [key: string]: unknown
+export type ApiCredentialState = 'pending' | 'active' | 'expired' | 'deleted'
+
+export interface ApiStats {
+  network: string
+  schemas: { total: number; publishers: number }
+  credentialGenerations: {
+    total: number
+    pending: number
+    active: number
+    expired: number
+    deleted: number
+  }
+  checkpoint: {
+    ledgerIndex: number
+    ledgerHash: string
+    closeTime: number
+    transactionRoot: string
+  }
 }
+
+export interface ApiIndexerStatus {
+  profileId: string
+  state: 'starting' | 'catching_up' | 'ready' | 'halted'
+  sourceTips: { primary: number | null; secondary: number | null }
+  lastAgreedLedger: { index: number; hash: string } | null
+  errorCode: string | null
+  updatedAt: string
+}
+
+export interface ApiSchemaSearchResult {
+  type: 'schema'
+  schemaUid: string
+  publisher: string
+  name: string
+  description: string
+  parentUid: string | null
+  supersedesUid: string | null
+  registrationTransactionHash: string
+  ledgerIndex: number
+  transactionIndex: number
+}
+
+export interface ApiCredentialSearchResult {
+  type: 'credential_generation'
+  generationId: string
+  issuer: string
+  subject: string
+  schemaUid: string
+  state: ApiCredentialState
+  createdLedgerIndex: number
+  lastLedgerIndex: number
+}
+
+export interface ApiTransactionSearchResult {
+  type: 'transaction'
+  transactionHash: string
+  ledgerIndex: number
+  ledgerHash: string
+  transactionIndex: number
+  registrationStatus: 'accepted' | 'rejected' | null
+  credentialEventCount: number
+}
+
+export type ApiSearchResult =
+  ApiSchemaSearchResult | ApiCredentialSearchResult | ApiTransactionSearchResult
+
+export interface ApiSchemaRegistrationEvidence {
+  status: 'accepted' | 'rejected'
+  publisher: string
+  ledgerIndex: number
+  ledgerHash: string
+  transactionIndex: number
+  schemaUid: string | null
+  schemaDigestHex: string | null
+  reasonCode: string | null
+}
+
+export interface ApiSchemaRegistration extends ApiSchemaRegistrationEvidence {
+  transactionHash: string
+}
+
+export interface ApiCredentialEvent {
+  transactionHash: string
+  nodeIndex: number
+  generationId: string
+  ledgerIndex: number
+  ledgerHash: string
+  transactionIndex: number
+  eventType: 'created' | 'accepted' | 'deleted'
+  issuer: string
+  subject: string
+  schemaUid: string
+  accepted: boolean
+  deletionCause: string | null
+}
+
+export interface ApiSchemaActivityPage {
+  items: ApiSchemaRegistration[]
+  nextCursor?: string
+}
+
+export interface ApiCredentialGeneration {
+  generationId: string
+  ledgerObjectId: string
+  issuer: string
+  subject: string
+  schemaUid: string
+  uriHex: string | null
+  expiration: number | null
+  accepted: boolean
+  createdLedgerIndex: number
+  createdTransactionIndex: number
+  lastLedgerIndex: number
+  deletedLedgerIndex: number | null
+  deletionCause: string | null
+}
+
+export interface ApiCredentialGenerationDetail {
+  generation: ApiCredentialGeneration
+  state: ApiCredentialState
+  timeline: ApiCredentialEvent[]
+}
+
+export interface ApiTransactionDetail {
+  transactionHash: string
+  ledgerIndex: number
+  ledgerHash: string
+  transactionIndex: number
+  registration: ApiSchemaRegistrationEvidence | null
+  credentialEvents: { items: ApiCredentialEvent[]; nextCursor?: string }
+}
+
+export type VerificationResponse = VerificationDimensions
 
 export function useXcsApi() {
   const config = useRuntimeConfig()
   const baseURL = import.meta.server ? config.apiBaseUrl : config.public.apiBaseUrl
+  const internalSsrRequest = (() => {
+    if (!import.meta.server) return undefined
+    const event = useRequestEvent()
+    if (event === undefined) throw new Error('INTERNAL_SSR_REQUEST_CONTEXT_UNAVAILABLE')
+    const context = event.context as typeof event.context & {
+      xcsSsrRateLimit?: InternalSsrRateLimitContext
+    }
+    if (context.xcsSsrRateLimit === undefined) {
+      throw new Error('INTERNAL_SSR_RATE_LIMIT_CONTEXT_UNAVAILABLE')
+    }
+    return context.xcsSsrRateLimit
+  })()
+  const apiFetch =
+    internalSsrRequest === undefined
+      ? $fetch
+      : $fetch.create({
+          headers: internalSsrRequest.headers,
+        })
 
   function listNetworks() {
-    return $fetch<{ items: NetworkProfile[] }>('/v1/networks', { baseURL })
+    return apiFetch<{ items: NetworkProfile[] }>('/v1/networks', { baseURL })
   }
 
   async function getActiveNetworkProfile(): Promise<NetworkProfile> {
@@ -59,11 +219,25 @@ export function useXcsApi() {
     return (await getActiveNetworkProfile()).profileId
   }
 
-  async function listSchemas(network?: string) {
-    const profileId = await resolveNetworkId(network)
-    const response = await $fetch<{ items: SchemaRow[]; nextCursor?: string }>(
+  async function listSchemas(
+    options: {
+      network?: string
+      cursor?: string
+      publisher?: string
+      limit?: number
+    } = {},
+  ) {
+    const profileId = await resolveNetworkId(options.network)
+    const response = await apiFetch<{ items: SchemaRow[]; nextCursor?: string }>(
       `/v1/networks/${encodeURIComponent(profileId)}/schemas`,
-      { baseURL },
+      {
+        baseURL,
+        query: {
+          ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          ...(options.publisher === undefined ? {} : { publisher: options.publisher }),
+          ...(options.limit === undefined ? {} : { limit: options.limit }),
+        },
+      },
     )
     return {
       items: response.items.map((row) => ({
@@ -72,6 +246,11 @@ export function useXcsApi() {
         description: row.description,
         publisher: row.publisher,
         valid: true,
+        parentUid: row.parentUid,
+        supersedesUid: row.supersedesUid,
+        registrationTransactionHash: row.registrationTransactionHash,
+        ledgerIndex: row.ledgerIndex,
+        transactionIndex: row.transactionIndex,
       })),
       ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
     }
@@ -79,7 +258,7 @@ export function useXcsApi() {
 
   async function getSchema(uid: string, network?: string): Promise<ApiSchemaDetail> {
     const profileId = await resolveNetworkId(network)
-    const row = await $fetch<SchemaRow>(
+    const row = await apiFetch<SchemaRow>(
       `/v1/networks/${encodeURIComponent(profileId)}/schemas/${encodeURIComponent(uid.toLowerCase())}`,
       { baseURL },
     )
@@ -89,9 +268,97 @@ export function useXcsApi() {
       description: row.description,
       publisher: row.publisher,
       valid: true,
+      parentUid: row.parentUid,
+      supersedesUid: row.supersedesUid,
+      registrationTransactionHash: row.registrationTransactionHash,
+      ledgerIndex: row.ledgerIndex,
+      transactionIndex: row.transactionIndex,
       definition: row.definition,
       resolved: row.resolvedDefinition,
     }
+  }
+
+  async function getStats(network?: string): Promise<ApiStats> {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<ApiStats>(`/v1/networks/${encodeURIComponent(profileId)}/stats`, { baseURL })
+  }
+
+  async function getNetworkStatus(network?: string): Promise<ApiIndexerStatus> {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<ApiIndexerStatus>(`/v1/networks/${encodeURIComponent(profileId)}/status`, {
+      baseURL,
+    })
+  }
+
+  async function getNetworkReadiness(network?: string): Promise<SigningReadiness> {
+    const profileId = await resolveNetworkId(network)
+    let response: unknown
+    try {
+      response = await apiFetch<unknown>(
+        `/v1/networks/${encodeURIComponent(profileId)}/readiness`,
+        {
+          baseURL,
+          cache: 'no-store',
+          retry: 0,
+          timeout: 5_000,
+        },
+      )
+    } catch {
+      throw new Error('INDEXER_SIGNING_READINESS_UNAVAILABLE')
+    }
+    return parseSigningReadiness(response, profileId)
+  }
+
+  async function search(query: string, limit = 20, network?: string) {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<{ items: ApiSearchResult[]; hasMore: boolean }>(
+      `/v1/networks/${encodeURIComponent(profileId)}/search`,
+      { baseURL, query: { q: query, limit } },
+    )
+  }
+
+  async function getSchemaActivity(
+    options: { network?: string; cursor?: string; limit?: number } = {},
+  ): Promise<ApiSchemaActivityPage> {
+    const profileId = await resolveNetworkId(options.network)
+    return apiFetch<ApiSchemaActivityPage>(
+      `/v1/networks/${encodeURIComponent(profileId)}/activity`,
+      {
+        baseURL,
+        query: {
+          ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          ...(options.limit === undefined ? {} : { limit: options.limit }),
+        },
+      },
+    )
+  }
+
+  async function getCredentialGeneration(
+    generationId: string,
+    network?: string,
+  ): Promise<ApiCredentialGenerationDetail> {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<ApiCredentialGenerationDetail>(
+      `/v1/networks/${encodeURIComponent(profileId)}/credential-generations/${encodeURIComponent(generationId.toLowerCase())}`,
+      { baseURL },
+    )
+  }
+
+  async function getTransaction(
+    transactionHash: string,
+    options: { network?: string; cursor?: string; limit?: number } = {},
+  ): Promise<ApiTransactionDetail> {
+    const profileId = await resolveNetworkId(options.network)
+    return apiFetch<ApiTransactionDetail>(
+      `/v1/networks/${encodeURIComponent(profileId)}/transactions/${encodeURIComponent(transactionHash.toLowerCase())}`,
+      {
+        baseURL,
+        query: {
+          ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+          ...(options.limit === undefined ? {} : { limit: options.limit }),
+        },
+      },
+    )
   }
 
   function verify(
@@ -105,7 +372,7 @@ export function useXcsApi() {
     network?: string,
   ) {
     return resolveNetworkId(network).then((profileId) =>
-      $fetch<VerificationResponse>('/v1/verify', {
+      apiFetch<VerificationResponse>('/v1/verify', {
         baseURL,
         method: 'POST',
         body: { network: profileId, ...input, schemaUid: input.schemaUid.toLowerCase() },
@@ -120,12 +387,34 @@ export function useXcsApi() {
     network?: string,
   ) {
     const profileId = await resolveNetworkId(network)
-    return $fetch<Record<string, unknown>>(
-      exactCredentialPath(profileId, issuer, subject, schemaUid),
+    return apiFetch<unknown>(exactCredentialPath(profileId, issuer, subject, schemaUid), {
+      baseURL,
+    })
+  }
+
+  async function getCredentialEventByTransaction(
+    issuer: string,
+    subject: string,
+    schemaUid: string,
+    transactionHash: string,
+    network?: string,
+  ) {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<unknown>(
+      exactCredentialEventPath(profileId, issuer, subject, schemaUid, transactionHash),
       {
         baseURL,
+        timeout: 5_000,
       },
     )
+  }
+
+  async function getSchemaRegistrationByTransaction(transactionHash: string, network?: string) {
+    const profileId = await resolveNetworkId(network)
+    return apiFetch<unknown>(exactSchemaRegistrationPath(profileId, transactionHash), {
+      baseURL,
+      timeout: 5_000,
+    })
   }
 
   return {
@@ -133,7 +422,16 @@ export function useXcsApi() {
     getActiveNetworkProfile,
     listSchemas,
     getSchema,
+    getStats,
+    getNetworkStatus,
+    getNetworkReadiness,
+    search,
+    getSchemaActivity,
+    getCredentialGeneration,
+    getTransaction,
     getCredential,
+    getCredentialEventByTransaction,
+    getSchemaRegistrationByTransaction,
     verify,
   }
 }

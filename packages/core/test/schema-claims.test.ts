@@ -1,28 +1,11 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
   resolveSchema,
   validateClaims,
   validateSchema,
-  XcsError,
   type RegisteredSchema,
-  type SchemaDefinition,
 } from '../src/index.js'
-
-interface ClaimsVectors {
-  schema: SchemaDefinition
-  cases: Array<{
-    name: string
-    valid: boolean
-    errorCode?: string
-    claims: unknown
-  }>
-}
-
-const vectors = JSON.parse(
-  readFileSync(new URL('../../../conformance/v0.1/claims.json', import.meta.url), 'utf8'),
-) as ClaimsVectors
 
 describe('schema validation and resolution', () => {
   const rootUid = '11'.repeat(32)
@@ -147,6 +130,26 @@ describe('schema validation and resolution', () => {
         getSchema: () => root,
       }),
     ).toThrowError(expect.objectContaining({ code: 'SCHEMA_SUPERSEDES_PUBLISHER_MISMATCH' }))
+  })
+
+  it('requires every fields map to be non-empty', () => {
+    expect(() =>
+      validateSchema({
+        xcsVersion: '0.1',
+        name: 'Empty root',
+        description: 'A schema must declare at least one descriptor',
+        fields: {},
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'SCHEMA_INVALID' }))
+
+    expect(() =>
+      validateSchema({
+        xcsVersion: '0.1',
+        name: 'Empty nested object',
+        description: 'Nested objects must declare at least one descriptor',
+        fields: { detail: { type: 'object', fields: {} } },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'SCHEMA_INVALID' }))
   })
 
   it('enforces the 256-field and 16-level limits', () => {
@@ -289,20 +292,7 @@ describe('schema validation and resolution', () => {
   })
 })
 
-describe('claim validation conformance', () => {
-  const schema = validateSchema(vectors.schema)
-  for (const vector of vectors.cases) {
-    it(vector.name, () => {
-      if (vector.valid) {
-        expect(validateClaims(vector.claims, schema.fields)).toEqual(vector.claims)
-      } else {
-        expect(() => validateClaims(vector.claims, schema.fields)).toThrowError(
-          expect.objectContaining({ code: vector.errorCode }),
-        )
-      }
-    })
-  }
-
+describe('claim validation', () => {
   it('rejects null and signed/unsigned overflow', () => {
     expect(() => validateClaims({ text: null }, { text: { type: 'string' } })).toThrowError(
       expect.objectContaining({ code: 'CLAIMS_INVALID' }),

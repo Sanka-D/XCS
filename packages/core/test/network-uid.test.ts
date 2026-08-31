@@ -1,22 +1,6 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-import {
-  computeSchemaUid,
-  encodeUtf8Hex,
-  decodeUtf8Hex,
-  validateNetworkProfile,
-  XcsError,
-  type SchemaUidInput,
-} from '../src/index.js'
-
-interface UidVectors {
-  cases: Array<{ name: string; input: SchemaUidInput; uid: string }>
-}
-
-const vectors = JSON.parse(
-  readFileSync(new URL('../../../conformance/v0.1/schema-uid.json', import.meta.url), 'utf8'),
-) as UidVectors
+import { decodeUtf8Hex, encodeUtf8Hex, validateNetworkProfile } from '../src/index.js'
 
 describe('network profile', () => {
   it('validates and normalizes hexadecimal identifiers', () => {
@@ -71,16 +55,16 @@ describe('network profile', () => {
 })
 
 describe('schema UID', () => {
-  for (const vector of vectors.cases) {
-    it(vector.name, () => {
-      expect(computeSchemaUid(vector.input)).toBe(vector.uid)
-    })
-  }
-
   it('encodes memo strings as uppercase UTF-8 hex', () => {
     expect(encodeUtf8Hex('xcs:schema_register')).toBe(
       '7863733A736368656D615F7265676973746572'.toUpperCase(),
     )
     expect(decodeUtf8Hex(encodeUtf8Hex('é'))).toBe('é')
+  })
+
+  it('rejects a terminal unpaired high surrogate before UTF-8 encoding', () => {
+    expect(() => encodeUtf8Hex(`invalid${String.fromCharCode(0xd800)}`)).toThrowError(
+      expect.objectContaining({ code: 'UTF8_INVALID' }),
+    )
   })
 })

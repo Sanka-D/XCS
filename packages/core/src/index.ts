@@ -4,6 +4,16 @@ export { validateClaims } from './claims.js'
 export { XCS_ERROR_CODES, XcsError, type XcsErrorCode } from './errors.js'
 export { validateNetworkProfile } from './network.js'
 export {
+  assertSchemaCatalogClosureWithinLimit,
+  MAX_SCHEMA_CATALOG_ENTRIES,
+  parseSchemaCatalogBundle,
+  resolveSchemaCatalogBundle,
+  validateSchemaCatalogBundle,
+} from './schema-catalog.js'
+export { parseVerificationReport } from './verification-report.js'
+export { projectCredentialLifecycle } from './lifecycle.js'
+export {
+  classifyCredentialPayload,
   computePayloadSha256Hex,
   createHttpsPayloadUri,
   createIpfsRawPayloadUri,
@@ -26,6 +36,8 @@ export type {
   ArrayFieldDescriptor,
   CredentialPayload,
   CredentialPayloadContext,
+  CredentialLifecycleInput,
+  CredentialLifecycleState,
   FieldDescriptor,
   HttpsPayloadUri,
   IpfsPayloadUri,
@@ -37,13 +49,19 @@ export type {
   OnChainVerificationStatus,
   ParsedPayloadUri,
   PayloadIntegrityResult,
+  PayloadRetrievalEvidence,
+  PayloadVerificationStatus,
   RegisteredSchema,
   ResolvedSchema,
   ScalarFieldDescriptor,
   ScalarFieldType,
+  SchemaCatalogBundleV1,
+  SchemaCatalogCheckpointV1,
+  SchemaCatalogEntryV1,
   SchemaDefinition,
   SchemaResolutionContext,
   SchemaUidInput,
+  ResolvedSchemaCatalogBundleV1,
   VerificationReport,
 } from './types.js'
 export {

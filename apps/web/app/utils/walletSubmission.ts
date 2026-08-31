@@ -1,20 +1,72 @@
 import type { ReliableSubmissionResult, Signer, SignerResult } from '@xcs-protocol/sdk'
-import { hashes, type SubmittableTransaction } from 'xrpl'
+import { decode, hashes, verifySignature } from 'xrpl'
 import type { SignedTransaction, Transaction } from 'xrpl-connect'
 
 interface WalletSignOnly {
   sign(transaction: Transaction): Promise<SignedTransaction>
 }
 
-export interface SignedOperationInput {
-  readonly transaction: Readonly<SubmittableTransaction>
+const HASH_PATTERN = /^[0-9A-F]{64}$/u
+
+export interface StoredRecoveryMaterial {
   readonly txBlob: string
   readonly txHash: string
+  readonly lastLedgerSequence: number
+  readonly account: string
+  readonly transactionType: string
+  readonly networkId: number
 }
 
-export type PersistSignedOperation = (input: SignedOperationInput) => Promise<void>
+/**
+ * Treat persisted browser recovery state as untrusted input before it can
+ * influence terminal reconciliation or create a new XRPL side effect.
+ */
+export function validateStoredRecoveryMaterial(material: StoredRecoveryMaterial): void {
+  let decoded: Record<string, unknown>
+  let derivedHash: string
+  try {
+    decoded = decode(material.txBlob)
+    derivedHash = hashes.hashSignedTx(material.txBlob).toUpperCase()
+    if (
+      Object.hasOwn(decoded, 'Signers') ||
+      typeof decoded.SigningPubKey !== 'string' ||
+      decoded.SigningPubKey.length === 0 ||
+      typeof decoded.TxnSignature !== 'string' ||
+      decoded.TxnSignature.length === 0 ||
+      !verifySignature(material.txBlob)
+    ) {
+      throw new Error('invalid single signature')
+    }
+  } catch {
+    throw new Error('OPERATION_RECOVERY_BLOB_INVALID')
+  }
 
-const HASH_PATTERN = /^[0-9A-F]{64}$/u
+  if (!HASH_PATTERN.test(material.txHash) || derivedHash !== material.txHash) {
+    throw new Error('OPERATION_RECOVERY_HASH_MISMATCH')
+  }
+
+  const decodedLastLedgerSequence = decoded.LastLedgerSequence
+  if (
+    !Number.isSafeInteger(material.lastLedgerSequence) ||
+    material.lastLedgerSequence <= 0 ||
+    !Number.isSafeInteger(decodedLastLedgerSequence) ||
+    (decodedLastLedgerSequence as number) <= 0
+  ) {
+    throw new Error('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_INVALID')
+  }
+  if (decodedLastLedgerSequence !== material.lastLedgerSequence) {
+    throw new Error('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_MISMATCH')
+  }
+  if (decoded.Account !== material.account) {
+    throw new Error('OPERATION_RECOVERY_ACCOUNT_MISMATCH')
+  }
+  if (decoded.TransactionType !== material.transactionType) {
+    throw new Error('OPERATION_RECOVERY_TRANSACTION_TYPE_MISMATCH')
+  }
+  if (decoded.NetworkID !== undefined && decoded.NetworkID !== material.networkId) {
+    throw new Error('OPERATION_RECOVERY_NETWORK_ID_MISMATCH')
+  }
+}
 
 /**
  * Crossmark and GemWallet currently return an empty hash from sign-only flows.
@@ -41,24 +93,12 @@ export function normalizeWalletSignature(signed: SignedTransaction): SignerResul
   return { hash: derivedHash, txBlob }
 }
 
-/**
- * Persistence is awaited inside the signer, before the SDK is allowed to make
- * its first submit call. A storage failure therefore prevents network effects.
- */
-export function createPersistingWalletSigner(
-  wallet: WalletSignOnly,
-  persist: PersistSignedOperation,
-): Signer {
+/** Adapts a sign-only browser wallet without persisting unverified output. */
+export function createWalletSigner(wallet: WalletSignOnly): Signer {
   return {
     async sign(transaction) {
       const signed = await wallet.sign(transaction as Transaction)
-      const normalized = normalizeWalletSignature(signed)
-      await persist({
-        transaction,
-        txBlob: normalized.txBlob,
-        txHash: normalized.hash,
-      })
-      return normalized
+      return normalizeWalletSignature(signed)
     },
   }
 }
@@ -69,5 +109,8 @@ export function assertValidatedTesSuccess(result: ReliableSubmissionResult): voi
   }
   if (result.transactionResult !== 'tesSUCCESS') {
     throw new Error(`TRANSACTION_FAILED:${result.transactionResult ?? 'UNKNOWN'}`)
+  }
+  if (!Number.isSafeInteger(result.ledgerIndex) || (result.ledgerIndex as number) <= 0) {
+    throw new Error('TRANSACTION_LEDGER_INDEX_INVALID')
   }
 }

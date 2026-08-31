@@ -6,13 +6,14 @@ import {
   isClassicAddress,
   parseCredentialPayload,
   parseJsonStrict,
-  validateSchema,
   verifyPayloadIntegrity,
   type CredentialPayload,
-  type ResolvedSchema,
 } from '@xcs-protocol/core'
 import { deriveAddress, verifyKeypairSignature } from 'xrpl'
 
+import { assertAuthoritativeLedgerEvidence } from './indexer-status.js'
+import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
+import { authoritativeResolvedSchema, schemaProjectionEvidenceUids } from './schema-projection.js'
 import type { ApiRepository, ContentPinStore, PinningRepository } from './types.js'
 
 const MAX_DEMO_PIN_BYTES = 64 * 1024
@@ -86,30 +87,13 @@ function hasPiiFieldName(value: unknown): boolean {
   )
 }
 
-function resolvedSchema(value: unknown): ResolvedSchema {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new PinningError('SCHEMA_PROJECTION_INVALID', 500)
-  }
-  const candidate = value as Partial<ResolvedSchema>
-  if (
-    typeof candidate.definition !== 'object' ||
-    candidate.definition === null ||
-    typeof candidate.fields !== 'object' ||
-    candidate.fields === null ||
-    !Array.isArray(candidate.lineage)
-  ) {
-    throw new PinningError('SCHEMA_PROJECTION_INVALID', 500)
-  }
-  validateSchema(candidate.definition)
-  return candidate as ResolvedSchema
-}
-
 export interface DemoPinningServiceOptions {
   repository: PinningRepository
   apiRepository: ApiRepository
   store: ContentPinStore
   ipHashSecret: string
   enabledNetworks: ReadonlySet<string>
+  maxLedgerAgeSeconds?: number
   now?: () => Date
   verifyWalletSignature?: (input: {
     wallet: string
@@ -174,9 +158,6 @@ export class DemoPinningService {
     if (!this.options.enabledNetworks.has(input.network)) {
       throw new PinningError('PINNING_NETWORK_DISABLED', 404)
     }
-    const network = await this.options.apiRepository.getNetwork(input.network)
-    if (network === undefined) throw new PinningError('NETWORK_NOT_FOUND', 404)
-    if (network.networkId !== 1) throw new PinningError('PINNING_NETWORK_DISABLED', 404)
     const challenge = await this.options.repository.getChallenge(input.challengeId)
     if (challenge === undefined) throw new PinningError('CHALLENGE_NOT_FOUND', 404)
     if (challenge.profileId !== input.network || challenge.wallet !== input.wallet) {
@@ -239,18 +220,47 @@ export class DemoPinningService {
     if (typeof payloadHeader.schema !== 'string') {
       throw new PinningError('PAYLOAD_INVALID', 400)
     }
-    const schemaRow = await this.options.apiRepository.getSchema(
-      input.network,
-      payloadHeader.schema,
-    )
-    if (schemaRow === undefined) throw new PinningError('SCHEMA_NOT_FOUND', 404)
+    const schema = await this.options.apiRepository.withConsistentSnapshot(async (repository) => {
+      const network = await repository.getNetwork(input.network)
+      if (network === undefined) throw new PinningError('NETWORK_NOT_FOUND', 404)
+      if (network.networkId !== 1) throw new PinningError('PINNING_NETWORK_DISABLED', 404)
+      const databaseNow = await repository.getDatabaseTime()
+      const status = await repository.getIndexerStatus(input.network)
+      const checkpoint = await repository.getLatestCheckpoint(input.network)
+      const authority = {
+        expectedProfileId: input.network,
+        status,
+        checkpoint,
+        now: databaseNow,
+        maxLedgerAgeSeconds: this.options.maxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+        minimumLedgerIndex: network.activationLedgerIndex,
+      }
+      assertAuthoritativeLedgerEvidence({ ...authority, projectionLedgerIndexes: [] })
+
+      const schemaRow = await repository.getSchema(input.network, payloadHeader.schema)
+      if (schemaRow === undefined) throw new PinningError('SCHEMA_NOT_FOUND', 404)
+      const schemaEvidence = await repository.getSchemaProjectionEvidence({
+        profileId: input.network,
+        schemaUids: schemaProjectionEvidenceUids([schemaRow], input.network),
+      })
+      assertAuthoritativeLedgerEvidence({
+        ...authority,
+        projectionLedgerIndexes: schemaEvidence.map((item) => item.schema.ledgerIndex),
+      })
+      return authoritativeResolvedSchema(schemaRow, schemaEvidence, {
+        profileId: input.network,
+        schemaUid: payloadHeader.schema,
+        networkId: network.networkId,
+        activationLedgerIndex: network.activationLedgerIndex,
+      })
+    })
     let payload: CredentialPayload
     try {
       payload = parseCredentialPayload(content, {
         issuer: input.wallet,
         subject: payloadHeader.subject,
         schemaUid: payloadHeader.schema,
-        schema: resolvedSchema(schemaRow.resolvedDefinition),
+        schema,
       })
     } catch (error) {
       if (error instanceof PinningError) throw error

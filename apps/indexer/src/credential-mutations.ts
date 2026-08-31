@@ -47,12 +47,17 @@ function normalizeNode(value: unknown): NormalizedNode | undefined {
   return undefined
 }
 
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+function uint32(value: unknown): number | undefined {
+  return typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= 0xffff_ffff
+    ? value
+    : undefined
 }
 
 function isAccepted(fields: Record<string, unknown>): boolean {
-  const flags = integer(fields.Flags) ?? 0
+  const flags = uint32(fields.Flags) ?? 0
   return (flags & CREDENTIAL_ACCEPTED_FLAG) !== 0
 }
 
@@ -69,7 +74,7 @@ function deletionCause(
       return isAccepted(fields) ? 'subject_removed' : 'subject_rejected'
     }
   }
-  const expiration = integer(fields.Expiration)
+  const expiration = uint32(fields.Expiration)
   if (expiration !== undefined && expiration <= closeTime) return 'expired_cleanup'
   return 'self_deleted'
 }
@@ -116,6 +121,15 @@ export function extractCredentialMutations(
     const schemaUid = credentialType.toLowerCase()
     if (!knownSchemaUids.has(schemaUid)) return
 
+    if (
+      (node.fields.Flags !== undefined && uint32(node.fields.Flags) === undefined) ||
+      (node.fields.Expiration !== undefined && uint32(node.fields.Expiration) === undefined) ||
+      (node.previousFields.Flags !== undefined && uint32(node.previousFields.Flags) === undefined)
+    ) {
+      malformedCredentialNodes += 1
+      return
+    }
+
     const uriHex = node.fields.URI
     if (typeof uriHex !== 'string') {
       malformedCredentialNodes += 1
@@ -135,7 +149,7 @@ export function extractCredentialMutations(
     } else if (node.kind === 'DeletedNode') {
       eventType = 'deleted'
     } else {
-      const previousFlags = integer(node.previousFields.Flags)
+      const previousFlags = uint32(node.previousFields.Flags)
       if (
         !accepted ||
         (previousFlags !== undefined && (previousFlags & CREDENTIAL_ACCEPTED_FLAG) !== 0)
@@ -145,7 +159,7 @@ export function extractCredentialMutations(
       eventType = 'accepted'
     }
 
-    const expiration = integer(node.fields.Expiration)
+    const expiration = uint32(node.fields.Expiration)
     const cause =
       eventType === 'deleted'
         ? deletionCause(

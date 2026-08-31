@@ -5,6 +5,14 @@
   "description": "XCS protocol specification and reference implementation for XRPL Credentials",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/XRPL-Commons/XCS#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XRPL-Commons/XCS.git"
+  },
+  "bugs": {
+    "url": "https://github.com/XRPL-Commons/XCS/issues"
+  },
   "packageManager": "pnpm@10.34.4",
   "engines": {
     "node": ">=24 <27",
@@ -17,8 +25,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "turbo run lint",
+    "package:smoke": "node scripts/package-smoke.mjs",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
+    "test:e2e": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/sdk build && pnpm --filter @xcs-protocol/web build && pnpm --filter @xcs-protocol/web test:e2e && pnpm --filter @xcs-protocol/web test:e2e:security",
+    "test:postgres": "pnpm --filter @xcs-protocol/core build && pnpm --filter @xcs-protocol/db build && pnpm --filter @xcs-protocol/indexer test:postgres && pnpm --filter @xcs-protocol/api test:postgres",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },

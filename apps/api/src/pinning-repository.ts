@@ -1,5 +1,10 @@
-import { demoPins, pinChallenges, type XcsDatabase } from '@xcs-protocol/db'
-import { and, count, eq, gt, gte, inArray, isNull, lte, ne, notExists, sql } from 'drizzle-orm'
+import {
+  demoPins,
+  pinChallenges,
+  runSerializableTransaction,
+  type XcsDatabase,
+} from '@xcs-protocol/db'
+import { and, count, eq, gt, gte, inArray, isNull, lte, ne, notExists } from 'drizzle-orm'
 
 import { PinningError } from './pinning.js'
 import type { PinningRepository } from './types.js'
@@ -23,14 +28,7 @@ export class PostgresPinningRepository implements PinningRepository {
   }
 
   async reservePin(input: Parameters<PinningRepository['reservePin']>[0]) {
-    return this.db.transaction(async (tx) => {
-      // Consistent lock order avoids quota races without serializing all users.
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`wallet:${input.wallet}`}, 0))`,
-      )
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`ip:${input.requesterIpHash}`}, 0))`,
-      )
+    return runSerializableTransaction(this.db, async (tx) => {
       const [challenge] = await tx
         .select()
         .from(pinChallenges)

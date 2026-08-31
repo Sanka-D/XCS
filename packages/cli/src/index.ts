@@ -41,6 +41,18 @@ export async function runCli(
     }
     if (error instanceof XcsSdkError) {
       writeError(io, error.code, error.message, error.details)
+      if (error.code === 'XCS_SDK_TRANSACTION_EXPIRED') return 4
+      if (
+        error.code === 'XCS_SDK_ACTIVATION_UNAVAILABLE' ||
+        error.code === 'XCS_SDK_ACTIVATION_MISMATCH' ||
+        error.code === 'XCS_SDK_AMENDMENT_UNAVAILABLE' ||
+        error.code === 'XCS_SDK_CLIENT_NOT_CONNECTED' ||
+        error.code === 'XCS_SDK_NETWORK_MISMATCH' ||
+        error.code === 'XCS_SDK_PREPARED_READINESS_REGRESSION' ||
+        error.code === 'XCS_SDK_LEDGER_CURRENT_INVALID'
+      ) {
+        return 3
+      }
       return 2
     }
     if (error instanceof XcsError) {

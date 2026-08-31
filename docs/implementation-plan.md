@@ -1,8 +1,9 @@
 # XCS implementation plan
 
-This plan takes XCS from the current Testnet alpha to a service that organizations can use to
-register schemas and issue native XRPL Credentials without giving XCS custody of their signing
-keys. It is outcome-driven: a milestone is complete only when its exit criteria are demonstrated.
+This plan takes XCS from the current Testnet alpha to an accountless public Testnet beta that
+organizations can use to discover and register schemas, issue native XRPL Credentials, and inspect
+exact verification evidence without giving XCS custody of their signing keys or claims. It is
+outcome-driven: a milestone is complete only when its exit criteria are demonstrated.
 
 ## Product outcome
 
@@ -15,9 +16,165 @@ An organization must be able to complete this flow:
 4. create the native Credential, let its subject accept it, and later revoke or remove it;
 5. let an independent verifier reconstruct the same schema and lifecycle state from validated
    ledgers and report payload integrity separately from issuer trust.
+6. expose the result through one Explorer, Studio and Developers site without creating a Commons
+   issuer directory or a public subject feed.
 
 The reference service remains non-custodial and reproducible. A self-hosted indexer processing the
 same validated ledgers must reach the same protocol result as the shared service.
+
+## Accepted beta product boundaries
+
+- XCS v0.1 normative semantics are frozen. Product/API work must not alter historical schema
+  validity, UID bytes, payload interpretation or lifecycle projection.
+- EAS and EASScan are UX references only; the protocol remains native XRPL Credentials plus XCS.
+- All valid permissionless schemas and aggregate statistics are publicly discoverable.
+- Credential lookup is exact by shared generation ID, transaction hash or complete
+  issuer/subject/schema tuple. There is no public subject feed, account-wide Credential enumeration
+  or claims search. A future browsable Credential catalog needs a separately designed opt-in signal.
+- Commons presents addresses and four-dimensional verification without issuer badges, ranking or a
+  universal trust decision.
+- The beta uses issuer-hosted HTTPS payloads, unit issuance through Crossmark or GemWallet, and no
+  XCS account or multi-tenant backend.
+- One site contains Explorer, Studio and Developers surfaces. Its public integration contract is
+  REST-first; GraphQL is deferred until real usage demonstrates a need.
+- The initial pilot covers course participation/completion and diploma-style credentials.
+- Commons hosts the shared web, dual-source indexer, API and PostgreSQL cache, but no signing keys or
+  claims. Independent operators can reconstruct the same ledger-derived state.
+
+These choices are recorded in [`ADR 0002`](./adr/0002-public-product-and-discovery.md).
+
+Before the irreversible beta ceremony, [`ADR 0003`](./adr/0003-disposable-controlled-testnet-registry.md)
+allows one private staging profile, `commons-testnet-xcs-v0.1-controlled-pilot`, whose registry is
+still controlled. The profile and its fresh database are disposable and cannot be promoted; this
+operational exception changes no v0.1 semantics or beta exit criterion.
+
+## Current implementation evidence
+
+The repository now contains the frozen v0.1 specification and conformance contract, strict
+dual-`rippled` preflight/quorum, a fenced PostgreSQL writer,
+transaction-root checkpoints, fail-closed repeatable-read API guards, quorum-verified bounded
+empty-database replay, least-privilege database roles, and a timestamp-free projection digest. The
+browser submission RPC is configured separately from the two private indexer sources.
+Every new browser signature is gated by a profile-bound authoritative readiness snapshot immediately
+before wallet invocation and again before a returned blob can be retained or submitted.
+Recovery first binds the decoded blob to its stored hash, expiry, account, transaction type and any
+explicit network ID. It then reconciles that hash, requires another readiness snapshot and reasserts
+the local business lock immediately before any signed-blob retransmission; a failed gate retains the
+blob for a later retry without reopening the wallet.
+Unit/conformance suites cover the deterministic protocol, source normalization, worker, API, CLI
+and browser flow; CI contains a PostgreSQL 18 job for fifteen database-migration, role-permission,
+fencing, replay, and operational-snapshot scenarios. The complete-replay case captures one integrity-bound synthetic
+ledger bundle, validates it twice, runs both copies through the normal worker into empty projections,
+and requires the same fixed full-projection digest and all six deletion causes.
+The v0.1 conformance manifest revision 12 adds network-profile, boundary, schema-resolution,
+schema-catalog, Ripple-time, lifecycle and payload-retrieval cases. The catalog cases fix the
+combined relation closure at 256 unique schemas, reject 257, and count shared ancestors once. Raw
+JSON-token cases require TypeScript and Go to accept semantically integral decimal and exponent
+spellings, normalize accepted `-0` values to positive zero before field validation, and reject
+non-finite `1e400` as `JSON_NON_IJSON_NUMBER`. Shared payload vectors cover the four retrieval
+outcomes, tampering, exact 1 MiB limits, HTTPS authority parsing and inherited claims, including
+fail-closed incomplete catalogs. Deterministic TypeScript properties exercise strict JSON/JCS, UID
+invariants and every supported inheritance depth; SDK/indexer matrices cover memo encoding and
+hostile normalized XRPL shapes; and two bounded native Go fuzz targets cover canonical JSON and UID
+preimages. The independent Go library now
+resolves inheritance and supersession from a caller-supplied, previously validated catalog and can
+use that resolution while checking credential payload claims. It also independently converts Ripple
+time and projects Credential lifecycle state from the shared vectors. The indexer and API reject
+ledger-derived indices, `Expiration` and close-time values outside the native uint32 range, and the
+API rejects contradictory generation timelines including in aggregate statistics. Seeds and
+configurable run counts are reproducible and part of the Turbo cache key.
+Database migration `0003_projection_integrity.sql` mirrors those boundaries with 16 additive
+storage constraints. It installs them as `NOT VALID` with a 5-second lock timeout, after which
+`db:migrate` validates one table per transaction after the migration commit. Historical violations
+fail the deployment without weakening future-write checks; rebuilding/replaying the projection and
+rerunning the command resumes validation.
+Database migration `0004_indexer_incidents.sql` adds a durable halt record keyed by profile and
+fenced writer epoch. The indexer writes status and incident atomically; its runtime role can append
+but not rewrite incidents, while the API role can only read them. `XCS_DATABASE_SCOPE` also makes the
+storage assumption explicit: `shared` permits multiple profiles, `exclusive-profile` rejects any
+different existing profile, and the controlled pilot requires the exclusive mode.
+
+PostgreSQL role provisioning now treats its cluster-wide effects as a dedicated-cluster maintenance
+boundary. Before the `xcs_provision_control` marker can bind the first database, the current build
+requires PostgreSQL 18, `max_prepared_transactions = 0`, the exact hash/timestamp identities of five
+applied migrations, eight schema sentinels and all 16 named projection constraints validated with
+their canonical definitions. A committed `NOLOGIN` quarantine removes incoming and outgoing runtime
+memberships, terminates non-administrator sessions, applies `DROP OWNED`, removes all raw
+advisory-lock privileges and audits ownership drift.
+System/application relation, routine, type and trusted-language ACLs are normalized, while hostile
+`PUBLIC` FDW/server/Large-Object and all explicit `PUBLIC` default ACLs are purged. The built-in
+`pg_monitor` role family is validated before fixed grants and `LOGIN` return. Runtime password
+rotation forces and verifies SCRAM-SHA-256 verifiers. Operators must stop runtime clients for
+provisioning, forbid later database creation without immediate access closure and reprovisioning
+from the control database, and use a `pg_hba.conf` role-to-database SCRAM allowlist as defense in
+depth.
+
+Runtime database serialization no longer relies on advisory locks. Concurrent profile
+initialization and pin reservation use the same `SERIALIZABLE` helper with five bounded,
+full-jitter retries for serialization failures or deadlocks; pinning locks the consumed challenge
+row, while ledger persistence locks the active fenced lease row with `FOR UPDATE` before committing
+projections, checkpoint and status together.
+
+Portable cross-process evidence is now explicit. Core and the independent Go implementation both
+strictly validate `xcs-schema-catalog/1`, recompute each registration UID and resolve the complete
+topological lineage; successful verification reports also pass an exact four-dimensional runtime
+parser. The authoritative API now exports a no-store catalog for one schema and its complete lineage;
+the Go CLI consumes catalog bundles for claims and payload checks. Combined relation closures are
+bounded to 256 unique schemas in transport, with no change to historical on-ledger validity. The
+bundle is internally consistent rather than self-authenticating: CLI output says that XRPL inclusion
+was not independently verified, and an independent consumer still needs trusted checkpoint/source
+or validated ledger transaction and metadata evidence.
+
+The TypeScript CLI can download a catalog, validate inherited payloads and verify a profile's
+activation anchor. Offline preparation now rejects generic XRPL transactions with a profile-bound
+semantic validator and requires an authoritative catalog for every native `Credential*` operation.
+It commits the exact profile SHA-256 and checkpoint in an `xcs:prepared` Memo before autofill and
+writes the resulting transaction to an `xcs-prepared-transaction/1` artifact. Submission accepts
+only a cryptographically valid XRPL single-signature, rejects multisign in the alpha, obtains final
+readiness and then checks `ledger_current` before the first relay side effect. Non-loopback endpoints
+require WSS, and profile/API artifacts use strict UTF-8/JSON handling that cannot silently discard a
+BOM. The public package smoke compiles and imports these contracts from two byte-reproducible tarball
+builds in an isolated offline consumer.
+
+The reference product now also has REST reads for aggregate statistics, schema search and
+registration activity, exact Credential generation timelines, and exact XCS transaction
+projections, plus an authoritative complete-lineage schema catalog. The Nuxt application exposes
+corresponding Explorer pages, a Studio workflow index and a Developers page. Its guided schema
+editor includes course-completion and diploma templates, while advanced JSON remains available for
+schemas outside the scalar-field editor. Database migration
+`0002_discovery_indexes.sql` adds only the supporting indexes and leaves existing rows and contracts
+unchanged; `0003_projection_integrity.sql` adds the projection-boundary checks without rewriting
+historical rows.
+
+This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
+the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
+captured ledger fixtures, and two-entity pilot evidence remain external gates.
+
+The controlled-pilot deployment configuration is now explicit: it is guarded by an exact policy
+and acknowledgement, uses a Commons-operated primary, Ripple's public Testnet secondary and XRPL
+Labs' browser-only submission endpoint, and requires profile
+`commons-testnet-xcs-v0.1-controlled-pilot` plus a fresh private-staging database. Those public
+services have no XCS SLA. Evidence from this deployment is useful for staging drills and wallet
+feedback, but it is not blackhole, provider-retention, public-beta or Mainnet evidence.
+
+The browser Playwright journey is deterministic and synthetic: it replaces the wallet, RPC, API and
+payload host with fakes and covers schema registration, issuance, and subject acceptance through
+separate issuer and subject accounts. The acceptance path keeps payload consent distinct from the
+subject's generation-bound acknowledgement of an issuer whose trust status is `unknown`, then
+requires exact indexed `accepted` evidence. Negative cases also prove that an unavailable or
+mid-wallet-degraded indexer produces no XRPL submission or retained signed blob. Reload recovery
+cases use a syntactically valid synthetic blob to prove that an unavailable indexer prevents
+retransmission while preserving recovery material, that a ready indexer completes recovery without
+another signature, and that inconsistent stored metadata is rejected before reconciliation. It is useful CI
+evidence for application state transitions, but it is not evidence for browser-extension
+compatibility, issuer-hosted CORS behavior, a live Commons deployment or validated Testnet pilot
+transactions.
+
+The public `core`, SDK, and CLI manifests now have a coordinated artifact contract. A fresh-checkout
+CI job builds and twice-packs all three, rejects non-reproducible or workspace-linked tarballs, and
+smokes them from an isolated offline consumer. This is release evidence, not publication evidence:
+the npm scope bootstrap, first public versions, Trusted Publisher records, and human approval of a
+staged alpha remain external organization gates.
 
 ## Scope boundaries for v0.1
 
@@ -28,7 +185,11 @@ The following are deliberately not v0.1 promises:
 - no private-credential or personal-data storage on public IPFS;
 - no Mainnet launch before the Testnet, interoperability, operations, and security gates below;
 - no in-place migration from the historical Nuxt MVP database;
-- no account-wide public Credential enumeration endpoint.
+- no public subject feed, account-wide Credential enumeration or claims search;
+- no Commons issuer badge, ranking or universal trust directory;
+- no XCS user or organization account and no GraphQL API in the beta;
+- no HSM integration, batch issuance, private claims, multi-tenant administration, or Mainnet
+  activation in the first controlled pilot.
 
 ## Milestone 0 — adopt the reference baseline
 
@@ -62,8 +223,12 @@ database. Never point the former application at the new projection database.
 
 Work:
 
+- treat any run of `commons-testnet-xcs-v0.1-controlled-pilot` as disposable pre-beta staging; do
+  not reuse its registry, profile, activation boundary, events or PostgreSQL database for this
+  milestone;
 - perform the dedicated registry-account blackhole ceremony in
-  `config/networks/README.md`, retaining public transaction and ledger evidence;
+  `config/networks/README.md`, using `ACCOUNT_ZERO` unless a documented reason requires
+  `ACCOUNT_ONE`, and retain public transaction and ledger evidence;
 - confirm that the required Credentials amendment is supported and enabled on the selected network;
 - record the exact activation ledger index and hash after the ceremony;
 - publish `config/networks/testnet.json` and its SHA-256 digest through at least two organization
@@ -72,15 +237,28 @@ Work:
   from activation;
 - add a profile smoke check that validates the registry account flags, activation hash, amendment,
   network ID, and source history before indexing starts;
-- configure a second ledger provider for comparison and documented failover, without silently
-  skipping any ledger.
+- require two independently operated ledger providers and compare every normalized ledger header,
+  transaction root, transaction, and metadata object before projection;
+- reject missing transaction arrays, metadata, hashes, duplicate transaction hashes, discontinuous
+  transaction indexes, and provider disagreement instead of treating incomplete input as empty;
+- persist an indexer state (`starting`, `catching_up`, `ready`, or `halted`) and make authoritative API
+  reads return `503` immediately while the indexer is halted or lacks quorum;
+- apply the additive integrity migration to a fresh XCS database and an existing `0002` projection;
+  prove post-commit validation, fail-closed handling of invalid historical rows, retry after a
+  rebuild/replay, transaction rollback, restart, idempotency, and deterministic replay against real
+  PostgreSQL.
 
 Exit criteria:
 
 - two reviewers independently reproduce the profile validation;
 - the indexer starts at the activation boundary, reaches the Testnet tip, and remains ready;
 - a clean rebuild produces identical schema UIDs, events, projections, and checkpoint hashes;
-- changing any immutable profile field causes startup to fail closed.
+- reusing a `profileId` with any changed immutable profile field causes startup to fail closed;
+- a Testnet reset or corrected profile field is published under a new `profileId` and activation
+  boundary rather than changing the prior profile;
+- omitting or changing any ledger transaction or metadata field on either provider halts ingestion
+  before the checkpoint advances;
+- two fresh databases replayed from activation produce the same timestamp-free projection digest.
 
 Rollback: discard the new projection database and profile deployment. A faulty or reset Testnet
 profile is replaced by a new profile ID and activation boundary, never edited in place.
@@ -97,8 +275,8 @@ Work:
   expiry, restart recovery, and duplicate submission attempts;
 - verify that every UI preview exactly matches the signed blob and that every success shown to the
   user is `validated` with `tesSUCCESS`;
-- capture redacted, non-sensitive ledger fixtures from those transactions for deterministic indexer
-  regression tests;
+- capture the exact public ledger transactions and metadata for deterministic indexer regression
+  tests, review the bundle for on-ledger identifiers, and bind it to a published manifest digest;
 - add PostgreSQL integration tests that apply the migration to an empty database, ingest fixtures,
   restart at checkpoints, and rebuild projections;
 - add browser tests with a deterministic mock signer, while retaining the manual extension-wallet
@@ -113,9 +291,10 @@ Exit criteria:
 - all automated checks run in CI and the manual wallet evidence records adapter and extension
   versions.
 
-## Milestone 3 — freeze an interoperable v0.1 candidate
+## Milestone 3 — prove frozen v0.1 interoperability
 
-**Goal:** remove protocol ambiguity before inviting external implementations.
+**Goal:** demonstrate that independent implementations reproduce the frozen v0.1 contract without
+changing its normative semantics.
 
 Work:
 
@@ -127,16 +306,24 @@ Work:
   output, not only counts;
 - submit or adopt the `xrpl.js` URI-length correction; keep the documented 128-byte interoperability
   guard until a released dependency is verified at the normative 256-byte boundary;
-- obtain review from at least one implementer who did not write the TypeScript core and record all
-  normative decisions in the ADR/specification;
+- obtain review from at least one implementer who did not write the TypeScript core and record any
+  clarification that does not change validity or derived bytes in the ADR/specification;
 - version the conformance vectors and define the compatibility policy for future protocol profiles.
+
+The first local milestone slices now cover additive boundary and shared schema-resolution vectors,
+deterministic TypeScript properties, SDK/indexer mutation matrices, bounded Go fuzzing, independent
+Go inheritance/supersession resolution, inherited-claim payload checks, payload byte/URI boundaries,
+Ripple-time conversion, lifecycle-state parity, shared retrieval classification, all six deletion
+causes, and complete capture/validation/replay comparison through a synthetic ledger bundle. The
+remaining interoperability gates are running that same complete-projection proof against a reviewed
+public Testnet capture, the URI-length released-dependency gate, and external implementation review.
 
 Exit criteria:
 
 - TypeScript and Go pass every v0.1 conformance vector with identical validity outcomes and stable
-  error classes;
-- no open issue can change historical schema validity, UID bytes, payload interpretation, or
-  lifecycle projection without a new protocol version;
+  error codes; diagnostic messages and paths need not be identical;
+- any proposal that changes historical schema validity, UID bytes, payload interpretation or
+  lifecycle projection is assigned to a new protocol version and activation profile;
 - an external implementation can derive a known UID and verify a known Credential from the published
   specification and vectors alone.
 
@@ -153,10 +340,29 @@ Work:
   and safe rollback in a staging environment;
 - add container, dependency, license, secret, and software-bill-of-materials checks to release CI;
 - sign release tags and container artifacts and record build provenance;
-- deploy browser security headers and a strict Content Security Policy compatible with the selected
-  wallets;
-- arrange an independent defensive security review and close its release-blocking findings;
+- make Nitro the source of truth for browser security headers; deploy one CSP in report-only mode,
+  require the edge to overwrite rather than append policy values, and keep HSTS scoped to the
+  current host without `includeSubDomains` or `preload`;
+- validate the report-only policy with `curl`, browser DevTools and real Crossmark/GemWallet
+  transaction matrices, then promote the same single policy to enforcement only after all
+  application-owned violations and wallet regressions are resolved; retain `connect-src https:` for
+  permissionless issuer payload hosts and do not add a CSP report collector without a separate
+  privacy review;
+- perform an internal threat-model and defensive design review, and close release-blocking findings
+  before exposing the pilot; this review does not replace the final post-freeze audit in milestone 6;
 - document data retention, public-payload constraints, abuse handling, and incident contacts.
+
+The first local operability slices are implemented: process liveness and deployment readiness have
+separate contracts, all probe outcomes are non-cacheable and outside request budgets, Compose checks
+API liveness, and the web service waits for that health signal. A separately authenticated,
+disabled-by-default JSON `schemaVersion: 2` snapshot and Prometheus endpoint now expose ledger lag,
+checkpoint hash/age, the active halt, durable fenced halt count/latest evidence,
+accepted/rejected registrations, logical database size, cluster client connections, rate-limit
+outcomes and optional server payload-resolution outcomes without recording request identifiers. The
+coverage metadata does not mislabel browser-local submissions, physical disk capacity or
+postgres.js pool saturation as observed. Client-submission observability, staging recovery drills,
+review of production objectives/alerts, and release signing/provenance evidence remain open; the
+presence of local monitoring configuration does not satisfy those operational exit criteria.
 
 Exit criteria:
 
@@ -164,45 +370,67 @@ Exit criteria:
   objectives;
 - stale, discontinuous, or inconsistent ledger data never produces an authoritative active/valid
   response;
+- the public web origin exposes one enforced CSP and one host-scoped HSTS value, with recorded curl,
+  DevTools and real Crossmark/GemWallet evidence from the promoted policy;
 - the threat model, audit report, operational dashboards, alerts, and incident procedures are
   reviewed and linked from the release record;
 - production services hold no XRPL signing secret.
 
-## Milestone 5 — deliver the organizational issuer workflow
+## Milestone 5 — deliver the public Explorer, Studio and Developers beta
 
-**Goal:** let pilot entities issue repeatably without adapting protocol internals themselves.
+**Goal:** let a visitor discover public schemas and exact evidence, and let pilot entities issue
+repeatably without accounts or protocol-specific integration work.
 
 Work:
 
-- add a schema-authoring workflow that validates locally, previews canonical bytes and memo size, and
-  records the resulting registration operation;
-- build a non-custodial issuer tool on the SDK `Signer` boundary: browser wallet for low volume and an
-  injected offline/HSM integration for managed environments;
-- add deterministic payload generation, organization-hosted HTTPS publication, optional public IPFS
-  publication, and a mandatory proof that the published bytes match the URI before issuance;
-- support batch preparation and idempotent resumption without batch key custody in the shared API;
+- present public permissionless schemas, aggregate statistics and exact Credential evidence without
+  exposing a subject feed, account-wide listing or claims index;
+- provide exact Credential resolution from a shared generation ID, transaction hash or complete
+  issuer/subject/schema tuple;
+- organize one accountless site into Explorer, Studio and Developers surfaces with a REST-first
+  integration path;
+- retain the schema-authoring workflow that validates locally, previews canonical bytes and memo
+  size, and records the resulting registration operation;
+- build the controlled pilot on the SDK `Signer` boundary using the explicitly tested Crossmark and
+  GemWallet browser adapters for low-volume, unit issuance;
+- retain deterministic payload generation, issuer-hosted HTTPS publication and the mandatory proof
+  that published bytes match the URI before issuance;
+- support idempotent resumption and sanitized local receipts for each unit operation;
 - add organization-local audit exports containing schema, operation, ledger, hash, actor, and outcome
   metadata, but never seeds or private claim data by default;
 - add subject acceptance links and clear pending/active/expired/deleted lifecycle guidance;
-- run pilots with at least two entities using different signer and payload-hosting setups.
+- publish REST, SDK and CLI guidance alongside the application;
+- run a course participation/completion pilot and a diploma-style pilot with issuer-controlled HTTPS
+  hosts.
+
+Public subject feeds, Commons trust badges, XCS accounts, GraphQL, offline/HSM signing, batch
+issuance, multi-operator administration, and multi-tenant hosting are outside the beta. Adding any
+of these changes the privacy, signing or authorization surface and requires a new product decision
+and threat-model review.
 
 Exit criteria:
 
 - a new issuer follows published documentation without repository maintainer intervention;
+- a visitor can discover a public schema and open exact shared Credential evidence without creating
+  an account;
+- neither the site nor API enumerates a subject's Credentials or stores issuer payload claims;
 - retrying any interrupted operation cannot create an untracked duplicate or report a provisional
   result as final;
-- signing keys remain within the issuer-controlled wallet, offline signer, or HSM boundary;
+- signing keys remain within the issuer- or subject-controlled wallet;
 - pilot feedback is resolved or explicitly deferred before a stable release.
 
-## Milestone 6 — Mainnet go/no-go
+## Milestone 6 — final audit and Mainnet go/no-go
 
 **Goal:** decide whether a separately activated Mainnet profile is justified.
 
 Required gates:
 
-- the v0.1 candidate is frozen and independently implemented;
+- the frozen v0.1 contract is independently implemented;
 - real-wallet Testnet matrices and issuer pilots are complete;
-- security review findings are closed and operational recovery drills pass;
+- an independent defensive security audit covers the exact frozen commit, container digests, signer
+  adapters, indexer quorum, payload resolver, and authorization surfaces shipped after milestone 5;
+- security review findings are closed and operational recovery drills pass; any material code or
+  configuration change after the audit triggers a documented delta review or re-audit;
 - privacy, legal, support, abuse, and issuer-trust presentation have organization approval;
 - dependency and wallet versions supporting native Credentials are pinned and monitored;
 - a separate Mainnet registry ceremony, profile, database, and activation plan have two-person review;
@@ -229,11 +457,13 @@ The critical path is:
 
 ```text
 baseline adopted
+  → disposable private controlled-registry staging
   → immutable Testnet profile
   → real wallet and ledger journey
-  → interoperable v0.1 candidate
-  → operational and security readiness
-  → issuer pilots
+  → frozen v0.1 interoperability proof
+  → operational readiness and pre-pilot review
+  → public Explorer/Studio/Developers beta and issuer pilots
+  → final frozen-artifact audit
   → Mainnet go/no-go
 ```
 

@@ -4,7 +4,14 @@ export const DEFAULT_LEDGER_MAX_AGE_SECONDS = 120
 export const MAX_LEDGER_CLOCK_SKEW_SECONDS = 30
 
 export type LedgerCheckpointFreshness = 'fresh' | 'missing' | 'stale'
-export type IndexerUnavailableCode = 'INDEXER_NOT_INITIALIZED' | 'INDEXER_STALE'
+export type IndexerUnavailableCode =
+  | 'INDEXER_NOT_INITIALIZED'
+  | 'INDEXER_STALE'
+  | 'INDEXER_STATUS_UNAVAILABLE'
+  | 'INDEXER_NOT_READY'
+  | 'INDEXER_HALTED'
+  | 'INDEXER_LEASE_EXPIRED'
+  | 'INDEXER_EVIDENCE_INVALID'
 
 export class IndexerUnavailableError extends Error {
   readonly statusCode = 503

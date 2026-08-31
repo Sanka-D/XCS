@@ -2,16 +2,354 @@
   "version": "0.1",
   "cases": [
     {
+      "id": "payload-integrity.raw-cidv1",
       "name": "hello as raw CIDv1",
       "contentUtf8": "hello",
       "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "derive": true,
       "uri": "ipfs://bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq"
     },
     {
+      "id": "payload-integrity.https-sha256",
       "name": "hello over HTTPS",
       "contentUtf8": "hello",
       "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "derive": true,
+      "fetchUrl": "https://issuer.example/credentials/1.json",
       "uri": "https://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-https-digest",
+      "name": "rejects a percent-encoded HTTPS digest fragment",
+      "contentUtf8": "hello",
+      "uri": "https://issuer.example/credentials/1.json#xcs-sha256=%32cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-empty-https-userinfo",
+      "name": "rejects an empty HTTPS userinfo component",
+      "contentUtf8": "hello",
+      "uri": "https://@issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-empty-https-username-and-password",
+      "name": "rejects empty HTTPS username and password components",
+      "contentUtf8": "hello",
+      "uri": "https://:@issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-single-slash-https",
+      "name": "rejects a single slash after the HTTPS scheme",
+      "contentUtf8": "hello",
+      "uri": "https:/issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-backslash-https",
+      "name": "rejects backslashes in a raw HTTPS URI",
+      "contentUtf8": "hello",
+      "uri": "https:\\\\issuer.example\\credentials\\1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-leading-space-https",
+      "name": "rejects leading ASCII whitespace in a raw HTTPS URI",
+      "contentUtf8": "hello",
+      "uri": " https://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-line-feed-https",
+      "name": "rejects an ASCII control character in a raw HTTPS URI",
+      "contentUtf8": "hello",
+      "uri": "https://issuer.example\n/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-empty-https-authority",
+      "name": "rejects an empty raw HTTPS authority",
+      "contentUtf8": "hello",
+      "uri": "https:///issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-uppercase-https-scheme",
+      "name": "rejects a non-literal uppercase HTTPS scheme",
+      "contentUtf8": "hello",
+      "uri": "HTTPS://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-invalid-utf8-payload",
+      "name": "classifies non-UTF-8 credential payload bytes as UTF8_INVALID",
+      "contentBase64": "/w==",
+      "errorCode": "UTF8_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-256-byte-https-uri",
+      "name": "accepts an HTTPS integrity URI at the native byte limit",
+      "contentUtf8": "hello",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "uri": "https://issuer.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-257-byte-https-uri",
+      "name": "rejects an HTTPS integrity URI above the native byte limit",
+      "contentUtf8": "hello",
+      "uri": "https://issuer.example/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.detect-tampered-content",
+      "name": "distinguishes a digest mismatch from an invalid URI",
+      "contentUtf8": "HELLO",
+      "status": "tampered",
+      "expectedSha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "actualSha256": "3733cd977ff8eb18b987357e22ced99f46097f31ecb239e878ae63760e83e4d5",
+      "uri": "https://issuer.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.accept-1048576-byte-payload",
+      "name": "accepts content exactly at the one MiB payload limit",
+      "contentRepeat": { "value": "a", "count": 1048576 },
+      "status": "valid",
+      "sha256": "9bc1b2a288b26af7257a36277ae3816a7d4f16e89c1e7e77d0a5c48bad62b360",
+      "uri": "https://issuer.example/credentials/max.json#xcs-sha256=9bc1b2a288b26af7257a36277ae3816a7d4f16e89c1e7e77d0a5c48bad62b360"
+    },
+    {
+      "id": "payload-integrity.reject-1048577-byte-payload",
+      "name": "rejects content above the one MiB payload limit",
+      "contentRepeat": { "value": "a", "count": 1048577 },
+      "uri": "https://issuer.example/credentials/too-large.json#xcs-sha256=9bc1b2a288b26af7257a36277ae3816a7d4f16e89c1e7e77d0a5c48bad62b360",
+      "errorCode": "PAYLOAD_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-ipfs-path",
+      "name": "rejects a path appended to an otherwise valid raw CID",
+      "contentUtf8": "hello",
+      "uri": "ipfs://bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq/payload",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-percent-encoded-https-host",
+      "name": "accepts an ASCII host byte percent-encoded before URL parsing",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://example.com/credentials/1.json",
+      "uri": "https://%65xample.com/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.accept-percent-encoded-utf8-host",
+      "name": "accepts a UTF-8 host code point percent-encoded before URL parsing",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://xn--n3h.example/credentials/1.json",
+      "uri": "https://%E2%98%83.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-userinfo-delimiter",
+      "name": "rejects an encoded at-sign in the HTTPS authority",
+      "contentUtf8": "hello",
+      "uri": "https://%40example.com/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-port-delimiter",
+      "name": "rejects an encoded colon that would alter HTTPS authority structure",
+      "contentUtf8": "hello",
+      "uri": "https://example.com%3A443/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-path-delimiter",
+      "name": "rejects an encoded slash in the HTTPS authority",
+      "contentUtf8": "hello",
+      "uri": "https://%2Fexample.com/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-port-digits",
+      "name": "rejects percent escapes in the HTTPS port",
+      "contentUtf8": "hello",
+      "uri": "https://example.com:%34%34%33/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-uts46-mapped-fullwidth-slash",
+      "name": "rejects a host code point that UTS 46 maps to a slash",
+      "contentUtf8": "hello",
+      "uri": "https://%EF%BC%8F.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-uts46-mapped-fullwidth-at",
+      "name": "rejects a host code point that UTS 46 maps to an at-sign",
+      "contentUtf8": "hello",
+      "uri": "https://%EF%BC%A0example.com/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-invalid-idna-joiner",
+      "name": "rejects a host containing a context-invalid zero-width joiner",
+      "contentUtf8": "hello",
+      "uri": "https://%E2%80%8D.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-maximum-https-port",
+      "name": "accepts the maximum numeric HTTPS port",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://example.com:65535/credentials/1.json",
+      "uri": "https://example.com:65535/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-nonnumeric-https-port",
+      "name": "rejects a nonnumeric HTTPS port",
+      "contentUtf8": "hello",
+      "uri": "https://example.com:https/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-out-of-range-https-port",
+      "name": "rejects an HTTPS port above uint16",
+      "contentUtf8": "hello",
+      "uri": "https://example.com:65536/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-ipv6-https-host",
+      "name": "accepts a bracketed IPv6 HTTPS host",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://[2001:db8::1]:65535/credentials/1.json",
+      "uri": "https://[2001:db8::1]:65535/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-invalid-ipv6-https-host",
+      "name": "rejects a bracketed host that is not IPv6",
+      "contentUtf8": "hello",
+      "uri": "https://[not-ipv6]/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-whatwg-ipv4-host",
+      "name": "accepts a noncanonical IPv4 host recognized by WHATWG",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://127.0.0.1/credentials/1.json",
+      "uri": "https://0x7f.1/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.reject-out-of-range-whatwg-ipv4-host",
+      "name": "rejects a numeric host above the WHATWG IPv4 range",
+      "contentUtf8": "hello",
+      "uri": "https://4294967296/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-post-unicode-15-host-code-point",
+      "name": "rejects a host code point assigned after the pinned Unicode version",
+      "contentUtf8": "hello",
+      "uri": "https://%F0%91%8E%80.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-backtick-https-host",
+      "name": "rejects a backtick in the normalized HTTPS host",
+      "contentUtf8": "hello",
+      "uri": "https://%60.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-uts46-mapped-left-brace",
+      "name": "rejects a host code point that UTS 46 maps to a left brace",
+      "contentUtf8": "hello",
+      "uri": "https://%EF%BD%9B.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-right-brace-https-host",
+      "name": "rejects a right brace in the normalized HTTPS host",
+      "contentUtf8": "hello",
+      "uri": "https://%7D.example/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-malformed-percent-escape-in-https-path",
+      "name": "rejects a malformed percent escape in the HTTPS path",
+      "contentUtf8": "hello",
+      "uri": "https://example.com/credentials/%ZZ.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-noncanonical-https-path-character",
+      "name": "rejects a path character with divergent URL serialization",
+      "contentUtf8": "hello",
+      "uri": "https://example.com/credentials/a|b.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-raw-unicode-https-query",
+      "name": "rejects raw non-ASCII text in the HTTPS query",
+      "contentUtf8": "hello",
+      "uri": "https://example.com/credentials/1.json?q=é#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-noncanonical-https-query-character",
+      "name": "rejects a query character with divergent URL serialization",
+      "contentUtf8": "hello",
+      "uri": "https://example.com/credentials/1.json?q='value'#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-percent-encoded-https-dot-segment",
+      "name": "rejects a percent-encoded HTTPS path dot-segment",
+      "contentUtf8": "hello",
+      "uri": "https://example.com/credentials/%2e%2E/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.reject-ipv4-mapped-ipv6-https-host",
+      "name": "rejects IPv4-mapped IPv6 host serialization ambiguity",
+      "contentUtf8": "hello",
+      "uri": "https://[::ffff:192.0.2.1]/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "errorCode": "PAYLOAD_URI_INVALID"
+    },
+    {
+      "id": "payload-integrity.accept-nonmapped-ipv6-with-ffff-hextet",
+      "name": "accepts an IPv6 host with ffff outside the IPv4-mapped prefix",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://[::ffff:0:c000:201]/credentials/1.json",
+      "uri": "https://[::ffff:0:192.0.2.1]/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.accept-nonmapped-compressed-ipv6-with-ffff-hextet",
+      "name": "accepts a compressed non-mapped IPv6 host beginning with ffff after compression",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://[::ffff:0:1:2]/credentials/1.json",
+      "uri": "https://[::ffff:0:1:2]/credentials/1.json#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    },
+    {
+      "id": "payload-integrity.canonicalizes-https-retrieval-url",
+      "name": "derives one canonical retrieval URL without reserializing path or query",
+      "contentUtf8": "hello",
+      "status": "valid",
+      "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "fetchUrl": "https://example.com/credentials/%E2%98%83.json?lang=fr&v=1",
+      "uri": "https://Example.COM:0443/credentials/%E2%98%83.json?lang=fr&v=1#xcs-sha256=2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
     }
   ]
 }

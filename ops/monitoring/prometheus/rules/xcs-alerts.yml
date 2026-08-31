@@ -1,0 +1,195 @@
+groups:
+  - name: xcs-core-availability
+    interval: 30s
+    rules:
+      # Emit a sample on every rule evaluation for every profile seen during the
+      # SLO window. A failed/missing API scrape or missing readiness series is
+      # therefore recorded as zero instead of disappearing from avg_over_time.
+      - record: xcs:indexer_authoritative_available
+        expr: >-
+          (
+            xcs_indexer_ready
+              * on() group_left()
+            min(up{job="xcs-api"})
+          )
+          or
+          (
+            0 * last_over_time(xcs_indexer_ready[30d])
+          )
+
+      - alert: XcsMetricsEndpointUnavailable
+        expr: up{job="xcs-api"} == 0 or absent(up{job="xcs-api"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS API operational metrics are unavailable
+          description: Prometheus has not scraped the authenticated XCS endpoint for two minutes.
+
+      - alert: XcsPostgresExporterUnavailable
+        expr: up{job="xcs-postgres"} == 0 or absent(up{job="xcs-postgres"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS PostgreSQL exporter is unavailable
+          description: Prometheus has not scraped PostgreSQL metrics for two minutes.
+
+      - alert: XcsHostExporterUnavailable
+        expr: up{job="xcs-host"} == 0 or absent(up{job="xcs-host"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: XCS host exporter is unavailable
+          description: Prometheus has not scraped host-capacity metrics for five minutes.
+
+      - alert: XcsDatabaseUnavailable
+        expr: xcs_database_available != 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS cannot read its PostgreSQL projection
+          description: The API operational snapshot reports that PostgreSQL is unavailable.
+
+      - alert: XcsMetricsSnapshotFailure
+        expr: increase(xcs_api_metrics_snapshot_failures_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS failed to build an operational metrics snapshot
+          description: At least one authenticated API metrics snapshot failed during the last five minutes.
+
+      - alert: XcsIndexerHalted
+        expr: xcs_indexer_state{state="halted"} == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS indexer is halted
+          description: Profile {{ $labels.profile_id }} has entered its fail-closed halted state.
+
+      - alert: XcsIndexerHaltRecorded
+        expr: increase(xcs_indexer_halts_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS recorded a new durable indexer halt
+          description: Profile {{ $labels.profile_id }} persisted a fenced halt incident in the last five minutes.
+
+      - alert: XcsIndexerNotReady
+        expr: xcs_indexer_ready == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: XCS indexer is not ready
+          description: Profile {{ $labels.profile_id }} has been non-authoritative for five minutes.
+
+      - alert: XcsIndexerTelemetryMissing
+        expr: absent(xcs_indexer_ready) and on() (up{job="xcs-api"} == 1)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS exposes no indexer readiness telemetry
+          description: The API metrics endpoint is reachable but has exposed no indexer readiness series for five minutes.
+
+      - alert: XcsCheckpointStale
+        expr: xcs_indexer_checkpoint_age_seconds > 120
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS authoritative checkpoint is stale
+          description: Profile {{ $labels.profile_id }} exceeds the 120 second freshness budget.
+
+      - alert: XcsLedgerLagHigh
+        expr: xcs_indexer_ledger_lag > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: XCS ledger projection is falling behind
+          description: Profile {{ $labels.profile_id }} is more than five agreed ledgers behind.
+
+      - alert: XcsLedgerSourcesDiverged
+        expr: >-
+          abs(
+            xcs_indexer_source_tip{source="primary"}
+              - ignoring(source)
+            xcs_indexer_source_tip{source="secondary"}
+          ) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: XCS ledger source tips diverge
+          description: The two sources for {{ $labels.profile_id }} differ by more than three ledgers.
+
+      - alert: XcsLedgerSourceMissing
+        expr: >-
+          count by (profile_id) (xcs_indexer_source_tip) < 2
+          or on(profile_id)
+          (
+            max by (profile_id) (xcs_indexer_ready)
+              unless on(profile_id)
+            count by (profile_id) (xcs_indexer_source_tip)
+          )
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS has lost one ledger source
+          description: Profile {{ $labels.profile_id }} no longer exposes both independent source tips.
+
+      - alert: XcsDatabaseConnectionsHigh
+        expr: xcs_database_connections_used / xcs_database_connections_max > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PostgreSQL connection usage exceeds 80 percent
+          description: XCS is approaching the PostgreSQL cluster connection limit.
+
+      - alert: XcsAuthoritativeReadinessSloAtRisk
+        expr: avg_over_time(xcs:indexer_authoritative_available[30d]) < 0.995
+        for: 15m
+        labels:
+          severity: warning
+          slo: authoritative-readiness-99.5
+        annotations:
+          summary: XCS 30-day authoritative readiness is below 99.5 percent
+          description: Profile {{ $labels.profile_id }} is below the Testnet beta readiness objective.
+
+  - name: xcs-host-capacity
+    interval: 30s
+    rules:
+      - alert: XcsHostDiskUsageHigh
+        expr: >-
+          1 - (
+            node_filesystem_avail_bytes{job="xcs-host",fstype!~"tmpfs|overlay|squashfs"}
+              /
+            node_filesystem_size_bytes{job="xcs-host",fstype!~"tmpfs|overlay|squashfs"}
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: XCS host filesystem usage exceeds 80 percent
+          description: Filesystem {{ $labels.mountpoint }} has less than 20 percent capacity remaining.
+
+      - alert: XcsHostDiskUsageCritical
+        expr: >-
+          1 - (
+            node_filesystem_avail_bytes{job="xcs-host",fstype!~"tmpfs|overlay|squashfs"}
+              /
+            node_filesystem_size_bytes{job="xcs-host",fstype!~"tmpfs|overlay|squashfs"}
+          ) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: XCS host filesystem usage exceeds 90 percent
+          description: Filesystem {{ $labels.mountpoint }} has less than 10 percent capacity remaining.

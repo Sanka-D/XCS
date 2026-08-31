@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -29,37 +28,45 @@ func ParseSchemaUIDInput(data []byte) (SchemaUIDInput, error) {
 	if !ok {
 		return SchemaUIDInput{}, invalid("UID_INPUT_INVALID", "$", "must be an object")
 	}
-	for _, field := range []string{"networkId", "ledgerIndex", "transactionIndex"} {
-		value, exists := object[field]
-		number, valid := value.(json.Number)
-		if !exists || !valid {
-			return SchemaUIDInput{}, invalid("UID_INPUT_INVALID", "$."+field, "must be a present uint32")
-		}
-		if _, err := strconv.ParseUint(number.String(), 10, 32); err != nil {
-			return SchemaUIDInput{}, invalid("UID_INPUT_INVALID", "$."+field, "must be a uint32")
-		}
+	networkID, err := requireJSONUint32(object, "networkId", "$", "UID_INPUT_INVALID")
+	if err != nil {
+		return SchemaUIDInput{}, err
+	}
+	ledgerIndex, err := requireJSONUint32(object, "ledgerIndex", "$", "UID_INPUT_INVALID")
+	if err != nil {
+		return SchemaUIDInput{}, err
+	}
+	transactionIndex, err := requireJSONUint32(object, "transactionIndex", "$", "UID_INPUT_INVALID")
+	if err != nil {
+		return SchemaUIDInput{}, err
 	}
 
 	var raw struct {
-		NetworkID        uint32          `json:"networkId"`
+		NetworkID        json.RawMessage `json:"networkId"`
 		LedgerHash       string          `json:"ledgerHash"`
-		LedgerIndex      uint32          `json:"ledgerIndex"`
-		TransactionIndex uint32          `json:"transactionIndex"`
+		LedgerIndex      json.RawMessage `json:"ledgerIndex"`
+		TransactionIndex json.RawMessage `json:"transactionIndex"`
 		Publisher        string          `json:"publisher"`
 		Schema           json.RawMessage `json:"schema"`
 	}
 	if err := decodeKnownJSON(data, &raw); err != nil {
-		return SchemaUIDInput{}, err
+		// ParseJSON above has already established that the wrapper is strict JSON.
+		// Decoder failures here are therefore UID wrapper structure errors. The
+		// nested schema remains RawMessage and is classified separately below.
+		return SchemaUIDInput{}, invalid("UID_INPUT_INVALID", "$", "invalid UID input structure: %v", err)
+	}
+	if len(raw.Schema) == 0 {
+		return SchemaUIDInput{}, invalid("SCHEMA_INVALID", "$.schema", "schema is required")
 	}
 	schema, err := ParseSchema(raw.Schema)
 	if err != nil {
 		return SchemaUIDInput{}, err
 	}
 	return SchemaUIDInput{
-		NetworkID:        raw.NetworkID,
+		NetworkID:        networkID,
 		LedgerHash:       raw.LedgerHash,
-		LedgerIndex:      raw.LedgerIndex,
-		TransactionIndex: raw.TransactionIndex,
+		LedgerIndex:      ledgerIndex,
+		TransactionIndex: transactionIndex,
 		Publisher:        raw.Publisher,
 		Schema:           schema,
 	}, nil

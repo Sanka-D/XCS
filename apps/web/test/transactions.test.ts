@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   assertPreparedTransaction,
   assertTransactionSigner,
+  exactCredentialEventPath,
   exactCredentialPath,
+  exactSchemaRegistrationPath,
 } from '../app/utils/transactions'
-import { payloadPublicationMatches } from '../app/utils/payloadPublication'
 
 const address = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 
@@ -50,17 +51,25 @@ describe('transaction safety helpers', () => {
     )
   })
 
-  it('invalidates publication confirmation when a rebuilt payload changes', () => {
-    const published = {
-      canonicalPayload: '{"claims":{"course":"A"}}',
-      credentialUri: 'ipfs://first',
-    }
+  it('builds a transaction-bound event lookup instead of a full history URL', () => {
+    const transactionHash = 'AB'.repeat(32)
+    const path = exactCredentialEventPath(
+      'test net',
+      'r/issuer',
+      'r subject',
+      'AA',
+      transactionHash,
+    )
 
-    expect(
-      payloadPublicationMatches(published, published.canonicalPayload, published.credentialUri),
-    ).toBe(true)
-    expect(payloadPublicationMatches(published, '{"claims":{"course":"B"}}', 'ipfs://second')).toBe(
-      false,
+    expect(path).toBe(
+      `/v1/networks/test%20net/credentials/r%2Fissuer/r%20subject/aa/events/${transactionHash.toLowerCase()}`,
+    )
+    expect(path).not.toBe('/v1/networks/test%20net/credentials/r%2Fissuer/r%20subject/aa/events')
+  })
+
+  it('builds an exact schema registration proof lookup', () => {
+    expect(exactSchemaRegistrationPath('test net', 'AB'.repeat(32))).toBe(
+      `/v1/networks/test%20net/schema-registrations/${'ab'.repeat(32)}`,
     )
   })
 })

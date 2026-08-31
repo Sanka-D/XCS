@@ -1,6 +1,26 @@
 <script setup lang="ts">
+import { singleQueryValue } from '~/utils/explorer'
+
+const route = useRoute()
+const localePath = useLocalePath()
+const { t } = useI18n()
+const cursor = computed(() => singleQueryValue(route.query.cursor))
 const { listSchemas } = useXcsApi()
-const { data, pending, error, refresh } = await useAsyncData('schemas', () => listSchemas())
+const { data, pending, error, refresh } = await useAsyncData(
+  () => `schemas:${cursor.value}`,
+  () => listSchemas({ ...(cursor.value === '' ? {} : { cursor: cursor.value }), limit: 18 }),
+)
+
+function nextPage(): ReturnType<typeof navigateTo> | undefined {
+  if (data.value?.nextCursor === undefined) return undefined
+  return navigateTo({ path: localePath('/schemas'), query: { cursor: data.value.nextCursor } })
+}
+
+useSeoMeta({
+  title: () => t('schemas.metaTitle'),
+  description: () => t('schemas.description'),
+  robots: 'index,follow',
+})
 </script>
 
 <template>
@@ -15,13 +35,8 @@ const { data, pending, error, refresh } = await useAsyncData('schemas', () => li
       }}</NuxtLinkLocale>
     </div>
     <p>{{ $t('schemas.description') }}</p>
-    <p v-if="pending">{{ $t('common.loading') }}</p>
-    <div v-else-if="error" class="error-box">
-      {{ $t('common.apiUnavailable') }}
-      <button class="text-button" type="button" @click="() => refresh()">
-        {{ $t('common.retry') }}
-      </button>
-    </div>
+    <p v-if="pending" class="loading-state" role="status">{{ $t('common.loading') }}</p>
+    <ExplorerError v-else-if="error" :error="error" @retry="refresh" />
     <div v-else-if="data?.items.length" class="schema-grid">
       <NuxtLinkLocale
         v-for="schema in data.items"
@@ -34,8 +49,22 @@ const { data, pending, error, refresh } = await useAsyncData('schemas', () => li
         <p>{{ schema.description }}</p>
         <code>{{ schema.uid }}</code>
         <small>{{ schema.publisher }}</small>
+        <small>{{ $t('explorer.ledger', { ledger: schema.ledgerIndex }) }}</small>
       </NuxtLinkLocale>
     </div>
     <div v-else class="empty-state">{{ $t('schemas.empty') }}</div>
+    <nav v-if="data" class="pagination" :aria-label="$t('explorer.pagination.label')">
+      <NuxtLinkLocale v-if="cursor" class="button secondary compact" to="/schemas">
+        {{ $t('explorer.pagination.first') }}
+      </NuxtLinkLocale>
+      <button
+        v-if="data.nextCursor"
+        class="button secondary compact"
+        type="button"
+        @click="nextPage"
+      >
+        {{ $t('explorer.pagination.next') }}
+      </button>
+    </nav>
   </section>
 </template>

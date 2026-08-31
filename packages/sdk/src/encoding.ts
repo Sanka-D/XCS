@@ -1,5 +1,5 @@
 import { decodeUtf8Hex, encodeUtf8Hex, inspectPayloadUri } from '@xcs-protocol/core'
-import { encode, type Payment } from 'xrpl'
+import { encode, type Memo, type Payment } from 'xrpl'
 
 import { XcsSdkError } from './errors.js'
 
@@ -7,6 +7,11 @@ export const XCS_SCHEMA_MEMO_TYPE = 'xcs:schema_register'
 export const XCS_SCHEMA_MEMO_FORMAT = 'application/json'
 export const MAX_XRPL_MEMO_BYTES = 1_024
 export const MAX_CREDENTIAL_URI_BYTES = 256
+
+// rippled measures sfMemos via STArray::add: the serialized Memo objects only.
+// xrpl.js encodes two additional one-byte field delimiters around that body:
+// the sfMemos field header (F9) and the STArray end marker (F1).
+const XRPL_MEMOS_FIELD_ENVELOPE_BYTES = 2
 
 const SCHEMA_UID_PATTERN = /^[0-9a-f]{64}$/u
 const CREDENTIAL_TYPE_PATTERN = /^[0-9a-fA-F]{64}$/u
@@ -61,7 +66,20 @@ export function credentialHexToUri(uriHex: string): string {
   return uri
 }
 
-export function assertMemoFits(canonicalSchema: string): void {
+export function measureSchemaRegistrationMemoBytes(canonicalSchema: string): number {
+  return measureTransactionMemoBytes([
+    {
+      Memo: {
+        MemoType: encodeUtf8Hex(XCS_SCHEMA_MEMO_TYPE),
+        MemoFormat: encodeUtf8Hex(XCS_SCHEMA_MEMO_FORMAT),
+        MemoData: encodeUtf8Hex(canonicalSchema),
+      },
+    },
+  ])
+}
+
+/** Exact serialized Memo-object bytes counted by rippled against its 1 KiB limit. */
+export function measureTransactionMemoBytes(memos: readonly Memo[]): number {
   const base: Payment = {
     TransactionType: 'Payment',
     Account: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
@@ -73,17 +91,29 @@ export function assertMemoFits(canonicalSchema: string): void {
   }
   const withMemo: Payment = {
     ...base,
-    Memos: [
-      {
-        Memo: {
-          MemoType: encodeUtf8Hex(XCS_SCHEMA_MEMO_TYPE),
-          MemoFormat: encodeUtf8Hex(XCS_SCHEMA_MEMO_FORMAT),
-          MemoData: encodeUtf8Hex(canonicalSchema),
-        },
-      },
-    ],
+    // Strict JSON parsing intentionally creates null-prototype objects. The
+    // XRPL codec stringifies invalid-field diagnostics, so materialize plain
+    // objects at this boundary before measuring the exact serialized bytes.
+    Memos: memos.map((entry) => ({ Memo: { ...entry.Memo } })),
   }
-  const byteLength = (encode(withMemo).length - encode(base).length) / 2
+  const serializedMemosFieldBytes = (encode(withMemo).length - encode(base).length) / 2
+
+  return serializedMemosFieldBytes - XRPL_MEMOS_FIELD_ENVELOPE_BYTES
+}
+
+export function assertTransactionMemosFit(memos: readonly Memo[]): void {
+  const byteLength = measureTransactionMemoBytes(memos)
+  if (byteLength > MAX_XRPL_MEMO_BYTES) {
+    throw new XcsSdkError(
+      'XCS_SDK_MEMO_TOO_LARGE',
+      `Transaction memos exceed the ${MAX_XRPL_MEMO_BYTES}-byte XRPL limit.`,
+      { byteLength, maxByteLength: MAX_XRPL_MEMO_BYTES },
+    )
+  }
+}
+
+export function assertMemoFits(canonicalSchema: string): void {
+  const byteLength = measureSchemaRegistrationMemoBytes(canonicalSchema)
 
   if (byteLength > MAX_XRPL_MEMO_BYTES) {
     throw new XcsSdkError(

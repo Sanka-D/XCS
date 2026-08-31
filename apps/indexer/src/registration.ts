@@ -38,7 +38,9 @@ function decodeHexUtf8(value: unknown): string | undefined {
   }
 
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(
+    // Keep a leading BOM visible so exact memo tokens and JCS bytes cannot be
+    // accepted after TextDecoder silently removes an on-ledger byte prefix.
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
       Uint8Array.from(Buffer.from(value, 'hex')),
     )
   } catch {
@@ -119,7 +121,7 @@ export function interpretSchemaRegistration(
     }
   }
 
-  let parsed: unknown
+  let parsed: JsonValue | undefined
   try {
     parsed = parseJsonStrict(extracted.envelope.jsonText)
     if (canonicalize(parsed as JsonValue) !== extracted.envelope.jsonText) {
@@ -149,13 +151,13 @@ export function interpretSchemaRegistration(
       publisher: extracted.envelope.publisher,
       schema: definition,
     })
-
     return {
       status: 'accepted',
       transactionHash: transaction.hash,
       transactionIndex: transaction.transactionIndex,
       publisher: extracted.envelope.publisher,
       schemaUid,
+      memoJson: parsed,
       definition,
       resolved,
     }

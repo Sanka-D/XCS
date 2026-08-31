@@ -44,8 +44,43 @@ Usage:
   xcs-verify uid UID_INPUT.json
   xcs-verify schema SCHEMA.json
   xcs-verify claims SCHEMA.json CLAIMS.json
-  xcs-verify payload SCHEMA.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID`)
+  xcs-verify claims --catalog CATALOG.json CLAIMS.json
+  xcs-verify catalog CATALOG.json
+  xcs-verify payload SCHEMA.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID
+  xcs-verify payload --catalog CATALOG.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID`)
 	os.Exit(2)
+}
+
+func verifyClaims(schemaData []byte, claimsData []byte) error {
+	schema, err := xcs.ParseSchema(schemaData)
+	if err != nil {
+		return err
+	}
+	claims, err := xcs.ParseJSON(claimsData)
+	if err != nil {
+		return err
+	}
+	return xcs.ValidateClaimsAgainstSchema(claims, schema)
+}
+
+func resolveCatalog(data []byte) (xcs.ResolvedSchemaCatalogBundleV1, error) {
+	catalog, err := xcs.ParseSchemaCatalogBundle(data)
+	if err != nil {
+		return xcs.ResolvedSchemaCatalogBundleV1{}, err
+	}
+	return xcs.ResolveSchemaCatalogBundle(catalog)
+}
+
+func verifyCatalogClaims(catalogData []byte, claimsData []byte) error {
+	resolved, err := resolveCatalog(catalogData)
+	if err != nil {
+		return err
+	}
+	claims, err := xcs.ParseJSON(claimsData)
+	if err != nil {
+		return err
+	}
+	return xcs.ValidateClaims(claims, resolved.ResolvedTarget.Fields)
 }
 
 func main() {
@@ -75,46 +110,76 @@ func main() {
 		}
 		write(map[string]any{"valid": true})
 	case "claims":
-		if len(os.Args) != 4 {
+		var err error
+		if len(os.Args) == 5 && os.Args[2] == "--catalog" {
+			err = verifyCatalogClaims(read(os.Args[3]), read(os.Args[4]))
+		} else if len(os.Args) == 4 {
+			err = verifyClaims(read(os.Args[2]), read(os.Args[3]))
+		} else {
 			usage()
 		}
-		schema, err := xcs.ParseSchema(read(os.Args[2]))
 		if err != nil {
-			fatal(err)
-		}
-		value, err := xcs.ParseJSON(read(os.Args[3]))
-		if err != nil {
-			fatal(err)
-		}
-		claims, ok := value.(map[string]any)
-		if !ok {
-			fatal(fmt.Errorf("claims must be a JSON object"))
-		}
-		if err := xcs.ValidateClaimsAgainstSchema(claims, schema); err != nil {
 			fatal(err)
 		}
 		write(map[string]any{"valid": true})
-	case "payload":
-		if len(os.Args) != 8 {
+	case "catalog":
+		if len(os.Args) != 3 {
 			usage()
 		}
-		schema, err := xcs.ParseSchema(read(os.Args[2]))
+		resolved, err := resolveCatalog(read(os.Args[2]))
 		if err != nil {
 			fatal(err)
 		}
-		payloadBytes := read(os.Args[3])
-		integrity, expected, actual, err := xcs.VerifyPayloadIntegrity(payloadBytes, os.Args[4])
+		write(map[string]any{
+			"valid":                    true,
+			"validationScope":          "internal-consistency",
+			"xrplRegistrationVerified": false,
+			"targetUid":                resolved.Target.UID,
+			"lineage":                  resolved.ResolvedTarget.Lineage,
+			"checkpoint":               resolved.Bundle.Checkpoint,
+		})
+	case "payload":
+		var schema xcs.SchemaDefinition
+		var resolutionContext *xcs.SchemaResolutionContext
+		var payloadPath, uri, issuer, subject, schemaUID string
+		if len(os.Args) == 9 && os.Args[2] == "--catalog" {
+			resolved, err := resolveCatalog(read(os.Args[3]))
+			if err != nil {
+				fatal(err)
+			}
+			schema = resolved.Target.Definition
+			resolutionContext = &resolved.ResolutionContext
+			payloadPath, uri, issuer, subject, schemaUID = os.Args[4], os.Args[5], os.Args[6], os.Args[7], os.Args[8]
+			if schemaUID != resolved.Target.UID {
+				fatal(&xcs.Error{Code: "SCHEMA_CATALOG_INVALID", Path: "$schemaUid", Msg: "schema UID does not match catalog targetUid"})
+			}
+		} else if len(os.Args) == 8 {
+			var err error
+			schema, err = xcs.ParseSchema(read(os.Args[2]))
+			if err != nil {
+				fatal(err)
+			}
+			payloadPath, uri, issuer, subject, schemaUID = os.Args[3], os.Args[4], os.Args[5], os.Args[6], os.Args[7]
+		} else {
+			usage()
+		}
+		payloadBytes := read(payloadPath)
+		integrity, expected, actual, err := xcs.VerifyPayloadIntegrity(payloadBytes, uri)
 		if err != nil {
 			fatal(err)
 		}
 		if _, err := xcs.ParseCredentialPayload(payloadBytes, xcs.PayloadContext{
-			Issuer: os.Args[5], Subject: os.Args[6], SchemaUID: os.Args[7], Schema: schema,
+			Issuer: issuer, Subject: subject, SchemaUID: schemaUID, Schema: schema,
+			ResolutionContext: resolutionContext,
 		}); err != nil {
 			fatal(err)
 		}
 		write(map[string]any{
 			"valid": integrity, "expectedDigestHex": expected, "actualDigestHex": actual,
 		})
+		if !integrity {
+			os.Exit(1)
+		}
 	default:
 		usage()
 	}

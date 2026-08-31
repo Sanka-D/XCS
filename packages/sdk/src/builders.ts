@@ -12,6 +12,7 @@ import type { CredentialAccept, CredentialCreate, CredentialDelete, Payment } fr
 
 import {
   assertMemoFits,
+  measureSchemaRegistrationMemoBytes,
   schemaUidToCredentialType,
   uriToCredentialHex,
   XCS_SCHEMA_MEMO_FORMAT,
@@ -30,6 +31,8 @@ export interface BuiltSchemaRegistration {
   readonly transaction: Payment
   readonly schema: SchemaDefinition
   readonly canonicalSchema: string
+  /** Exact serialized Memo-object bytes counted against rippled's 1 KiB limit. */
+  readonly memoByteLength: number
 }
 
 export interface ValidatedSchemaRegistrationContext {
@@ -74,6 +77,7 @@ export function buildSchemaRegistrationPayment(
   const schema = validateSchema(input.schema)
   const canonicalSchema = canonicalize(schema as unknown as JsonValue)
   assertMemoFits(canonicalSchema)
+  const memoByteLength = measureSchemaRegistrationMemoBytes(canonicalSchema)
 
   return {
     transaction: {
@@ -93,6 +97,7 @@ export function buildSchemaRegistrationPayment(
     },
     schema,
     canonicalSchema,
+    memoByteLength,
   }
 }
 
