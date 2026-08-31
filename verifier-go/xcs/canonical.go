@@ -99,6 +99,12 @@ func decodeValue(decoder *json.Decoder, path string) (any, error) {
 	}
 	delimiter, composite := token.(json.Delim)
 	if !composite {
+		if number, ok := token.(json.Number); ok {
+			parsed, parseErr := strconv.ParseFloat(number.String(), 64)
+			if parseErr != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+				return nil, invalid("JSON_NON_IJSON_NUMBER", path, "number is outside the IEEE-754 finite range")
+			}
+		}
 		return token, nil
 	}
 	switch delimiter {

@@ -16,6 +16,37 @@ Use `prepareSignAndSubmit` for a headless flow. A UI that previews the final aut
 must call `autofillXcsTransaction`, display the returned transaction, then pass that exact object to
 `signPreparedAndSubmit`; the latter does not autofill a second time and rejects wallet mutations.
 
+`assertXcsTransactionSemantics` is the profile-bound transaction gate. It accepts only an XCS schema
+registration `Payment` addressed to the profile registry for the exact registration amount, or a
+native `CredentialCreate`, `CredentialAccept` or `CredentialDelete` carrying a valid XCS schema UID.
+It also enforces the operation-specific address, canonical memo, payment-flag and integrity-bound URI
+rules after generic XRPL validation.
+
+For an offline or HSM-backed signer, call `bindPreparedTransactionContext` **before** autofill. It
+adds exactly one `xcs:prepared` Memo whose digest commits to the profile ID, SHA-256 of the exact
+reviewed profile-file bytes, and authoritative indexer checkpoint. The wallet therefore signs this
+context together with the final `Fee`, `Sequence` and `LastLedgerSequence` produced by autofill.
+`createPreparedTransactionEnvelope` then creates the `xcs-prepared-transaction/1` artifact containing
+that autofilled transaction and its canonical digest.
+
+After signing, call `assertPreparedEnvelopeMatchesProfile`, `assertSignedBlobMatchesPrepared`,
+`assertReadinessAdvancesPreparedCheckpoint` and `assertTransactionNotExpired` before
+`submitSignedTransaction`. Blob validation requires a cryptographically valid XRPL single-signature
+and rejects every non-signature mutation; multisigning is deliberately outside this alpha flow. The
+final readiness check must run before the `ledger_current` expiry check and both must complete before
+the first relay side effect. None of these APIs accepts or exposes a seed.
+
+The companion CLI implements the complete sequence as `xcs tx prepare` and
+`xcs tx submit --prepared`. For every `Credential*` operation, it also downloads and strictly
+validates the referenced `xcs-schema-catalog/1` bundle before preparation. An SDK host implementing
+the same workflow must establish that catalog evidence itself; the deterministic SDK does not
+choose or trust an API endpoint on the caller's behalf.
+
+`verifyNetworkProfileActivation` independently reads the immutable activation ledger from a
+history-capable `rippled` server after checking network ID and amendment support. Submission-only
+endpoints that do not retain the activation range can continue to use `connectAndValidateNetwork`,
+but they cannot establish the historical anchor by themselves.
+
 The operation journal never contains the signed blob, full transaction, private material, or
 credential payload. Persist it in the host application to reconcile a transaction hash after an
 ambiguous network failure.

@@ -27,11 +27,15 @@ Commands:
 xcs-verify uid UID_INPUT.json
 xcs-verify schema SCHEMA.json
 xcs-verify claims SCHEMA.json CLAIMS.json
+xcs-verify claims --catalog CATALOG.json CLAIMS.json
+xcs-verify catalog CATALOG.json
 xcs-verify payload SCHEMA.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID
+xcs-verify payload --catalog CATALOG.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID
 ```
 
 Every command writes one JSON result. Protocol errors are written to stderr with
-a stable `code`, `path`, and `message`, then the process exits non-zero.
+a stable `code`, `path`, and `message`, then the process exits non-zero. A structurally valid payload
+whose bytes do not match its URI digest writes `valid:false` to stdout and exits with status `1`.
 
 The Go library can resolve inheritance and supersession through `ResolveSchema`.
 Callers supply a `SchemaResolutionContext` whose `GetSchema` callback reads a
@@ -45,10 +49,17 @@ registrations whose UIDs were checked when they were indexed.
 `PayloadContext.ResolutionContext`, so library consumers can validate inherited
 claims. Omitting it preserves the offline fail-closed behavior.
 
-The CLI deliberately exposes no catalog-loading option. Its `claims` and
-`payload` commands therefore require a locally complete schema; if an input
-schema contains `extends`, they fail closed with `SCHEMA_PARENT_NOT_FOUND` rather
-than validating only the child fields.
+The `catalog` command strictly checks an `xcs-schema-catalog/1` bundle, recomputes every UID,
+validates its profile and authoritative checkpoint, rejects combined relation closures above the
+normative 256-entry limit, and resolves all relations. `claims` and
+`payload` accept that same bundle through `--catalog`; the positional schema form remains available
+for standalone definitions. Supplying an inherited child without its catalog still fails closed
+with `SCHEMA_PARENT_NOT_FOUND`.
+
+The `catalog` result explicitly reports `validationScope: "internal-consistency"` and
+`xrplRegistrationVerified: false`. A bundle has no ledger header chain, transaction metadata or
+inclusion proof; callers must trust its authoritative source/checkpoint or independently verify the
+corresponding validated XRPL evidence before claiming on-ledger registration.
 
 Library consumers can use `UnixSecondsToRippleTime`, `RippleTimeToUnixSeconds`,
 `ISO8601ToRippleTime`, and `RippleTimeToISO8601` for the v0.1 uint32 whole-second time contract.
@@ -59,5 +70,5 @@ unchanged.
 `ClassifyCredentialPayload` is the independent network-free counterpart for the full payload
 decision. A caller supplies `PayloadRetrievalEvidence` containing retrieved bytes or an explicit
 unavailable outcome, the native URI, and a complete `PayloadContext`; the result preserves
-`valid`, `unavailable`, `tampered`, and `invalid` as separate statuses. The shared revision 9 vectors
+`valid`, `unavailable`, `tampered`, and `invalid` as separate statuses. The shared revision 12 vectors
 exercise the same contract in Go and TypeScript.

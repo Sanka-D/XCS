@@ -21,6 +21,10 @@ function isUint32(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff
 }
 
+function normalizeUint32(value: number): number {
+  return value === 0 ? 0 : value
+}
+
 export function validateNetworkProfile(input: unknown): NetworkProfile {
   if (!isRecord(input)) {
     return fail('NETWORK_PROFILE_INVALID', 'Network profile must be a JSON object', '$')
@@ -91,11 +95,11 @@ export function validateNetworkProfile(input: unknown): NetworkProfile {
   return {
     profileId: input.profileId,
     xcsVersion: '0.1',
-    networkId: input.networkId,
+    networkId: normalizeUint32(input.networkId),
     requiredAmendment: input.requiredAmendment.toUpperCase(),
     registryAddress: input.registryAddress,
     registrationAmountDrops: '1',
-    activationLedgerIndex: input.activationLedgerIndex,
+    activationLedgerIndex: normalizeUint32(input.activationLedgerIndex),
     activationLedgerHash: input.activationLedgerHash.toLowerCase(),
   }
 }

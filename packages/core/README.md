@@ -2,7 +2,8 @@
 
 Deterministic, browser-safe primitives for XCS v0.1: strict JSON parsing, RFC 8785
 canonicalization, schema validation and resolution, schema UID derivation, payload integrity and
-XRPL time conversions.
+XRPL time conversions. It also strictly parses portable schema catalogs and four-dimensional
+verification reports received across process boundaries.
 
 ```ts
 import { canonicalize, validateSchema, type JsonValue } from '@xcs-protocol/core'
@@ -26,6 +27,17 @@ Payload claim validation accepts either a complete standalone `SchemaDefinition`
 is used as payload context; passing an unresolved child fails with `SCHEMA_PARENT_NOT_FOUND`. Raw
 field maps are intentionally not accepted because they cannot prove that inherited required claims
 were included.
+
+`parseSchemaCatalogBundle` validates the complete `xcs-schema-catalog/1` transport format, including
+its network profile, authoritative checkpoint, topological order, registration coordinates and
+recomputed UIDs. A target's combined `extends` + `supersedes` closure is limited to 256 unique
+schemas, candidate included; shared ancestors count once. Pass the result to
+`resolveSchemaCatalogBundle` before validating inherited claims.
+Catalog validation proves internal consistency only: the portable bundle contains no ledger header
+chain, transaction metadata or inclusion proof. A caller asserting XRPL registration must trust the
+configured authoritative source/checkpoint or verify that ledger evidence independently.
+`parseVerificationReport` rejects missing, unknown or unsupported fields instead of treating a
+truthy partial API response as protocol evidence.
 
 `projectCredentialLifecycle` centralizes pending/active/expired/deleted projection. Its expiration
 and validated-ledger close-time inputs are Ripple-epoch uint32 seconds. The exported conversion

@@ -57,6 +57,35 @@ export interface RegisteredSchema {
   transactionIndex: number
 }
 
+export interface SchemaCatalogCheckpointV1 {
+  ledgerIndex: number
+  ledgerHash: string
+}
+
+export interface SchemaCatalogEntryV1 {
+  uid: string
+  definition: SchemaDefinition
+  publisher: string
+  ledgerIndex: number
+  ledgerHash: string
+  transactionIndex: number
+  transactionHash: string
+}
+
+export interface SchemaCatalogBundleV1 {
+  format: 'xcs-schema-catalog/1'
+  profile: NetworkProfile
+  targetUid: string
+  checkpoint: SchemaCatalogCheckpointV1
+  schemas: SchemaCatalogEntryV1[]
+}
+
+export interface ResolvedSchemaCatalogBundleV1 {
+  bundle: SchemaCatalogBundleV1
+  target: SchemaCatalogEntryV1
+  resolvedTarget: ResolvedSchema
+}
+
 export interface SchemaResolutionContext {
   networkId: number
   publisher: string

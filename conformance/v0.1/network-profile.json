@@ -1,0 +1,173 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "network-profile.valid-normalized",
+      "name": "accepts a complete profile and normalizes hexadecimal anchors",
+      "valid": true,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+      },
+      "expected": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "id": "network-profile.reject-unknown-property",
+      "name": "rejects profile extensions not defined by v0.1",
+      "valid": false,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "future": true
+      },
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.reject-zero-activation-ledger",
+      "name": "requires a real validated activation ledger",
+      "valid": false,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 0,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.reject-unchecksummed-registry",
+      "name": "requires a checksummed XRPL classic registry address",
+      "valid": false,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rNotChecksummed",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.reject-registration-amount",
+      "name": "freezes the schema registration payment amount to one drop",
+      "valid": false,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "2",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.reject-negative-network-id",
+      "name": "requires the XRPL network identifier to be a uint32",
+      "valid": false,
+      "input": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": -1,
+        "requiredAmendment": "abababababababababababababababababababababababababababababababab",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.json-decimal-uint32",
+      "name": "accepts decimal-form integral profile identifiers and activation ledgers",
+      "valid": true,
+      "inputJson": "{\"profileId\":\"xrpl-testnet-xcs-v0.1-vector\",\"xcsVersion\":\"0.1\",\"networkId\":1.0,\"requiredAmendment\":\"abababababababababababababababababababababababababababababababab\",\"registryAddress\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"registrationAmountDrops\":\"1\",\"activationLedgerIndex\":123.0,\"activationLedgerHash\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"}",
+      "expected": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "id": "network-profile.json-exponent-uint32",
+      "name": "accepts exponent-form integral profile identifiers and activation ledgers",
+      "valid": true,
+      "inputJson": "{\"profileId\":\"xrpl-testnet-xcs-v0.1-vector\",\"xcsVersion\":\"0.1\",\"networkId\":1e0,\"requiredAmendment\":\"abababababababababababababababababababababababababababababababab\",\"registryAddress\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"registrationAmountDrops\":\"1\",\"activationLedgerIndex\":1.23e2,\"activationLedgerHash\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"}",
+      "expected": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 1,
+        "requiredAmendment": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "id": "network-profile.json-negative-zero-network-id",
+      "name": "accepts negative zero as network identifier zero",
+      "valid": true,
+      "inputJson": "{\"profileId\":\"xrpl-testnet-xcs-v0.1-vector\",\"xcsVersion\":\"0.1\",\"networkId\":-0,\"requiredAmendment\":\"abababababababababababababababababababababababababababababababab\",\"registryAddress\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"registrationAmountDrops\":\"1\",\"activationLedgerIndex\":123,\"activationLedgerHash\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"}",
+      "expected": {
+        "profileId": "xrpl-testnet-xcs-v0.1-vector",
+        "xcsVersion": "0.1",
+        "networkId": 0,
+        "requiredAmendment": "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB",
+        "registryAddress": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "registrationAmountDrops": "1",
+        "activationLedgerIndex": 123,
+        "activationLedgerHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "id": "network-profile.json-negative-zero-activation",
+      "name": "normalizes negative zero before enforcing a positive activation ledger",
+      "valid": false,
+      "inputJson": "{\"profileId\":\"xrpl-testnet-xcs-v0.1-vector\",\"xcsVersion\":\"0.1\",\"networkId\":1,\"requiredAmendment\":\"abababababababababababababababababababababababababababababababab\",\"registryAddress\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"registrationAmountDrops\":\"1\",\"activationLedgerIndex\":-0,\"activationLedgerHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+      "errorCode": "NETWORK_PROFILE_INVALID"
+    },
+    {
+      "id": "network-profile.json-non-ijson-number",
+      "name": "rejects a network identifier outside the finite IEEE-754 range",
+      "valid": false,
+      "inputJson": "{\"profileId\":\"xrpl-testnet-xcs-v0.1-vector\",\"xcsVersion\":\"0.1\",\"networkId\":1e400,\"requiredAmendment\":\"abababababababababababababababababababababababababababababababab\",\"registryAddress\":\"rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh\",\"registrationAmountDrops\":\"1\",\"activationLedgerIndex\":123,\"activationLedgerHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}",
+      "errorCode": "JSON_NON_IJSON_NUMBER"
+    }
+  ]
+}

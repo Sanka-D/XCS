@@ -1,7 +1,8 @@
-import { encode, hashes, type Client, type SubmittableTransaction } from 'xrpl'
+import { decode, encode, hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  assertTransactionNotExpired,
   autofillXcsTransaction,
   getTransactionStatus,
   MemoryOperationJournal,
@@ -11,11 +12,12 @@ import {
   XcsSdkError,
 } from '../src/index.js'
 
-const ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
+const TEST_WALLET = Wallet.fromEntropy(Uint8Array.from({ length: 16 }, (_, index) => index + 1))
+const ACCOUNT = TEST_WALLET.classicAddress
 const DESTINATION = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
 
 function signedBlob(lastLedgerSequence = 50): string {
-  return encode({
+  return TEST_WALLET.sign({
     TransactionType: 'Payment',
     Account: ACCOUNT,
     Destination: DESTINATION,
@@ -23,8 +25,7 @@ function signedBlob(lastLedgerSequence = 50): string {
     Fee: '12',
     Sequence: 1,
     LastLedgerSequence: lastLedgerSequence,
-    SigningPubKey: '',
-  })
+  }).tx_blob
 }
 
 function mockClient(overrides: Record<string, unknown> = {}): Client {
@@ -134,6 +135,15 @@ describe('reliable submission', () => {
   it('runs the validated-signature hook after exact comparison and before submit', async () => {
     const calls: string[] = []
     const blob = signedBlob()
+    const prepared = {
+      TransactionType: 'Payment' as const,
+      Account: ACCOUNT,
+      Destination: DESTINATION,
+      Amount: '1',
+      Fee: '12',
+      Sequence: 1,
+      LastLedgerSequence: 50,
+    }
     const client = mockClient({
       submit: vi.fn(async () => {
         calls.push('submit')
@@ -143,15 +153,7 @@ describe('reliable submission', () => {
 
     await signPreparedAndSubmit(
       client,
-      {
-        TransactionType: 'Payment',
-        Account: ACCOUNT,
-        Destination: DESTINATION,
-        Amount: '1',
-        Fee: '12',
-        Sequence: 1,
-        LastLedgerSequence: 50,
-      },
+      prepared,
       { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
       {
         journal: new MemoryOperationJournal(),
@@ -165,10 +167,14 @@ describe('reliable submission', () => {
             lastLedgerSequence: 50,
           })
         },
+        beforeSubmit: async (signature) => {
+          calls.push('guard')
+          expect(signature.transaction).toEqual(prepared)
+        },
       },
     )
 
-    expect(calls).toEqual(['persist', 'submit'])
+    expect(calls).toEqual(['persist', 'guard', 'submit'])
   })
 
   it('still reconciles after an ambiguous submit acknowledgement failure', async () => {
@@ -218,6 +224,64 @@ describe('reliable submission', () => {
     })
   })
 
+  it('rejects an expired prepared transaction before any submit side effect', async () => {
+    const submit = vi.fn()
+    const client = mockClient({
+      submit,
+      request: vi.fn(async () => ({ result: { ledger_current_index: 51 } })),
+    })
+
+    await expect(assertTransactionNotExpired(client, 50)).rejects.toMatchObject({
+      code: 'XCS_SDK_TRANSACTION_EXPIRED',
+      details: { currentLedgerIndex: 51, lastLedgerSequence: 50 },
+    })
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when ledger_current omits or corrupts its ledger index', async () => {
+    for (const ledger_current_index of [undefined, Number.NaN, 0, 1.5, 0x1_0000_0000]) {
+      const client = mockClient({
+        request: vi.fn(async () => ({ result: { ledger_current_index } })),
+      })
+
+      await expect(assertTransactionNotExpired(client, 50)).rejects.toMatchObject({
+        code: 'XCS_SDK_LEDGER_CURRENT_INVALID',
+      })
+    }
+  })
+
+  it('rejects unsigned and cryptographically invalid blobs before submission', async () => {
+    const unsigned = encode({
+      TransactionType: 'Payment',
+      Account: ACCOUNT,
+      Destination: DESTINATION,
+      Amount: '1',
+      Fee: '12',
+      Sequence: 1,
+      LastLedgerSequence: 50,
+      SigningPubKey: '',
+    })
+    const decoded = decode(signedBlob())
+    const signature = decoded.TxnSignature as string
+    const invalidSignature = encode({
+      ...decoded,
+      TxnSignature: `${signature.slice(0, -2)}${signature.endsWith('00') ? '01' : '00'}`,
+    } as unknown as SubmittableTransaction)
+    const submit = vi.fn()
+
+    await expect(
+      submitSignedTransaction(mockClient({ submit }), unsigned, {
+        journal: new MemoryOperationJournal(),
+      }),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNED_BLOB' })
+    await expect(
+      submitSignedTransaction(mockClient({ submit }), invalidSignature, {
+        journal: new MemoryOperationJournal(),
+      }),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNED_BLOB' })
+    expect(submit).not.toHaveBeenCalled()
+  })
+
   it('rejects incomplete autofill and mismatched signer hashes', async () => {
     const incomplete = mockClient({ autofill: vi.fn(async (transaction) => transaction) })
     await expect(
@@ -248,7 +312,7 @@ describe('reliable submission', () => {
   })
 
   it('rejects a correctly hashed blob when the signer changed transaction fields', async () => {
-    const changedBlob = encode({
+    const changedBlob = TEST_WALLET.sign({
       TransactionType: 'Payment',
       Account: ACCOUNT,
       Destination: ACCOUNT,
@@ -257,8 +321,7 @@ describe('reliable submission', () => {
       Sequence: 1,
       LastLedgerSequence: 50,
       Flags: 0,
-      SigningPubKey: '',
-    })
+    }).tx_blob
     const onValidatedSignature = vi.fn()
     const submit = vi.fn()
     await expect(

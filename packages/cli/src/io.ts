@@ -22,7 +22,8 @@ export const processIo: CliIo = {
     }
     return Buffer.concat(chunks).toString('utf8')
   },
-  readTextFile: (path) => readFile(path, 'utf8'),
+  readTextFile: async (path) =>
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await readFile(path)),
   writeTextFile: (path, value) => writeFile(path, value, 'utf8'),
   writeStdout: (value) => process.stdout.write(value),
   writeStderr: (value) => process.stderr.write(value),

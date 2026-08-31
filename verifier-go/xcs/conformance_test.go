@@ -14,7 +14,7 @@ func TestConformanceVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if suite.Manifest.FormatVersion != 1 || suite.Manifest.ProtocolVersion != "0.1" || suite.Manifest.Revision != 9 {
+	if suite.Manifest.FormatVersion != 1 || suite.Manifest.ProtocolVersion != "0.1" || suite.Manifest.Revision != 12 {
 		t.Fatalf("unexpected frozen manifest metadata: %+v", suite.Manifest)
 	}
 
@@ -28,10 +28,14 @@ func TestConformanceVectors(t *testing.T) {
 			run = runSchemaValidationVectors
 		case schemaResolutionHandler:
 			run = runSchemaResolutionVectors
+		case schemaCatalogHandler:
+			run = runSchemaCatalogVectors
 		case rippleTimeHandler:
 			run = runRippleTimeVectors
 		case lifecycleStateHandler:
 			run = runLifecycleStateVectors
+		case networkProfileHandler:
+			run = runNetworkProfileVectors
 		case schemaUIDHandler:
 			run = runSchemaUIDVectors
 		case claimsHandler:

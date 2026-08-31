@@ -1,4 +1,4 @@
-import { decode, hashes, type Client, type SubmittableTransaction } from 'xrpl'
+import { decode, hashes, verifySignature, type Client, type SubmittableTransaction } from 'xrpl'
 
 import { XcsSdkError } from './errors.js'
 
@@ -70,6 +70,11 @@ export interface ReliableSubmissionOptions {
    */
   readonly onValidatedSignature?:
     ((signature: ValidatedSignature) => void | Promise<void>) | undefined
+  /**
+   * Final online guard executed after recovery material is journaled and
+   * immediately before the first submission side effect.
+   */
+  readonly beforeSubmit?: ((signature: ValidatedSignature) => void | Promise<void>) | undefined
 }
 
 export interface TransactionStatus {
@@ -240,6 +245,7 @@ export async function submitSignedTransaction(
   } catch {
     throw new XcsSdkError('XCS_SDK_INVALID_SIGNED_BLOB', 'Cannot decode signed transaction.')
   }
+  assertValidSingleSignature(decoded, txBlob)
 
   const lastLedgerSequence = asPositiveInteger(decoded.LastLedgerSequence)
   if (lastLedgerSequence === undefined) {
@@ -256,6 +262,27 @@ export async function submitSignedTransaction(
     txHash,
     lastLedgerSequence,
   })
+
+  if (options.beforeSubmit !== undefined) {
+    try {
+      await options.beforeSubmit({
+        operationId,
+        transaction: withoutSignatureFields(decoded) as unknown as SubmittableTransaction,
+        txBlob,
+        txHash,
+        lastLedgerSequence,
+      })
+    } catch (error) {
+      await append(options.journal, {
+        operationId,
+        stage: 'failed',
+        txHash,
+        lastLedgerSequence,
+        message: 'Final pre-submission validation failed.',
+      })
+      throw error
+    }
+  }
 
   let submitEngineResult: string | undefined
   try {
@@ -362,6 +389,38 @@ export async function getTransactionStatus(
   return { status: 'not_found', txHash: txHash.toUpperCase(), lastLedgerSequence }
 }
 
+/**
+ * Prove that a prepared transaction can still be accepted before attempting a
+ * submission. This check deliberately happens at the final online boundary so
+ * an offline-reviewed blob is never relayed after its ledger window closed.
+ */
+export async function assertTransactionNotExpired(
+  client: Client,
+  lastLedgerSequence: number,
+): Promise<number> {
+  if (!client.isConnected()) {
+    throw new XcsSdkError(
+      'XCS_SDK_CLIENT_NOT_CONNECTED',
+      'Connect and validate the XRPL client before checking transaction expiry.',
+    )
+  }
+  if (!Number.isInteger(lastLedgerSequence) || lastLedgerSequence <= 0) {
+    throw new XcsSdkError(
+      'XCS_SDK_INVALID_SIGNED_BLOB',
+      'LastLedgerSequence must be a positive integer.',
+    )
+  }
+  const currentLedgerIndex = await getCurrentLedgerIndex(client)
+  if (currentLedgerIndex > lastLedgerSequence) {
+    throw new XcsSdkError(
+      'XCS_SDK_TRANSACTION_EXPIRED',
+      'Prepared transaction expired before submission.',
+      { currentLedgerIndex, lastLedgerSequence },
+    )
+  }
+  return currentLedgerIndex
+}
+
 async function waitForTransaction(
   client: Client,
   txHash: string,
@@ -386,7 +445,19 @@ async function waitForTransaction(
 
 async function getCurrentLedgerIndex(client: Client): Promise<number> {
   const response = await client.request({ command: 'ledger_current' })
-  return response.result.ledger_current_index
+  const ledgerIndex = response.result.ledger_current_index
+  if (
+    typeof ledgerIndex !== 'number' ||
+    !Number.isInteger(ledgerIndex) ||
+    ledgerIndex <= 0 ||
+    ledgerIndex > 0xffff_ffff
+  ) {
+    throw new XcsSdkError(
+      'XCS_SDK_LEDGER_CURRENT_INVALID',
+      'XRPL ledger_current returned an invalid ledger index.',
+    )
+  }
+  return ledgerIndex
 }
 
 async function append(
@@ -406,17 +477,57 @@ function assertSignerResult(result: SignerResult): void {
   }
 }
 
-function assertSignedTransactionMatches(
+/**
+ * Decode a signed blob and prove that the signer changed no reviewed field.
+ * XRPL signature fields are the only permitted additions.
+ */
+export function assertSignedTransactionMatches(
   prepared: Readonly<SubmittableTransaction>,
   txBlob: string,
 ): void {
-  const signed = decode(txBlob)
+  let signed: Record<string, unknown>
+  try {
+    signed = decode(txBlob)
+  } catch {
+    throw new XcsSdkError('XCS_SDK_INVALID_SIGNED_BLOB', 'Cannot decode signed transaction.')
+  }
+  assertValidSingleSignature(signed, txBlob)
   const preparedFields = withoutSignatureFields(prepared as unknown as Record<string, unknown>)
   const signedFields = withoutSignatureFields(signed)
   if (stableJson(preparedFields) !== stableJson(signedFields)) {
     throw new XcsSdkError(
       'XCS_SDK_INVALID_SIGNER_RESULT',
       'Signer changed transaction fields other than the XRPL signature fields.',
+    )
+  }
+}
+
+function assertValidSingleSignature(signed: Record<string, unknown>, txBlob: string): void {
+  if (Object.hasOwn(signed, 'Signers')) {
+    throw new XcsSdkError(
+      'XCS_SDK_INVALID_SIGNED_BLOB',
+      'Multisigned transactions are not supported by the XCS v0.1 submission flow.',
+    )
+  }
+  if (
+    typeof signed.SigningPubKey !== 'string' ||
+    signed.SigningPubKey.length === 0 ||
+    typeof signed.TxnSignature !== 'string' ||
+    signed.TxnSignature.length === 0
+  ) {
+    throw new XcsSdkError(
+      'XCS_SDK_INVALID_SIGNED_BLOB',
+      'Transaction blob must contain a single XRPL signature.',
+    )
+  }
+  try {
+    if (!verifySignature(txBlob)) {
+      throw new Error('invalid signature')
+    }
+  } catch {
+    throw new XcsSdkError(
+      'XCS_SDK_INVALID_SIGNED_BLOB',
+      'Transaction blob contains an invalid XRPL signature.',
     )
   }
 }

@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
   "protocolVersion": "0.1",
-  "revision": 9,
+  "revision": 12,
   "files": [
     {
       "file": "canonicalization.json",
@@ -16,12 +16,20 @@
       "handler": "schema-resolution"
     },
     {
+      "file": "schema-catalog.json",
+      "handler": "schema-catalog"
+    },
+    {
       "file": "ripple-time.json",
       "handler": "ripple-time"
     },
     {
       "file": "lifecycle-state.json",
       "handler": "lifecycle-state"
+    },
+    {
+      "file": "network-profile.json",
+      "handler": "network-profile"
     },
     {
       "file": "schema-uid.json",

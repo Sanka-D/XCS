@@ -14,6 +14,10 @@ function isUint32(value: unknown): value is number {
   return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff
 }
 
+function normalizeUint32(value: number): number {
+  return value === 0 ? 0 : value
+}
+
 export function computeSchemaUid(input: SchemaUidInput): string {
   if (!isRecord(input)) {
     return fail('UID_INPUT_INVALID', 'Schema UID input must be an object', '$')
@@ -42,10 +46,10 @@ export function computeSchemaUid(input: SchemaUidInput): string {
   const preimage = {
     purpose: 'xcs.schema.uid',
     version: '0.1',
-    networkId: input.networkId,
+    networkId: normalizeUint32(input.networkId),
     ledgerHash: input.ledgerHash.toLowerCase(),
-    ledgerIndex: input.ledgerIndex,
-    transactionIndex: input.transactionIndex,
+    ledgerIndex: normalizeUint32(input.ledgerIndex),
+    transactionIndex: normalizeUint32(input.transactionIndex),
     publisher: input.publisher,
     schema,
   } as unknown as JsonValue

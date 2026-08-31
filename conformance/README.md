@@ -7,13 +7,21 @@ of vector files and the handler that must consume each one. A runner must fail o
 an unknown manifest or protocol version, an unknown file or handler, a missing
 declared file, or an undeclared JSON file.
 
+The current v0.1 manifest revision is 12. This revision adds the schema-catalog closure vectors and
+raw numeric-token parity cases described below; it does not change the frozen v0.1 validity rules.
+
 - `canonicalization.json`: strict JSON parsing and RFC 8785 output.
 - `schema-validation.json`: valid schemas and the boundary between malformed JSON
   (`JSON_INVALID`) and structurally invalid schema definitions (`SCHEMA_INVALID`).
 - `schema-resolution.json`: deterministic parent catalogs, resolved field unions,
   root-to-parent lineage, inheritance limits and stable relation failure codes.
+- `schema-catalog.json`: the normative 256-entry combined relation-closure limit,
+  including exact-boundary, overflow, shared-ancestor deduplication and raw integral JSON-number
+  spellings for checkpoint/schema coordinates.
 - `ripple-time.json`: Ripple/Unix/ISO conversion, canonical formatting and uint32 boundaries.
 - `lifecycle-state.json`: pending, active, expired and deleted projection precedence.
+- `network-profile.json`: strict public profile validation, hexadecimal anchor normalization and
+  raw decimal/exponent/negative-zero uint32 equivalence.
 - `schema-uid.json`: complete UID preimages, SHA-256 results and invalid wrapper inputs.
 - `claims.json`: valid and invalid typed claims, including the required object root.
 - `payload-integrity.json`: HTTPS digests, raw CIDv1 values, the pinned Unicode 15 UTS #46 host
@@ -47,6 +55,21 @@ they do not define a precedence for content that is simultaneously malformed and
 `payload-validation.json` supplies a network-bound parent catalog for inherited cases; runners must
 resolve that schema first and must fail closed when the catalog is incomplete. Passing only a
 child's local field map is not conforming.
+
+`schema-catalog.json` uses compact generated topologies so the boundary vectors do not duplicate
+hundreds of complete schema documents. For `linear-supersedes`, runners create `ancestorCount`
+unique entries where each entry after the first supersedes its predecessor, then make the candidate
+supersede the last entry. For `shared-supersedes`, runners create `sharedAncestorCount` entries in
+the same linear chain, add two unique branch entries that both supersede the chain tip, then make the
+candidate extend the first branch and supersede the second. The candidate itself counts as one
+catalog entry and every referenced UID counts at most once.
+
+Raw numeric cases retain their JSON token as a string so runners test the wire spelling rather than
+the host language's already-decoded number. Semantically integral `1`, `1.0` and `1e0` values are
+equivalent in TypeScript and Go. `-0` normalizes to positive zero before field-specific bounds are
+applied, so it is accepted where zero is valid and rejected where a positive value is required.
+Tokens outside the finite I-JSON range, such as `1e400`, fail with `JSON_NON_IJSON_NUMBER` before
+profile or catalog shape validation.
 
 Schema normalization is part of the wire contract: an explicit
 `"optional": false` is equivalent to the default and is omitted before JCS and
