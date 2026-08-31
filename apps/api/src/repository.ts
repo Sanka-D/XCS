@@ -125,12 +125,12 @@ export class PostgresApiRepository implements ApiRepository {
           AND schema_uid = ${input.targetUid}
         UNION
         SELECT related.schema_uid, related.parent_uid, related.supersedes_uid
-        FROM catalog AS current_schema
+        FROM catalog AS catalog_entry
         JOIN schemas AS related
           ON related.profile_id = ${input.profileId}
          AND (
-           related.schema_uid = current_schema.parent_uid
-           OR related.schema_uid = current_schema.supersedes_uid
+           related.schema_uid = catalog_entry.parent_uid
+           OR related.schema_uid = catalog_entry.supersedes_uid
          )
       )
       SELECT schema_uid AS "schemaUid"

@@ -351,8 +351,11 @@ removing an applied `0003`.
    The two RPC files contain the complete WSS URLs and therefore also protect provider credentials
    embedded in a path or query. `docker-compose.secrets.yml` removes all corresponding direct values
    from the container model and mounts only these files. If the `monitoring` profile is enabled,
-   also create the ninth, separate `XCS_GRAFANA_ADMIN_PASSWORD_FILE`. Keep every file mode `0600`;
-   never commit, log or expose its contents through a `NUXT_PUBLIC_*` variable.
+   also create the ninth, separate `XCS_GRAFANA_ADMIN_PASSWORD_FILE`. Compose implements file-backed
+   secrets as bind mounts, so keep their parent directory mode `0700` and each file mode `0644` so
+   the distinct unprivileged container UIDs can read only the secrets mounted into their service.
+   Never place these files in a host directory accessible by another user, and never commit, log or
+   expose their contents through a `NUXT_PUBLIC_*` variable.
 
    The internal token authenticates only the private Nuxt SSR-to-API rate-limit identity. It does
    not authenticate the public API, whose direct browser calls remain IP-limited. Never reuse a

@@ -1,3 +1,3 @@
 # Repository Codex Instructions
 
-- Before pushing Compose workflow assertions, render the exact overlays and activate every referenced profile with Docker Compose; inactive profiled services are absent from the rendered service configuration.
+- Before pushing Compose changes, render the exact overlays with every referenced profile and, when a Docker engine is available, run the production image build plus secret-file startup under the configured unprivileged users; configuration rendering alone does not validate build context or bind-mounted secret readability.

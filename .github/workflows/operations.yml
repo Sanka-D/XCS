@@ -51,7 +51,11 @@ jobs:
           printf '%s' "$XCS_INTERNAL_API_TOKEN" > "$SECRET_DIRECTORY/internal_api_token"
           printf '%s' "$XCS_RPC_URL_PRIMARY" > "$SECRET_DIRECTORY/rpc_url_primary"
           printf '%s' "$XCS_RPC_URL_SECONDARY" > "$SECRET_DIRECTORY/rpc_url_secondary"
-          chmod 600 "$SECRET_DIRECTORY"/*
+          # Compose file-backed secrets retain the host mode. The directory is
+          # private while 0644 lets each image's distinct unprivileged UID read
+          # only the files explicitly mounted into that service.
+          chmod 700 "$SECRET_DIRECTORY"
+          chmod 644 "$SECRET_DIRECTORY"/*
           {
             echo "XCS_POSTGRES_ADMIN_PASSWORD_FILE=$SECRET_DIRECTORY/postgres_admin_password"
             echo "XCS_INDEXER_DATABASE_PASSWORD_FILE=$SECRET_DIRECTORY/indexer_database_password"

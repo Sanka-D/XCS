@@ -133,8 +133,8 @@ describe('PostgresApiRepository authority reads', () => {
     expect(statement).toBeDefined()
     const query = new PgDialect().sqlToQuery(statement!)
     expect(query.sql).toContain('WITH RECURSIVE catalog AS')
-    expect(query.sql).toContain('related.schema_uid = current_schema.parent_uid')
-    expect(query.sql).toContain('related.schema_uid = current_schema.supersedes_uid')
+    expect(query.sql).toContain('related.schema_uid = catalog_entry.parent_uid')
+    expect(query.sql).toContain('related.schema_uid = catalog_entry.supersedes_uid')
     expect(query.sql).toContain('LIMIT')
     expect(query.params).toContain(MAX_SCHEMA_CATALOG_ENTRIES + 1)
     expect(projectionRead).toHaveBeenCalledWith({

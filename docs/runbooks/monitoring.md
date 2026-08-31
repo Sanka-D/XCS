@@ -40,9 +40,11 @@ dedicated `xcs_monitor` role. Provisioning first requires the built-in `pg_monit
 graph and ACLs to match PostgreSQL's recorded installation baseline. Drift fails closed instead of
 being silently repaired. Only then does `xcs_monitor` inherit `pg_monitor`, without `SET ROLE`,
 application-table DML or any raw advisory-lock function. Create a ninth, independent
-`XCS_GRAFANA_ADMIN_PASSWORD_FILE` for Grafana. Keep every file mode `0600`; do not commit, log or
-pass its contents on a command line. The default paths are under `ops/secrets/`, whose contents are
-ignored by Git.
+`XCS_GRAFANA_ADMIN_PASSWORD_FILE` for Grafana. Compose implements file-backed secrets as bind mounts:
+keep their parent directory mode `0700` and each file mode `0644`, allowing the distinct
+unprivileged container UIDs to read only secrets mounted into their service. Do not put them in a
+host directory accessible by another user, commit them, log them or pass their contents on a command
+line. The default paths are under `ops/secrets/`, whose contents are ignored by Git.
 
 Validate the fully rendered configuration without printing it, then start the profile:
 
