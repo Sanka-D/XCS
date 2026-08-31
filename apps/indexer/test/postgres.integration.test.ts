@@ -1934,7 +1934,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       `
       expect(monitorRead?.databaseName).toBe(new URL(database.url).pathname.slice(1))
       expect(Number(monitorRead?.logicalSizeBytes)).toBeGreaterThan(0)
-      await expectPermissionDenied(monitorClient.sql`SELECT * FROM network_profiles`)
+      await expectPermissionDenied(monitorClient.sql`SELECT * FROM public.network_profiles`)
       await expectPermissionDenied(
         monitorClient.sql`SELECT lo_from_bytea(0::oid, decode('00', 'hex'))`,
       )
@@ -1956,7 +1956,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       await expectPermissionDenied(apiClient.sql`SELECT pg_notify('xcs_test', 'payload')`)
       await expectPermissionDenied(
         monitorClient.sql`
-          INSERT INTO indexer_incidents (profile_id, writer_epoch, error_code)
+          INSERT INTO public.indexer_incidents (profile_id, writer_epoch, error_code)
           VALUES (${permissionsProfile.profileId}, 998, 'FORBIDDEN_MONITOR_WRITE')
         `,
       )
