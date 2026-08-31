@@ -1,4 +1,4 @@
-import { encode, hashes, type Client, type SubmittableTransaction } from 'xrpl'
+import { hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
 import type {
   AccountInfo,
   SignedTransaction,
@@ -29,11 +29,26 @@ const NETWORK_ID = 1
 const LEDGER_INDEX = 100_001
 const LAST_LEDGER_SEQUENCE = LEDGER_INDEX + 20
 
-// These bytes are intentionally not a usable signature or secret. The local
-// fake ledger accepts the syntactic blob so the application can still prove
-// exact signed-field comparison, hashing, journaling and finality transitions.
-const SYNTHETIC_PUBLIC_KEY = `02${'11'.repeat(32)}`
-const SYNTHETIC_SIGNATURE = 'AA'
+const BROWSER_E2E_SIGNERS = new Map([
+  [
+    BROWSER_E2E_ACCOUNT,
+    Wallet.fromEntropy(
+      Uint8Array.from({ length: 16 }, (_, index) => index + 1),
+      {
+        masterAddress: BROWSER_E2E_ACCOUNT,
+      },
+    ),
+  ],
+  [
+    BROWSER_E2E_SUBJECT_ACCOUNT,
+    Wallet.fromEntropy(
+      Uint8Array.from({ length: 16 }, (_, index) => 0xff - index),
+      {
+        masterAddress: BROWSER_E2E_SUBJECT_ACCOUNT,
+      },
+    ),
+  ],
+])
 
 type WalletListener = (payload?: unknown) => void
 
@@ -103,12 +118,10 @@ class BrowserE2eWalletManager {
   public async sign(transaction: Transaction): Promise<SignedTransaction> {
     if (this.currentAccount === null) throw new Error('BROWSER_E2E_WALLET_NOT_CONNECTED')
     browserE2eEffects().walletSignatures += 1
-    const txBlob = encode({
-      ...transaction,
-      SigningPubKey: SYNTHETIC_PUBLIC_KEY,
-      TxnSignature: SYNTHETIC_SIGNATURE,
-    })
-    return { tx_blob: txBlob, hash: hashes.hashSignedTx(txBlob) }
+    const signer = BROWSER_E2E_SIGNERS.get(this.currentAccount.address)
+    if (signer === undefined) throw new Error('BROWSER_E2E_SIGNER_UNKNOWN')
+    const signed = signer.sign(transaction)
+    return { tx_blob: signed.tx_blob, hash: signed.hash }
   }
 
   private emit(event: string, payload?: unknown): void {

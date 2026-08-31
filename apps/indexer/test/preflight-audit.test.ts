@@ -19,6 +19,7 @@ const config: IndexerPreflightConfig = {
   },
   profileSha256: 'c'.repeat(64),
   registryPolicy: 'controlled-testnet-pilot',
+  databaseScope: 'exclusive-profile',
   xrplRpcUrlPrimary: 'wss://primary.example.test/private-token',
   xrplRpcUrlSecondary: 'wss://secondary.example.test/private-token',
 }
@@ -55,6 +56,7 @@ describe('preflight audit output', () => {
       profileId: 'commons-testnet-xcs-v0.1-controlled-pilot',
       profileSha256: 'c'.repeat(64),
       registryPolicy: 'controlled-testnet-pilot',
+      databaseScope: 'exclusive-profile',
       networkId: 1,
       sourceTips: { primary: 110, secondary: 108, effective: 108 },
       sources: {

@@ -12,9 +12,10 @@ team administration or batch issuer in the Testnet beta; one wallet action is pr
 
 Immediately before opening the wallet, the site requires a fresh, profile-bound readiness proof
 from the authoritative indexer. It repeats that proof after the wallet returns and before retaining
-or submitting the signed blob. A missing, timed-out, malformed, stale or inconsistent proof fails
-closed; the site requests a non-cacheable response and never falls back to the public submission RPC
-or the diagnostic status DTO.
+or submitting the signed blob. A later retransmission from the local recovery journal requires a
+new proof immediately before the XRPL side effect. A missing, timed-out, malformed, stale or
+inconsistent proof fails closed; the site requests a non-cacheable response and never falls back to
+the public submission RPC or the diagnostic status DTO.
 
 ## Public discovery boundary
 
@@ -66,10 +67,14 @@ removes the resulting active generation through the subject wallet, opens its ex
 permalink and exports the sanitized `subject_removed` receipt. A separate case proves that rejecting
 an unaccepted pending generation contacts neither the payload host nor `/v1/verify`. Two negative
 cases prove that unavailable readiness prevents the wallet call and that readiness disappearing
-while the wallet is open prevents both blob persistence and XRPL submission. The suite also
-exercises the Developers quickstart against the
-deterministic exact-generation API, checks that local-payload verification never sets
-`resolvePayload`, and proves that a replaced generation fails before a payload can be submitted.
+while the wallet is open prevents both blob persistence and XRPL submission. Recovery cases seed a
+syntactically valid signed operation in IndexedDB, reload the application, and prove both that a
+ready indexer allows validation without a second wallet signature and that an unavailable indexer
+prevents retransmission while preserving the blob for a later retry. A corrupted recovery record is
+also rejected before status reconciliation, readiness or submission without deleting its blob. The
+suite also exercises the Developers quickstart against the deterministic exact-generation API,
+checks that local-payload verification never sets `resolvePayload`, and proves that a replaced
+generation fails before a payload can be submitted.
 
 ```bash
 pnpm --filter @xcs-protocol/web exec playwright install chromium
@@ -244,8 +249,9 @@ signed fields exactly equal the reviewed transaction. SDK journal stages are ret
 operation. Schema registration stores publisher, canonical schema digest and exact memo size.
 Issuance stores the tuple, public URI, payload digest and optional expiration. Tuple-only actions
 store the exact reviewed generation ID. The `/operations` page first checks transaction status by
-hash; only a still-unvalidated transaction may be resubmitted, after checking that its generation is
-still current. The blob is
+hash, but only after decoding the blob and matching its derived hash, `LastLedgerSequence`, account,
+transaction type and any explicit `NetworkID` against the journal. Only a still-unvalidated
+transaction may be resubmitted, after checking that its generation is still current. The blob is
 removed from the local record as soon as the operation becomes `validated`, `expired`, or `failed`.
 A transaction has two separately displayed outcomes: XRPL must first report `validated: true` and
 `TransactionResult: tesSUCCESS`, then the authoritative indexer must expose its exact schema
@@ -267,9 +273,11 @@ nor signed blob may be abandoned to release its key.
 
 The profile-bound readiness endpoint is checked just before the wallet call and again after the
 wallet response. If either check fails, SDK pre-submission validation records the local operation as
-failed and does not submit; the post-wallet failure path never persists the signed blob. Retrying an
-already signed, recoverable operation is intentionally unchanged because it asks for no new wallet
-consent and must reconcile a transaction that may already have reached XRPL.
+failed and does not submit; the post-wallet failure path never persists the signed blob. Recovery
+first reconciles the stored hash without creating an XRPL side effect. If it is still unvalidated,
+retransmission requires a new readiness proof and a second ownership check on the business lock.
+Failure preserves the signed blob and recoverable stage for a later retry; it never asks the wallet
+to sign again.
 
 Native `CredentialAccept` and `CredentialDelete` transactions contain only issuer, subject and
 credential type; they cannot cryptographically bind an XCS generation ID. An issuer could therefore

@@ -3,6 +3,7 @@ import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm'
 import type { XcsDatabase } from './client.js'
 import {
   INDEXER_STATUS_STATES,
+  indexerIncidents,
   indexerStatuses,
   type IndexerStatusRow,
   type IndexerStatusState,
@@ -93,7 +94,10 @@ function validDate(value: Date | undefined): Date {
 }
 
 function databaseNow(value: Date | undefined) {
-  return value === undefined ? sql`CURRENT_TIMESTAMP` : validDate(value)
+  // clock_timestamp() is evaluated after a blocked row lock is acquired.
+  // CURRENT_TIMESTAMP is frozen at transaction start and could renew a lease
+  // to an instant that already passed while the statement was waiting.
+  return value === undefined ? sql`clock_timestamp()` : validDate(value)
 }
 
 function nullableUint32(value: number | null | undefined, field: string): number | null {
@@ -205,7 +209,7 @@ function leaseExpiration(now: Date, leaseDurationMs: number): Date {
 
 function databaseLeaseExpiration(value: Date | undefined, leaseDurationMs: number) {
   return value === undefined
-    ? sql`CURRENT_TIMESTAMP + (${leaseDurationMs}::bigint * interval '1 millisecond')`
+    ? sql`clock_timestamp() + (${leaseDurationMs}::bigint * interval '1 millisecond')`
     : leaseExpiration(validDate(value), leaseDurationMs)
 }
 
@@ -372,13 +376,27 @@ export async function haltIndexer(
   const token = normalizeToken(tokenInput)
   const value = normalizeHaltIndexerStatus(input, errorCode)
   const now = databaseNow(options.now)
-  const [row] = await database
-    .update(indexerStatuses)
-    .set({ ...value, writerId: null, leaseExpiresAt: null, updatedAt: now })
-    .where(tokenFilter(token))
-    .returning()
-  if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_LOST')
-  return row
+  return database.transaction(async (transaction) => {
+    const tx = transaction as unknown as XcsDatabase
+    const [row] = await tx
+      .update(indexerStatuses)
+      .set({ ...value, writerId: null, leaseExpiresAt: null, updatedAt: now })
+      .where(tokenFilter(token))
+      .returning()
+    if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_LOST')
+
+    await tx.insert(indexerIncidents).values({
+      profileId: token.profileId,
+      writerEpoch: token.epoch,
+      errorCode: value.errorCode!,
+      primarySourceTip: value.primarySourceTip,
+      secondarySourceTip: value.secondarySourceTip,
+      lastAgreedLedgerIndex: value.lastAgreedLedgerIndex,
+      lastAgreedLedgerHash: value.lastAgreedLedgerHash,
+      recordedAt: now,
+    })
+    return row
+  })
 }
 
 /**

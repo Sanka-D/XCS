@@ -1,5 +1,5 @@
 import type { ReliableSubmissionResult, Signer, SignerResult } from '@xcs-protocol/sdk'
-import { hashes } from 'xrpl'
+import { decode, hashes, verifySignature } from 'xrpl'
 import type { SignedTransaction, Transaction } from 'xrpl-connect'
 
 interface WalletSignOnly {
@@ -7,6 +7,66 @@ interface WalletSignOnly {
 }
 
 const HASH_PATTERN = /^[0-9A-F]{64}$/u
+
+export interface StoredRecoveryMaterial {
+  readonly txBlob: string
+  readonly txHash: string
+  readonly lastLedgerSequence: number
+  readonly account: string
+  readonly transactionType: string
+  readonly networkId: number
+}
+
+/**
+ * Treat persisted browser recovery state as untrusted input before it can
+ * influence terminal reconciliation or create a new XRPL side effect.
+ */
+export function validateStoredRecoveryMaterial(material: StoredRecoveryMaterial): void {
+  let decoded: Record<string, unknown>
+  let derivedHash: string
+  try {
+    decoded = decode(material.txBlob)
+    derivedHash = hashes.hashSignedTx(material.txBlob).toUpperCase()
+    if (
+      Object.hasOwn(decoded, 'Signers') ||
+      typeof decoded.SigningPubKey !== 'string' ||
+      decoded.SigningPubKey.length === 0 ||
+      typeof decoded.TxnSignature !== 'string' ||
+      decoded.TxnSignature.length === 0 ||
+      !verifySignature(material.txBlob)
+    ) {
+      throw new Error('invalid single signature')
+    }
+  } catch {
+    throw new Error('OPERATION_RECOVERY_BLOB_INVALID')
+  }
+
+  if (!HASH_PATTERN.test(material.txHash) || derivedHash !== material.txHash) {
+    throw new Error('OPERATION_RECOVERY_HASH_MISMATCH')
+  }
+
+  const decodedLastLedgerSequence = decoded.LastLedgerSequence
+  if (
+    !Number.isSafeInteger(material.lastLedgerSequence) ||
+    material.lastLedgerSequence <= 0 ||
+    !Number.isSafeInteger(decodedLastLedgerSequence) ||
+    (decodedLastLedgerSequence as number) <= 0
+  ) {
+    throw new Error('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_INVALID')
+  }
+  if (decodedLastLedgerSequence !== material.lastLedgerSequence) {
+    throw new Error('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_MISMATCH')
+  }
+  if (decoded.Account !== material.account) {
+    throw new Error('OPERATION_RECOVERY_ACCOUNT_MISMATCH')
+  }
+  if (decoded.TransactionType !== material.transactionType) {
+    throw new Error('OPERATION_RECOVERY_TRANSACTION_TYPE_MISMATCH')
+  }
+  if (decoded.NetworkID !== undefined && decoded.NetworkID !== material.networkId) {
+    throw new Error('OPERATION_RECOVERY_NETWORK_ID_MISMATCH')
+  }
+}
 
 /**
  * Crossmark and GemWallet currently return an empty hash from sign-only flows.

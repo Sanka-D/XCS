@@ -7,6 +7,7 @@ import {
   type SchemaRow,
   type XcsDatabase,
 } from '@xcs-protocol/db'
+import { MAX_SCHEMA_CATALOG_ENTRIES } from '@xcs-protocol/core'
 import type { SQL } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { describe, expect, it, vi } from 'vitest'
@@ -106,6 +107,40 @@ describe('PostgresApiRepository authority reads', () => {
     expect(from).toHaveBeenCalledWith(schemas)
     expect(innerJoin.mock.calls[0]?.[0]).toBe(schemaEvents)
     expect(where).toHaveBeenCalledOnce()
+  })
+
+  it('expands both schema relation types recursively before loading catalog evidence', async () => {
+    const parentUid = 'd'.repeat(64)
+    const supersededUid = 'e'.repeat(64)
+    const execute = vi.fn(async (_statement: SQL) => [
+      { schemaUid: schemaRow.schemaUid },
+      { schemaUid: parentUid },
+      { schemaUid: supersededUid },
+    ])
+    const repository = new PostgresApiRepository({ execute } as unknown as XcsDatabase)
+    const projectionRead = vi
+      .spyOn(repository, 'getSchemaProjectionEvidence')
+      .mockResolvedValue([{ schema: schemaRow, registration: schemaRegistration }])
+
+    await expect(
+      repository.getSchemaCatalogEvidence({
+        profileId: 'testnet',
+        targetUid: schemaRow.schemaUid,
+      }),
+    ).resolves.toEqual([{ schema: schemaRow, registration: schemaRegistration }])
+
+    const statement = execute.mock.calls[0]?.[0] as SQL | undefined
+    expect(statement).toBeDefined()
+    const query = new PgDialect().sqlToQuery(statement!)
+    expect(query.sql).toContain('WITH RECURSIVE catalog AS')
+    expect(query.sql).toContain('related.schema_uid = current_schema.parent_uid')
+    expect(query.sql).toContain('related.schema_uid = current_schema.supersedes_uid')
+    expect(query.sql).toContain('LIMIT')
+    expect(query.params).toContain(MAX_SCHEMA_CATALOG_ENTRIES + 1)
+    expect(projectionRead).toHaveBeenCalledWith({
+      profileId: 'testnet',
+      schemaUids: [schemaRow.schemaUid, parentUid, supersededUid],
+    })
   })
 
   it('bounds schema search, schema activity, and transaction event pages with one lookahead row', async () => {

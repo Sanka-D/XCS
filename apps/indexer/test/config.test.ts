@@ -63,6 +63,7 @@ describe('indexer configuration', () => {
       leaseDurationMs: 30_000,
       batchSize: 20,
       registryPolicy: 'blackholed',
+      databaseScope: 'shared',
     })
   })
 
@@ -78,6 +79,7 @@ describe('indexer configuration', () => {
     await expect(loadIndexerPreflightConfig(input)).resolves.toMatchObject({
       profileSha256: sha256Hex(await readFile(path)),
       registryPolicy: 'blackholed',
+      databaseScope: 'shared',
       xrplRpcUrlPrimary: 'wss://primary.example.test/',
       xrplRpcUrlSecondary: 'wss://secondary.example.test/',
     })
@@ -92,10 +94,14 @@ describe('indexer configuration', () => {
         XCS_NETWORK_PROFILE: controlledProfile,
         XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
         XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+        XCS_DATABASE_SCOPE: 'exclusive-profile',
       }),
     )
 
-    expect(config.registryPolicy).toBe('controlled-testnet-pilot')
+    expect(config).toMatchObject({
+      registryPolicy: 'controlled-testnet-pilot',
+      databaseScope: 'exclusive-profile',
+    })
   })
 
   it('rejects a controlled-pilot profile when the explicit policy is absent', async () => {
@@ -122,13 +128,14 @@ describe('indexer configuration', () => {
             XCS_NETWORK_PROFILE: controlledProfile,
             XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
             XCS_CONTROLLED_PILOT_ACK: acknowledgement,
+            XCS_DATABASE_SCOPE: 'exclusive-profile',
           }),
         ),
       ).rejects.toThrow('XCS_CONTROLLED_PILOT_ACK')
     },
   )
 
-  it('rejects controlled pilot outside network 1 or without the profile suffix', async () => {
+  it('rejects controlled pilot outside network 1 or without the exact profile id', async () => {
     const wrongNetwork = await profilePath({
       profileId: 'x-controlled-pilot',
       networkId: 2,
@@ -139,6 +146,7 @@ describe('indexer configuration', () => {
           XCS_NETWORK_PROFILE: wrongNetwork,
           XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
           XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+          XCS_DATABASE_SCOPE: 'exclusive-profile',
         }),
       ),
     ).rejects.toThrow('networkId 1')
@@ -148,9 +156,35 @@ describe('indexer configuration', () => {
         await environment({
           XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
           XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+          XCS_DATABASE_SCOPE: 'exclusive-profile',
         }),
       ),
-    ).rejects.toThrow('ending in -controlled-pilot')
+    ).rejects.toThrow('requires profileId commons-testnet-xcs-v0.1-controlled-pilot')
+  })
+
+  it.each([undefined, 'shared'])(
+    'requires exclusive database scope for the controlled pilot (%j)',
+    async (databaseScope) => {
+      const controlledProfile = await profilePath({
+        profileId: 'commons-testnet-xcs-v0.1-controlled-pilot',
+      })
+      await expect(
+        loadIndexerConfig(
+          await environment({
+            XCS_NETWORK_PROFILE: controlledProfile,
+            XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+            XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+            XCS_DATABASE_SCOPE: databaseScope,
+          }),
+        ),
+      ).rejects.toThrow('XCS_DATABASE_SCOPE=exclusive-profile')
+    },
+  )
+
+  it('rejects an unknown database scope', async () => {
+    await expect(
+      loadIndexerConfig(await environment({ XCS_DATABASE_SCOPE: 'private' })),
+    ).rejects.toThrow('XCS_DATABASE_SCOPE')
   })
 
   it('rejects an unknown registry policy', async () => {

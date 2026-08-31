@@ -27,7 +27,11 @@ import {
 import { assertCredentialGenerationCurrent } from '~/utils/credentialReview'
 import { assertPublicRpcUrl } from '~/utils/publicRpcUrl'
 import { assertTransactionSigner } from '~/utils/transactions'
-import { assertValidatedTesSuccess, createWalletSigner } from '~/utils/walletSubmission'
+import {
+  assertValidatedTesSuccess,
+  createWalletSigner,
+  validateStoredRecoveryMaterial,
+} from '~/utils/walletSubmission'
 
 const account = shallowRef<AccountInfo | null>(null)
 const walletError = ref<string | null>(null)
@@ -403,6 +407,14 @@ export function useWallet() {
       ) {
         throw new Error('OPERATION_NOT_RECOVERABLE')
       }
+      validateStoredRecoveryMaterial({
+        txBlob: stored.txBlob,
+        txHash: stored.txHash,
+        lastLedgerSequence: stored.lastLedgerSequence,
+        account: stored.account,
+        transactionType: stored.transactionType,
+        networkId: stored.networkId,
+      })
 
       const activeProfile = await getActiveNetworkProfile()
       if (
@@ -436,6 +448,11 @@ export function useWallet() {
           throw new Error('OPERATION_GENERATION_CONTEXT_REQUIRED')
         }
         await assertBusinessGenerationCurrent(business, activeProfile.profileId)
+        await operationStore.assertBusinessLockOwned(operationId)
+        // A signed blob can survive a browser or process restart for safe
+        // recovery. Re-enter the same fail-closed readiness boundary used by
+        // first submissions before creating any new XRPL side effect.
+        await getNetworkReadiness(activeProfile.profileId)
         await operationStore.assertBusinessLockOwned(operationId)
         result = await submitSignedTransaction(client, stored.txBlob, {
           journal: operationStore,

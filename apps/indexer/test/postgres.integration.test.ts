@@ -9,6 +9,9 @@ import {
   credentialEvents,
   credentialGenerations,
   createDatabaseClient,
+  haltIndexer,
+  indexerIncidents,
+  indexerStatuses,
   ledgerCheckpoints,
   migrateDatabase,
   PROJECTION_INTEGRITY_MIGRATION_ERROR,
@@ -18,6 +21,10 @@ import {
   schemaEvents,
   schemas,
   updateIndexerStatus,
+  XCS_API_DATABASE_CONNECTION_LIMIT,
+  XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
+  XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
+  XCS_PROVISION_CONTROL_ROLE,
   type DatabaseClient,
 } from '@xcs-protocol/db'
 import {
@@ -66,6 +73,7 @@ const SCHEMA_UID = 'd'.repeat(64)
 const SCHEMA_TRANSACTION_HASH = 'c'.repeat(64)
 const CREDENTIAL_TRANSACTION_HASH = 'e'.repeat(64)
 const CREDENTIAL_OBJECT_ID = 'f'.repeat(64)
+const PUBLIC_LARGE_OBJECT_ID = 8_100_001
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv'
 const FIXTURE_SUBJECTS = [
@@ -113,6 +121,12 @@ let runtimeRoleCleanupAllowed = false
 
 const INDEXER_DATABASE_PASSWORD = 'indexer-integration-password-000001'
 const API_DATABASE_PASSWORD = 'api-integration-password-0000000001'
+const MONITOR_DATABASE_PASSWORD = 'monitor-integration-password-00000001'
+const ROTATED_INDEXER_DATABASE_PASSWORD = 'rotated-indexer-integration-password-01'
+const ROTATED_API_DATABASE_PASSWORD = 'rotated-api-integration-password-00001'
+const ROTATED_MONITOR_DATABASE_PASSWORD = 'rotated-monitor-integration-password-01'
+const RUNTIME_MEMBER_DATABASE_PASSWORD = 'runtime-member-integration-password-001'
+const DOWNSTREAM_ROLE_DATABASE_PASSWORD = 'downstream-role-integration-password-01'
 
 function temporaryDatabaseName(): string {
   const name = `xcs_it_${randomUUID().replaceAll('-', '')}`
@@ -180,7 +194,13 @@ async function closeAndDropTemporaryDatabases(): Promise<void> {
 
     if (runtimeRoleCleanupAllowed) {
       try {
-        await adminClient.sql`DROP ROLE IF EXISTS xcs_indexer, xcs_api`
+        await adminClient.sql`
+          DROP ROLE IF EXISTS
+            xcs_indexer,
+            xcs_api,
+            xcs_monitor,
+            ${adminClient.sql(XCS_PROVISION_CONTROL_ROLE)}
+        `
         runtimeRoleCleanupAllowed = false
       } catch (error) {
         cleanupErrors.push(error)
@@ -812,7 +832,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await closeAndDropTemporaryDatabases()
   }, 60_000)
 
-  it('applies migrations 0000 through 0003 to a fresh database and is migration-idempotent', async () => {
+  it('applies migrations 0000 through 0004 to a fresh database and is migration-idempotent', async () => {
     const database = temporaryDatabases[0]
     if (database === undefined) throw new Error('First temporary database was not created')
 
@@ -830,6 +850,9 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     const [statusTable] = await database.client.sql<{ exists: boolean }[]>`
       SELECT to_regclass('public.indexer_status') IS NOT NULL AS exists
     `
+    const [incidentTable] = await database.client.sql<{ exists: boolean }[]>`
+      SELECT to_regclass('public.indexer_incidents') IS NOT NULL AS exists
+    `
     const discoveryIndexes = await database.client.sql<{ indexName: string }[]>`
       SELECT indexname AS "indexName"
       FROM pg_indexes
@@ -845,9 +868,10 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
 
     const integrityConstraints = await projectionIntegrityConstraintStates(database)
 
-    expect(migrationCount?.count).toBe(4)
+    expect(migrationCount?.count).toBe(5)
     expect(columns.map((row) => row.columnName)).toContain('transaction_root')
     expect(statusTable?.exists).toBe(true)
+    expect(incidentTable?.exists).toBe(true)
     expect(discoveryIndexes.map((row) => row.indexName)).toEqual([
       'credential_generations_stats_idx',
       'schema_events_activity_idx',
@@ -858,6 +882,43 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       [...PROJECTION_INTEGRITY_CONSTRAINT_NAMES].sort(),
     )
     expect(integrityConstraints.every((constraint) => constraint.validated)).toBe(true)
+  })
+
+  it('allows exact restarts but rejects another profile in exclusive database scope', async () => {
+    if (adminDatabaseUrl === undefined) throw new Error('PostgreSQL admin URL is not initialized')
+    const database = await createTemporaryDatabase(adminDatabaseUrl)
+    const candidates = [profile('exclusive-profile-a'), profile('exclusive-profile-b')] as const
+    const repository = new PostgresIndexerRepository(database.client.db, {
+      databaseScope: 'exclusive-profile',
+    })
+
+    const concurrentResults = await Promise.allSettled(
+      candidates.map((candidate) => repository.initializeProfile(candidate)),
+    )
+    expect(concurrentResults.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = concurrentResults.find((result) => result.status === 'rejected')
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'DATABASE_SCOPE_CONFLICT' },
+    })
+
+    const storedProfiles = await database.client.sql<Array<{ profileId: string }>>`
+      SELECT profile_id AS "profileId" FROM network_profiles
+    `
+    expect(storedProfiles).toHaveLength(1)
+    const winningProfile = candidates.find(
+      (candidate) => candidate.profileId === storedProfiles[0]?.profileId,
+    )
+    const losingProfile = candidates.find(
+      (candidate) => candidate.profileId !== storedProfiles[0]?.profileId,
+    )
+    if (winningProfile === undefined || losingProfile === undefined) {
+      throw new Error('Concurrent exclusive-profile result is invalid')
+    }
+    await expect(repository.initializeProfile(winningProfile)).resolves.toBeUndefined()
+    await expect(repository.initializeProfile(losingProfile)).rejects.toMatchObject({
+      code: 'DATABASE_SCOPE_CONFLICT',
+    })
   })
 
   it('fails closed on invalid 0002 history and resumes 0003 validation after replay repair', async () => {
@@ -897,11 +958,28 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     const eventConstraintStates = failedConstraintStates.filter(
       (constraint) => constraint.tableName === 'credential_events',
     )
-    expect(failedMigrationCount?.count).toBe(4)
+    expect(failedMigrationCount?.count).toBe(5)
     expect(generationConstraintStates).toHaveLength(6)
     expect(generationConstraintStates.every((constraint) => !constraint.validated)).toBe(true)
     expect(eventConstraintStates).toHaveLength(5)
     expect(eventConstraintStates.every((constraint) => !constraint.validated)).toBe(true)
+    await expect(
+      provisionRuntimeDatabaseRoles(database.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toThrow('fully migrated PostgreSQL 18 control database')
+    const [controlMarkerAfterFailedValidation] = await database.client.sql<
+      Array<{ exists: boolean }>
+    >`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = ${XCS_PROVISION_CONTROL_ROLE}
+      ) AS exists
+    `
+    expect(controlMarkerAfterFailedValidation?.exists).toBe(false)
 
     await expect(
       database.client.sql`
@@ -1008,15 +1086,93 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     `
   }, 30_000)
 
-  it('provisions idempotent least-privilege indexer and API roles', async () => {
+  it('provisions idempotent least-privilege indexer, API and monitor roles', async () => {
     const database = temporaryDatabases[0]
+    const otherMigratedDatabase = temporaryDatabases[1]
     if (database === undefined) throw new Error('First temporary database was not created')
+    if (otherMigratedDatabase === undefined) {
+      throw new Error('Second temporary database was not created')
+    }
     if (adminClient === undefined) throw new Error('PostgreSQL admin client is not initialized')
+
+    const emptyDatabase = await createTemporaryDatabase(database.url, { applyMigrations: false })
+    await expect(
+      provisionRuntimeDatabaseRoles(emptyDatabase.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(emptyDatabase.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toThrow('fully migrated PostgreSQL 18 control database')
+    const [prematureControlMarker] = await adminClient.sql<Array<{ exists: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = ${XCS_PROVISION_CONTROL_ROLE}
+      ) AS exists
+    `
+    expect(prematureControlMarker?.exists).toBe(false)
+
+    const weakenedConstraintDatabase = await createTemporaryDatabase(database.url)
+    await weakenedConstraintDatabase.client.sql`
+      ALTER TABLE public.credential_events
+        DROP CONSTRAINT credential_events_ledger_index_uint32,
+        ADD CONSTRAINT credential_events_ledger_index_uint32 CHECK (true)
+    `
+    await expect(
+      provisionRuntimeDatabaseRoles(weakenedConstraintDatabase.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(weakenedConstraintDatabase.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toThrow('exact validated projection constraints')
+    const [controlMarkerAfterWeakenedConstraint] = await adminClient.sql<
+      Array<{ exists: boolean }>
+    >`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = ${XCS_PROVISION_CONTROL_ROLE}
+      ) AS exists
+    `
+    expect(controlMarkerAfterWeakenedConstraint?.exists).toBe(false)
+
+    const duplicatedHistoryDatabase = await createTemporaryDatabase(database.url)
+    await duplicatedHistoryDatabase.client.sql`
+      DELETE FROM drizzle.__drizzle_migrations
+      WHERE id = (SELECT max(id) FROM drizzle.__drizzle_migrations)
+    `
+    await duplicatedHistoryDatabase.client.sql`
+      INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+      SELECT hash, created_at
+      FROM drizzle.__drizzle_migrations
+      ORDER BY id
+      LIMIT 1
+    `
+    await expect(
+      provisionRuntimeDatabaseRoles(duplicatedHistoryDatabase.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(duplicatedHistoryDatabase.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toThrow('exact 5-migration database history')
+    const [controlMarkerAfterDuplicatedHistory] = await adminClient.sql<Array<{ exists: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = ${XCS_PROVISION_CONTROL_ROLE}
+      ) AS exists
+    `
+    expect(controlMarkerAfterDuplicatedHistory?.exists).toBe(false)
 
     const preexisting = await adminClient.sql<{ roleName: string }[]>`
       SELECT rolname AS "roleName"
       FROM pg_roles
-      WHERE rolname IN ('xcs_indexer', 'xcs_api')
+      WHERE rolname IN (
+        'xcs_indexer',
+        'xcs_api',
+        'xcs_monitor',
+        ${XCS_PROVISION_CONTROL_ROLE}
+      )
     `
     if (preexisting.length > 0) {
       throw new Error(
@@ -1025,15 +1181,102 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     }
     runtimeRoleCleanupAllowed = true
 
-    await provisionRuntimeDatabaseRoles(database.client, {
-      indexerPassword: INDEXER_DATABASE_PASSWORD,
-      apiPassword: API_DATABASE_PASSWORD,
-    })
+    const driftedPasswordEncryptionUrl = new URL(database.url)
+    driftedPasswordEncryptionUrl.searchParams.set('options', '-c password_encryption=md5')
+    const driftedPasswordEncryptionClient = createDatabaseClient(
+      driftedPasswordEncryptionUrl.toString(),
+    )
+    try {
+      await provisionRuntimeDatabaseRoles(driftedPasswordEncryptionClient, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      })
+    } finally {
+      await driftedPasswordEncryptionClient.close()
+    }
+    const [runtimePasswordState] = await adminClient.sql<Array<{ scramRoles: number }>>`
+      SELECT count(*)::integer AS "scramRoles"
+      FROM pg_authid
+      WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+        AND rolpassword LIKE 'SCRAM-SHA-256$%'
+    `
+    expect(runtimePasswordState?.scramRoles).toBe(3)
+    await expect(
+      provisionRuntimeDatabaseRoles(otherMigratedDatabase.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(otherMigratedDatabase.url).password,
+        indexerPassword: INDEXER_DATABASE_PASSWORD,
+        apiPassword: API_DATABASE_PASSWORD,
+        monitorPassword: MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: '42501' })
+    await database.client.sql`CREATE SCHEMA xcs_hostile_runtime`
+    await database.client.sql`CREATE TABLE xcs_hostile_runtime.secret_rows (value integer)`
+    await database.client.sql`CREATE SEQUENCE xcs_hostile_runtime.secret_sequence`
+    await database.client.sql`
+      CREATE FUNCTION xcs_hostile_runtime.secret_value() RETURNS integer
+      LANGUAGE SQL AS 'SELECT 1'
+    `
+    await database.client.sql`
+      GRANT ALL PRIVILEGES ON SCHEMA xcs_hostile_runtime
+      TO PUBLIC, xcs_indexer, xcs_api, xcs_monitor
+    `
+    await database.client.sql`
+      GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA xcs_hostile_runtime
+      TO PUBLIC, xcs_indexer, xcs_api, xcs_monitor
+    `
+    await database.client.sql`
+      GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA xcs_hostile_runtime
+      TO PUBLIC, xcs_indexer, xcs_api, xcs_monitor
+    `
+    await database.client.sql`
+      GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA xcs_hostile_runtime
+      TO PUBLIC, xcs_indexer, xcs_api, xcs_monitor
+    `
+    await database.client.sql`
+      CREATE TYPE xcs_hostile_runtime.public_enum AS ENUM ('hostile')
+    `
+    await database.client.sql`
+      GRANT USAGE ON TYPE xcs_hostile_runtime.public_enum TO PUBLIC
+    `
+    await database.client.sql`
+      CREATE FOREIGN DATA WRAPPER xcs_hostile_fdw NO HANDLER
+    `
+    await database.client.sql`
+      CREATE SERVER xcs_hostile_server FOREIGN DATA WRAPPER xcs_hostile_fdw
+    `
+    await database.client.sql`
+      GRANT USAGE ON FOREIGN DATA WRAPPER xcs_hostile_fdw TO PUBLIC
+    `
+    await database.client.sql`
+      GRANT USAGE ON FOREIGN SERVER xcs_hostile_server TO PUBLIC
+    `
+    await database.client.sql`SELECT lo_create(${PUBLIC_LARGE_OBJECT_ID}::oid)`
+    await database.client.sql.unsafe(
+      `GRANT SELECT ON LARGE OBJECT ${PUBLIC_LARGE_OBJECT_ID} TO PUBLIC`,
+    )
+    await database.client.sql`REVOKE USAGE ON LANGUAGE plpgsql FROM PUBLIC`
+    await database.client.sql`
+      ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO PUBLIC
+    `
+    await database.client.sql`
+      ALTER DEFAULT PRIVILEGES IN SCHEMA xcs_hostile_runtime
+      GRANT USAGE ON TYPES TO PUBLIC
+    `
     const legacyMemberRole = temporaryLegacyRoleName()
-    await adminClient.sql`CREATE ROLE ${adminClient.sql(legacyMemberRole)} NOLOGIN`
+    await adminClient.sql`
+      CREATE ROLE ${adminClient.sql(legacyMemberRole)}
+      LOGIN PASSWORD 'runtime-member-integration-password-001'
+    `
     createdLegacyRoleNames.add(legacyMemberRole)
     const downstreamRole = temporaryLegacyRoleName()
-    await adminClient.sql`CREATE ROLE ${adminClient.sql(downstreamRole)} NOLOGIN`
+    await adminClient.sql`
+      CREATE ROLE ${adminClient.sql(downstreamRole)}
+      LOGIN PASSWORD 'downstream-role-integration-password-01'
+    `
     createdLegacyRoleNames.add(downstreamRole)
     const intermediateGrantorRole = temporaryLegacyRoleName()
     await adminClient.sql`CREATE ROLE ${adminClient.sql(intermediateGrantorRole)} NOLOGIN`
@@ -1080,11 +1323,222 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         { memberRole: downstreamRole, grantorRole: 'xcs_api', adminOption: false },
       ].sort((left, right) => left.memberRole.localeCompare(right.memberRole)),
     )
+    await adminClient.sql`
+      GRANT CONNECT ON DATABASE ${adminClient.sql(database.name)} TO ${adminClient.sql(downstreamRole)}
+    `
 
+    await database.client.sql`GRANT UPDATE ON TABLE network_profiles TO pg_monitor`
+    await database.client.sql`GRANT pg_write_all_data TO pg_monitor`
+    await expect(
+      provisionRuntimeDatabaseRoles(database.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: ROTATED_INDEXER_DATABASE_PASSWORD,
+        apiPassword: ROTATED_API_DATABASE_PASSWORD,
+        monitorPassword: ROTATED_MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: '42501' })
+    await database.client.sql`REVOKE UPDATE ON TABLE network_profiles FROM pg_monitor CASCADE`
+    await database.client.sql`REVOKE pg_write_all_data FROM pg_monitor CASCADE`
+
+    const runtimeOwnedDatabase = temporaryDatabaseName()
+    await adminClient.sql`
+      CREATE DATABASE ${adminClient.sql(runtimeOwnedDatabase)}
+      OWNER xcs_api TEMPLATE template0 ENCODING 'UTF8'
+    `
+    createdDatabaseNames.add(runtimeOwnedDatabase)
+    await expect(
+      provisionRuntimeDatabaseRoles(database.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: ROTATED_INDEXER_DATABASE_PASSWORD,
+        apiPassword: ROTATED_API_DATABASE_PASSWORD,
+        monitorPassword: ROTATED_MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: '42501' })
+    const quarantinedRoles = await adminClient.sql<
+      Array<{ roleName: string; canLogin: boolean; canCreateDatabase: boolean }>
+    >`
+      SELECT
+        rolname AS "roleName",
+        rolcanlogin AS "canLogin",
+        rolcreatedb AS "canCreateDatabase"
+      FROM pg_roles
+      WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+      ORDER BY rolname
+    `
+    expect(quarantinedRoles).toEqual([
+      { roleName: 'xcs_api', canLogin: false, canCreateDatabase: false },
+      { roleName: 'xcs_indexer', canLogin: false, canCreateDatabase: false },
+      { roleName: 'xcs_monitor', canLogin: false, canCreateDatabase: false },
+    ])
+    const [quarantinedMemberships] = await adminClient.sql<Array<{ count: number }>>`
+      SELECT count(*)::integer AS count
+      FROM pg_auth_members membership
+      JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+      JOIN pg_roles member_role ON member_role.oid = membership.member
+      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+    `
+    expect(quarantinedMemberships?.count).toBe(0)
+    await adminClient.sql`
+      ALTER DATABASE ${adminClient.sql(runtimeOwnedDatabase)} OWNER TO CURRENT_USER
+    `
+
+    const [ownedLargeObject] = await database.client.sql<Array<{ objectId: number }>>`
+      SELECT lo_create(0)::integer AS "objectId"
+    `
+    if (ownedLargeObject === undefined) throw new Error('Could not create ownership-guard fixture')
+    await database.client.sql.unsafe(
+      `ALTER LARGE OBJECT ${ownedLargeObject.objectId} OWNER TO xcs_api`,
+    )
+    await expect(
+      provisionRuntimeDatabaseRoles(database.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: ROTATED_INDEXER_DATABASE_PASSWORD,
+        apiPassword: ROTATED_API_DATABASE_PASSWORD,
+        monitorPassword: ROTATED_MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: '42501' })
+    await database.client.sql.unsafe(
+      `ALTER LARGE OBJECT ${ownedLargeObject.objectId} OWNER TO CURRENT_USER`,
+    )
+    await database.client.sql`SELECT lo_unlink(${ownedLargeObject.objectId}::oid)`
+
+    await database.client.sql`
+      CREATE COLLATION public.xcs_runtime_owned_collation FROM pg_catalog."C"
+    `
+    await database.client.sql`
+      ALTER COLLATION public.xcs_runtime_owned_collation OWNER TO xcs_api
+    `
+    await expect(
+      provisionRuntimeDatabaseRoles(database.client, {
+        clusterScope: 'dedicated',
+        administratorPassword: new URL(database.url).password,
+        indexerPassword: ROTATED_INDEXER_DATABASE_PASSWORD,
+        apiPassword: ROTATED_API_DATABASE_PASSWORD,
+        monitorPassword: ROTATED_MONITOR_DATABASE_PASSWORD,
+      }),
+    ).rejects.toMatchObject({ code: '42501' })
+    await database.client.sql`
+      ALTER COLLATION public.xcs_runtime_owned_collation OWNER TO CURRENT_USER
+    `
+    await database.client.sql`DROP COLLATION public.xcs_runtime_owned_collation`
+
+    // Ownership failures intentionally leave every runtime NOLOGIN. Restore
+    // the original generation before constructing sessions for rotation.
     await provisionRuntimeDatabaseRoles(database.client, {
+      clusterScope: 'dedicated',
+      administratorPassword: new URL(database.url).password,
       indexerPassword: INDEXER_DATABASE_PASSWORD,
       apiPassword: API_DATABASE_PASSWORD,
+      monitorPassword: MONITOR_DATABASE_PASSWORD,
     })
+    await adminClient.sql`GRANT xcs_indexer TO ${adminClient.sql(legacyMemberRole)}`
+    await adminClient.sql`GRANT xcs_api TO ${adminClient.sql(legacyMemberRole)}`
+    await adminClient.sql.begin(async (sql) => {
+      await sql`SET LOCAL ROLE ${sql(intermediateGrantorRole)}`
+      await sql`GRANT pg_read_all_data TO xcs_api WITH ADMIN OPTION`
+    })
+    await adminClient.sql`ALTER ROLE xcs_api CREATEDB`
+    const restoredDelegatingApiClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, 'xcs_api', API_DATABASE_PASSWORD),
+    )
+    try {
+      await restoredDelegatingApiClient.sql`
+        GRANT pg_read_all_data TO ${restoredDelegatingApiClient.sql(downstreamRole)}
+      `
+    } finally {
+      await restoredDelegatingApiClient.close()
+    }
+    await database.client.sql`
+      GRANT UPDATE (issuer) ON TABLE credential_generations TO xcs_indexer
+    `
+    await database.client.sql`
+      GRANT SELECT (rolpassword) ON TABLE pg_catalog.pg_authid TO xcs_api, PUBLIC
+    `
+    await database.client.sql`
+      GRANT SELECT ON TABLE pg_catalog.pg_subscription TO PUBLIC
+    `
+    await database.client.sql`GRANT CREATE ON SCHEMA pg_catalog TO PUBLIC`
+    await database.client.sql`GRANT SELECT ON ALL TABLES IN SCHEMA pg_toast TO PUBLIC`
+    await database.client.sql`GRANT UPDATE ON TABLE information_schema.tables TO PUBLIC`
+    await database.client.sql`
+      GRANT EXECUTE ON FUNCTION pg_catalog.pg_read_file(text) TO PUBLIC
+    `
+    await database.client.sql`
+      GRANT SET ON PARAMETER session_replication_role TO xcs_indexer
+    `
+    await database.client.sql`
+      GRANT ALTER SYSTEM ON PARAMETER work_mem TO xcs_api
+    `
+    await database.client.sql`
+      GRANT CREATE ON TABLESPACE pg_default TO xcs_monitor
+    `
+    await database.client.sql`
+      ALTER DEFAULT PRIVILEGES FOR ROLE xcs_api
+      GRANT SELECT ON TABLES TO ${database.client.sql(downstreamRole)}
+    `
+    await database.client.sql`
+      GRANT EXECUTE ON FUNCTION pg_catalog.pg_advisory_lock(integer, integer) TO xcs_api
+    `
+    await adminClient.sql`
+      GRANT CONNECT ON DATABASE ${adminClient.sql(database.name)} TO ${adminClient.sql(downstreamRole)}
+    `
+
+    const staleApiClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, 'xcs_api', API_DATABASE_PASSWORD),
+    )
+    const staleMemberClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, legacyMemberRole, RUNTIME_MEMBER_DATABASE_PASSWORD),
+    )
+    const staleDelegatedClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, downstreamRole, DOWNSTREAM_ROLE_DATABASE_PASSWORD),
+    )
+    await staleApiClient.sql`
+      SELECT pg_advisory_lock(1480807217, 1)
+    `
+    await staleMemberClient.sql`SET ROLE xcs_api`
+    const [assumedRuntimeRole] = await staleMemberClient.sql<{ currentRole: string }[]>`
+      SELECT current_user AS "currentRole"
+    `
+    expect(assumedRuntimeRole?.currentRole).toBe('xcs_api')
+    await staleDelegatedClient.sql`SET ROLE pg_read_all_data`
+    const [assumedDelegatedRole] = await staleDelegatedClient.sql<{ currentRole: string }[]>`
+      SELECT current_user AS "currentRole"
+    `
+    expect(assumedDelegatedRole?.currentRole).toBe('pg_read_all_data')
+    await provisionRuntimeDatabaseRoles(database.client, {
+      clusterScope: 'dedicated',
+      administratorPassword: new URL(database.url).password,
+      indexerPassword: ROTATED_INDEXER_DATABASE_PASSWORD,
+      apiPassword: ROTATED_API_DATABASE_PASSWORD,
+      monitorPassword: ROTATED_MONITOR_DATABASE_PASSWORD,
+    })
+    try {
+      await expect(staleApiClient.sql`SELECT 1`).rejects.toThrow()
+      await expect(staleMemberClient.sql`SELECT 1`).rejects.toThrow()
+      await expect(staleDelegatedClient.sql`SELECT 1`).rejects.toThrow()
+    } finally {
+      await Promise.allSettled([
+        staleApiClient.close(),
+        staleMemberClient.close(),
+        staleDelegatedClient.close(),
+      ])
+    }
+    await adminClient.sql`
+      REVOKE CONNECT ON DATABASE ${adminClient.sql(database.name)} FROM ${adminClient.sql(downstreamRole)}
+    `
+
+    const oldPasswordClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, 'xcs_api', API_DATABASE_PASSWORD),
+    )
+    try {
+      await expect(oldPasswordClient.sql`SELECT 1`).rejects.toMatchObject({ code: '28P01' })
+    } finally {
+      await oldPasswordClient.close()
+    }
 
     const roleProperties = await adminClient.sql<
       Array<{
@@ -1096,6 +1550,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canReplicate: boolean
         canBypassRls: boolean
         inheritsPrivileges: boolean
+        connectionLimit: number
         configuration: string[] | null
       }>
     >`
@@ -1108,9 +1563,14 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         rolreplication AS "canReplicate",
         rolbypassrls AS "canBypassRls",
         rolinherit AS "inheritsPrivileges",
-        rolconfig AS configuration
+        rolconnlimit AS "connectionLimit",
+        ARRAY(
+          SELECT setting
+          FROM unnest(COALESCE(rolconfig, ARRAY[]::text[])) setting
+          ORDER BY setting
+        ) AS configuration
       FROM pg_roles
-      WHERE rolname IN ('xcs_indexer', 'xcs_api')
+      WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
       ORDER BY rolname
     `
     expect(roleProperties).toEqual([
@@ -1123,7 +1583,12 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canReplicate: false,
         canBypassRls: false,
         inheritsPrivileges: false,
-        configuration: null,
+        connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+        configuration: [
+          'idle_in_transaction_session_timeout=30s',
+          'lock_timeout=15s',
+          'statement_timeout=30s',
+        ],
       },
       {
         roleName: 'xcs_indexer',
@@ -1134,22 +1599,73 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canReplicate: false,
         canBypassRls: false,
         inheritsPrivileges: false,
-        configuration: null,
+        connectionLimit: XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
+        configuration: [
+          'idle_in_transaction_session_timeout=30s',
+          'lock_timeout=30s',
+          'statement_timeout=5min',
+        ],
+      },
+      {
+        roleName: 'xcs_monitor',
+        canLogin: true,
+        isSuperuser: false,
+        canCreateDatabase: false,
+        canCreateRole: false,
+        canReplicate: false,
+        canBypassRls: false,
+        inheritsPrivileges: true,
+        connectionLimit: XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
+        configuration: [
+          'idle_in_transaction_session_timeout=30s',
+          'lock_timeout=10s',
+          'statement_timeout=30s',
+        ],
       },
     ])
-    const [runtimeMemberships] = await adminClient.sql<{ count: number }[]>`
-      SELECT count(*)::integer AS count
+    const runtimeMemberships = await adminClient.sql<
+      Array<{
+        grantedRole: string
+        memberRole: string
+        adminOption: boolean
+        inheritOption: boolean
+        setOption: boolean
+      }>
+    >`
+      SELECT
+        granted_role.rolname AS "grantedRole",
+        member_role.rolname AS "memberRole",
+        membership.admin_option AS "adminOption",
+        membership.inherit_option AS "inheritOption",
+        membership.set_option AS "setOption"
       FROM pg_auth_members membership
       JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
       JOIN pg_roles member_role ON member_role.oid = membership.member
-      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api')
-        OR member_role.rolname IN ('xcs_indexer', 'xcs_api')
+      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+        OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
         OR (
           granted_role.rolname = 'pg_read_all_data'
           AND member_role.rolname = ${downstreamRole}
         )
+      ORDER BY granted_role.rolname, member_role.rolname
     `
-    expect(runtimeMemberships?.count).toBe(0)
+    expect(runtimeMemberships).toEqual([
+      {
+        grantedRole: 'pg_monitor',
+        memberRole: 'xcs_monitor',
+        adminOption: false,
+        inheritOption: true,
+        setOption: false,
+      },
+    ])
+    const [monitorMembership] = await adminClient.sql<
+      Array<{ inheritsMonitor: boolean; canSetMonitor: boolean }>
+    >`
+      SELECT
+        pg_has_role('xcs_monitor', 'pg_monitor', 'USAGE') AS "inheritsMonitor",
+        pg_has_role('xcs_monitor', 'pg_monitor', 'SET') AS "canSetMonitor"
+    `
+    expect(monitorMembership).toEqual({ inheritsMonitor: true, canSetMonitor: false })
     const legacyRoles = await adminClient.sql<{ roleName: string; canLogin: boolean }[]>`
       SELECT rolname AS "roleName", rolcanlogin AS "canLogin"
       FROM pg_roles
@@ -1157,16 +1673,190 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       ORDER BY rolname
     `
     expect(legacyRoles).toEqual(
-      [legacyMemberRole, downstreamRole, intermediateGrantorRole]
-        .sort()
-        .map((roleName) => ({ roleName, canLogin: false })),
+      [
+        { roleName: legacyMemberRole, canLogin: true },
+        { roleName: downstreamRole, canLogin: true },
+        { roleName: intermediateGrantorRole, canLogin: false },
+      ].sort((left, right) => left.roleName.localeCompare(right.roleName)),
     )
 
+    const [privilegeDrift] = await adminClient.sql<
+      Array<{
+        indexerCanRewriteIssuer: boolean
+        indexerCanSetReplicationRole: boolean
+        apiCanAlterSystemWorkMem: boolean
+        monitorCanCreateInDefaultTablespace: boolean
+        apiDefaultAclCount: number
+        publicPasswordColumnAclCount: number
+        publicSubscriptionAclCount: number
+        apiCanCreateInPgCatalog: boolean
+        apiCanUpdateInformationSchema: boolean
+        apiCanReadServerFiles: boolean
+        plpgsqlPublicUsage: boolean
+        publicDefaultAclCount: number
+        publicFdwAclCount: number
+        publicForeignServerAclCount: number
+        publicLargeObjectAclCount: number
+        publicToastAclCount: number
+        publicTypeAclCount: number
+      }>
+    >`
+      SELECT
+        has_column_privilege(
+          'xcs_indexer',
+          'public.credential_generations',
+          'issuer',
+          'UPDATE'
+        ) AS "indexerCanRewriteIssuer",
+        has_parameter_privilege(
+          'xcs_indexer',
+          'session_replication_role',
+          'SET'
+        ) AS "indexerCanSetReplicationRole",
+        has_parameter_privilege(
+          'xcs_api',
+          'work_mem',
+          'ALTER SYSTEM'
+        ) AS "apiCanAlterSystemWorkMem",
+        has_tablespace_privilege(
+          'xcs_monitor',
+          'pg_default',
+          'CREATE'
+        ) AS "monitorCanCreateInDefaultTablespace",
+        (
+          SELECT count(*)::integer
+          FROM pg_default_acl
+          WHERE defaclrole = 'xcs_api'::regrole
+        ) AS "apiDefaultAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_attribute attribute_object
+          CROSS JOIN LATERAL aclexplode(attribute_object.attacl) privilege
+          WHERE attribute_object.attrelid = 'pg_catalog.pg_authid'::regclass
+            AND attribute_object.attname = 'rolpassword'
+            AND privilege.grantee = 0
+        ) AS "publicPasswordColumnAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_class relation
+          CROSS JOIN LATERAL aclexplode(relation.relacl) privilege
+          WHERE relation.oid = 'pg_catalog.pg_subscription'::regclass
+            AND privilege.grantee = 0
+        ) AS "publicSubscriptionAclCount",
+        has_schema_privilege(
+          'xcs_api',
+          'pg_catalog',
+          'CREATE'
+        ) AS "apiCanCreateInPgCatalog",
+        has_table_privilege(
+          'xcs_api',
+          'information_schema.tables',
+          'UPDATE'
+        ) AS "apiCanUpdateInformationSchema",
+        has_function_privilege(
+          'xcs_api',
+          'pg_catalog.pg_read_file(text)',
+          'EXECUTE'
+        ) AS "apiCanReadServerFiles",
+        EXISTS (
+          SELECT 1
+          FROM pg_language language_object
+          CROSS JOIN LATERAL aclexplode(
+            COALESCE(language_object.lanacl, acldefault('l'::"char", language_object.lanowner))
+          ) privilege
+          WHERE language_object.lanname = 'plpgsql'
+            AND privilege.grantee = 0
+            AND privilege.privilege_type = 'USAGE'
+        ) AS "plpgsqlPublicUsage",
+        (
+          SELECT count(*)::integer
+          FROM pg_default_acl default_acl
+          CROSS JOIN LATERAL aclexplode(default_acl.defaclacl) privilege
+          WHERE privilege.grantee = 0
+        ) AS "publicDefaultAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_foreign_data_wrapper wrapper
+          CROSS JOIN LATERAL aclexplode(wrapper.fdwacl) privilege
+          WHERE wrapper.fdwname = 'xcs_hostile_fdw'
+            AND privilege.grantee = 0
+        ) AS "publicFdwAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_foreign_server server_object
+          CROSS JOIN LATERAL aclexplode(server_object.srvacl) privilege
+          WHERE server_object.srvname = 'xcs_hostile_server'
+            AND privilege.grantee = 0
+        ) AS "publicForeignServerAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_largeobject_metadata large_object_metadata
+          CROSS JOIN LATERAL aclexplode(large_object_metadata.lomacl) privilege
+          WHERE large_object_metadata.oid = ${PUBLIC_LARGE_OBJECT_ID}::oid
+            AND privilege.grantee = 0
+        ) AS "publicLargeObjectAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_class relation
+          JOIN pg_namespace namespace_object ON namespace_object.oid = relation.relnamespace
+          CROSS JOIN LATERAL aclexplode(relation.relacl) privilege
+          WHERE namespace_object.nspname = 'pg_toast'
+            AND privilege.grantee = 0
+        ) AS "publicToastAclCount",
+        (
+          SELECT count(*)::integer
+          FROM pg_type type_object
+          JOIN pg_namespace namespace_object ON namespace_object.oid = type_object.typnamespace
+          CROSS JOIN LATERAL aclexplode(type_object.typacl) privilege
+          WHERE namespace_object.nspname = 'xcs_hostile_runtime'
+            AND type_object.typname = 'public_enum'
+            AND privilege.grantee = 0
+        ) AS "publicTypeAclCount"
+    `
+    expect(privilegeDrift).toEqual({
+      indexerCanRewriteIssuer: false,
+      indexerCanSetReplicationRole: false,
+      apiCanAlterSystemWorkMem: false,
+      monitorCanCreateInDefaultTablespace: false,
+      apiDefaultAclCount: 0,
+      publicPasswordColumnAclCount: 0,
+      publicSubscriptionAclCount: 0,
+      apiCanCreateInPgCatalog: false,
+      apiCanUpdateInformationSchema: false,
+      apiCanReadServerFiles: false,
+      plpgsqlPublicUsage: true,
+      publicDefaultAclCount: 0,
+      publicFdwAclCount: 0,
+      publicForeignServerAclCount: 0,
+      publicLargeObjectAclCount: 0,
+      publicToastAclCount: 0,
+      publicTypeAclCount: 0,
+    })
+
+    if (adminDatabaseUrl === undefined) throw new Error('PostgreSQL admin URL is not initialized')
+    for (const [roleName, password] of [
+      ['xcs_indexer', ROTATED_INDEXER_DATABASE_PASSWORD],
+      ['xcs_api', ROTATED_API_DATABASE_PASSWORD],
+      ['xcs_monitor', ROTATED_MONITOR_DATABASE_PASSWORD],
+    ] as const) {
+      const foreignDatabaseClient = createDatabaseClient(
+        runtimeDatabaseUrl(adminDatabaseUrl, roleName, password),
+      )
+      try {
+        await expectPermissionDenied(foreignDatabaseClient.sql`SELECT 1`)
+      } finally {
+        await foreignDatabaseClient.close()
+      }
+    }
+
     const indexerClient = createDatabaseClient(
-      runtimeDatabaseUrl(database.url, 'xcs_indexer', INDEXER_DATABASE_PASSWORD),
+      runtimeDatabaseUrl(database.url, 'xcs_indexer', ROTATED_INDEXER_DATABASE_PASSWORD),
     )
     const apiClient = createDatabaseClient(
-      runtimeDatabaseUrl(database.url, 'xcs_api', API_DATABASE_PASSWORD),
+      runtimeDatabaseUrl(database.url, 'xcs_api', ROTATED_API_DATABASE_PASSWORD),
+    )
+    const monitorClient = createDatabaseClient(
+      runtimeDatabaseUrl(database.url, 'xcs_monitor', ROTATED_MONITOR_DATABASE_PASSWORD),
     )
     try {
       const permissionsProfile = profile('runtime-role-permissions')
@@ -1186,7 +1876,16 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
           readyStatus(activation),
         ),
       ).resolves.toBe('inserted')
-      await repository.releaseLease(lease)
+      await repository.haltIndexer(
+        lease,
+        {
+          primarySourceTip: activation.ledgerIndex,
+          secondarySourceTip: activation.ledgerIndex,
+          lastAgreedLedgerIndex: activation.ledgerIndex,
+          lastAgreedLedgerHash: activation.ledgerHash,
+        },
+        'OPERATOR_TEST_HALT',
+      )
 
       const [projectionRead] = await apiClient.sql<{ count: number }[]>`
         SELECT count(*)::integer AS count
@@ -1194,6 +1893,15 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         WHERE profile_id = ${permissionsProfile.profileId}
       `
       expect(projectionRead?.count).toBe(1)
+      const [incidentRead] = await apiClient.sql<Array<{ writerEpoch: string; errorCode: string }>>`
+        SELECT writer_epoch::text AS "writerEpoch", error_code AS "errorCode"
+        FROM indexer_incidents
+        WHERE profile_id = ${permissionsProfile.profileId}
+      `
+      expect(incidentRead).toEqual({
+        writerEpoch: String(lease.epoch),
+        errorCode: 'OPERATOR_TEST_HALT',
+      })
 
       const [operationalRead] = await apiClient.sql<
         Array<{
@@ -1215,21 +1923,153 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       expect(Number(operationalRead?.maxConnections)).toBeGreaterThan(0)
       expect(Number(operationalRead?.logicalSizeBytes)).toBeGreaterThan(0)
 
-      await expect(
+      const [monitorRead] = await monitorClient.sql<
+        Array<{ databaseName: string; logicalSizeBytes: string }>
+      >`
+        SELECT
+          datname AS "databaseName",
+          pg_database_size(datname)::text AS "logicalSizeBytes"
+        FROM pg_stat_database
+        WHERE datname = current_database()
+      `
+      expect(monitorRead?.databaseName).toBe(new URL(database.url).pathname.slice(1))
+      expect(Number(monitorRead?.logicalSizeBytes)).toBeGreaterThan(0)
+      await expectPermissionDenied(monitorClient.sql`SELECT * FROM network_profiles`)
+      await expectPermissionDenied(
+        monitorClient.sql`SELECT lo_from_bytea(0::oid, decode('00', 'hex'))`,
+      )
+      await expectPermissionDenied(apiClient.sql`SELECT pg_advisory_xact_lock(1::bigint)`)
+      await expectPermissionDenied(apiClient.sql`SELECT pg_advisory_lock(1::bigint)`)
+      await expectPermissionDenied(apiClient.sql`SELECT pg_advisory_xact_lock(1, 1)`)
+      await expectPermissionDenied(monitorClient.sql`SELECT pg_advisory_xact_lock(1::bigint)`)
+      await expectPermissionDenied(
+        apiClient.sql`SELECT rolpassword FROM pg_catalog.pg_authid LIMIT 1`,
+      )
+      await expectPermissionDenied(
+        apiClient.sql`SELECT subconninfo FROM pg_catalog.pg_subscription LIMIT 1`,
+      )
+      await expectPermissionDenied(
+        apiClient.sql`
+          SELECT pg_logical_emit_message(false, 'xcs-test', 'payload', false)
+        `,
+      )
+      await expectPermissionDenied(apiClient.sql`SELECT pg_notify('xcs_test', 'payload')`)
+      await expectPermissionDenied(
+        monitorClient.sql`
+          INSERT INTO indexer_incidents (profile_id, writer_epoch, error_code)
+          VALUES (${permissionsProfile.profileId}, 998, 'FORBIDDEN_MONITOR_WRITE')
+        `,
+      )
+      await expectPermissionDenied(monitorClient.sql`SELECT * FROM xcs_hostile_runtime.secret_rows`)
+      await expectPermissionDenied(apiClient.sql`SELECT * FROM xcs_hostile_runtime.secret_rows`)
+      await expectPermissionDenied(indexerClient.sql`SELECT * FROM xcs_hostile_runtime.secret_rows`)
+      await expectPermissionDenied(
+        apiClient.sql`SELECT nextval('xcs_hostile_runtime.secret_sequence')`,
+      )
+      await expectPermissionDenied(apiClient.sql`SELECT xcs_hostile_runtime.secret_value()`)
+
+      await expectPermissionDenied(
         indexerClient.sql`
           UPDATE ledger_checkpoints
-          SET close_time = 4294967296
+          SET close_time = 4294967295
           WHERE profile_id = ${permissionsProfile.profileId}
         `,
-      ).rejects.toMatchObject({
-        code: '23514',
-        constraint_name: 'ledger_checkpoints_close_time_uint32',
-      })
+      )
+      await expectPermissionDenied(
+        indexerClient.sql`
+          UPDATE schemas
+          SET name = 'forbidden rewrite'
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+      )
+      await expectPermissionDenied(
+        indexerClient.sql`
+          UPDATE credential_events
+          SET event_type = 'deleted'
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+      )
+
+      await indexerClient.sql`
+        INSERT INTO schema_events (
+          profile_id, transaction_hash, ledger_index, ledger_hash, transaction_index,
+          publisher, status, schema_uid, memo_json
+        ) VALUES (
+          ${permissionsProfile.profileId}, ${SCHEMA_TRANSACTION_HASH},
+          ${ACTIVATION_LEDGER_INDEX}, ${ACTIVATION_LEDGER_HASH}, 1,
+          ${ISSUER}, 'accepted', ${SCHEMA_UID}, ${JSON.stringify(schemaDefinition)}::jsonb
+        )
+      `
+      await indexerClient.sql`
+        INSERT INTO schemas (
+          profile_id, schema_uid, publisher, name, description, definition,
+          resolved_definition, registration_transaction_hash, ledger_index, transaction_index
+        ) VALUES (
+          ${permissionsProfile.profileId}, ${SCHEMA_UID}, ${ISSUER},
+          ${schemaDefinition.name}, ${schemaDefinition.description},
+          ${JSON.stringify(schemaDefinition)}::jsonb,
+          ${JSON.stringify({ definition: schemaDefinition, fields: schemaDefinition.fields, lineage: [] })}::jsonb,
+          ${SCHEMA_TRANSACTION_HASH}, ${ACTIVATION_LEDGER_INDEX}, 1
+        )
+      `
+      await indexerClient.sql`
+        INSERT INTO credential_generations (
+          profile_id, generation_id, ledger_object_id, issuer, subject, schema_uid,
+          uri_hex, accepted, created_ledger_index, created_transaction_index,
+          last_ledger_index
+        ) VALUES (
+          ${permissionsProfile.profileId}, ${CREDENTIAL_TRANSACTION_HASH},
+          ${CREDENTIAL_OBJECT_ID}, ${ISSUER}, ${SUBJECT}, ${SCHEMA_UID},
+          'ABCD', false, ${ACTIVATION_LEDGER_INDEX}, 2, ${ACTIVATION_LEDGER_INDEX}
+        )
+      `
+      await expect(
+        indexerClient.sql`
+          UPDATE credential_generations
+          SET accepted = true,
+              last_ledger_index = ${ACTIVATION_LEDGER_INDEX + 1},
+              updated_at = CURRENT_TIMESTAMP
+          WHERE profile_id = ${permissionsProfile.profileId}
+            AND generation_id = ${CREDENTIAL_TRANSACTION_HASH}
+        `,
+      ).resolves.toBeDefined()
+      for (const forbiddenUpdate of [
+        indexerClient.sql`
+          UPDATE credential_generations
+          SET issuer = ${SUBJECT}
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+        indexerClient.sql`
+          UPDATE credential_generations
+          SET uri_hex = 'DCBA'
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+        indexerClient.sql`
+          UPDATE credential_generations
+          SET created_ledger_index = ${ACTIVATION_LEDGER_INDEX + 1}
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+      ]) {
+        await expectPermissionDenied(forbiddenUpdate)
+      }
 
       await expectPermissionDenied(
         apiClient.sql`
           UPDATE network_profiles
           SET enabled = false
+          WHERE profile_id = ${permissionsProfile.profileId}
+        `,
+      )
+      await expectPermissionDenied(
+        apiClient.sql`
+          INSERT INTO indexer_incidents (profile_id, writer_epoch, error_code)
+          VALUES (${permissionsProfile.profileId}, 999, 'FORBIDDEN_API_WRITE')
+        `,
+      )
+      await expectPermissionDenied(
+        indexerClient.sql`
+          UPDATE indexer_incidents
+          SET error_code = 'FORBIDDEN_INDEXER_UPDATE'
           WHERE profile_id = ${permissionsProfile.profileId}
         `,
       )
@@ -1277,9 +2117,9 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       await expectPermissionDenied(apiClient.sql`CREATE TABLE forbidden_api (id integer)`)
       await expectPermissionDenied(indexerClient.sql`CREATE TABLE forbidden_indexer (id integer)`)
     } finally {
-      await Promise.allSettled([indexerClient.close(), apiClient.close()])
+      await Promise.allSettled([indexerClient.close(), apiClient.close(), monitorClient.close()])
     }
-  })
+  }, 120_000)
 
   it('enforces NULL-safe agreed-ledger, ready and writer/lease shapes', async () => {
     const database = temporaryDatabases[0]
@@ -1368,6 +2208,15 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await expect(
       releaseIndexerLease(database.client.db, first, { now: takeoverAt }),
     ).rejects.toMatchObject({ code: 'INDEXER_LEASE_LOST' })
+    await expect(
+      haltIndexer(database.client.db, first, {}, 'STALE_WRITER_HALT', { now: takeoverAt }),
+    ).rejects.toMatchObject({ code: 'INDEXER_LEASE_LOST' })
+    expect(
+      await database.client.db
+        .select()
+        .from(indexerIncidents)
+        .where(eq(indexerIncidents.profileId, fencedProfile.profileId)),
+    ).toEqual([])
 
     const activation = ledger(ACTIVATION_LEDGER_INDEX)
     await expect(
@@ -1393,6 +2242,85 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         readyStatus(activation),
       ),
     ).resolves.toBe('inserted')
+  })
+
+  it('starts a renewed lease after a blocking row lock is acquired', async () => {
+    const database = temporaryDatabases[0]
+    if (database === undefined) throw new Error('First temporary database was not created')
+    const blockedProfile = profile('blocked-lease-renewal')
+    const repository = new PostgresIndexerRepository(database.client.db)
+    await repository.initializeProfile(blockedProfile)
+    const token = await repository.acquireLease(
+      blockedProfile.profileId,
+      'blocked-renewal-writer',
+      300_000,
+    )
+
+    const blockingClient = createDatabaseClient(database.url)
+    let markLocked: (() => void) | undefined
+    const rowLocked = new Promise<void>((resolve) => {
+      markLocked = resolve
+    })
+    try {
+      const blocker = blockingClient.sql.begin(async (sql) => {
+        await sql`
+          SELECT profile_id
+          FROM indexer_status
+          WHERE profile_id = ${blockedProfile.profileId}
+          FOR UPDATE
+        `
+        markLocked?.()
+        await sql`SELECT pg_sleep(2)`
+      })
+      await rowLocked
+
+      const renewalStartedAt = Date.now()
+      const renewal = renewIndexerLease(database.client.db, token, {
+        leaseDurationMs: 10_000,
+      })
+      await blocker
+      const renewed = await renewal
+
+      expect(Date.now() - renewalStartedAt).toBeGreaterThanOrEqual(1_800)
+      expect(renewed.leaseExpiresAt.getTime() - Date.now()).toBeGreaterThan(9_000)
+    } finally {
+      await blockingClient.close()
+    }
+  }, 15_000)
+
+  it('rolls back the halted status when the durable incident insert fails', async () => {
+    const database = temporaryDatabases[0]
+    if (database === undefined) throw new Error('First temporary database was not created')
+    const atomicProfile = profile('atomic-halt')
+    const repository = new PostgresIndexerRepository(database.client.db)
+    await repository.initializeProfile(atomicProfile)
+    const token = await repository.acquireLease(
+      atomicProfile.profileId,
+      'atomic-halt-writer',
+      300_000,
+    )
+
+    await database.client.db.insert(indexerIncidents).values({
+      profileId: atomicProfile.profileId,
+      writerEpoch: token.epoch,
+      errorCode: 'PREEXISTING_INCIDENT',
+    })
+
+    await expect(repository.haltIndexer(token, {}, 'SOURCE_DIVERGENCE')).rejects.toMatchObject({
+      code: '23505',
+    })
+
+    const [status] = await database.client.db
+      .select()
+      .from(indexerStatuses)
+      .where(eq(indexerStatuses.profileId, atomicProfile.profileId))
+      .limit(1)
+    expect(status).toMatchObject({
+      state: 'starting',
+      writerId: token.writerId,
+      writerEpoch: token.epoch,
+      errorCode: null,
+    })
   })
 
   it('rolls back all projection writes when a later mutation fails', async () => {
@@ -1533,6 +2461,12 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         WHERE profile_id = ${replayProfile.profileId}
       `
     }
+
+    await firstDatabase.client.db.insert(indexerIncidents).values({
+      profileId: replayProfile.profileId,
+      writerEpoch: 99,
+      errorCode: 'DIGEST_EXCLUDED_HALT',
+    })
 
     const [firstDigest, secondDigest] = await Promise.all([
       computeProjectionDigest(firstDatabase.client.db, replayProfile.profileId),

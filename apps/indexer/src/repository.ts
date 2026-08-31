@@ -8,6 +8,7 @@ import {
   networkProfiles,
   releaseIndexerLease,
   renewIndexerLease,
+  runSerializableTransaction,
   schemaEvents,
   schemas,
   updateIndexerStatus as updateDatabaseIndexerStatus,
@@ -16,12 +17,13 @@ import {
   type XcsDatabase,
 } from '@xcs-protocol/db'
 import { canonicalize, type JsonValue } from '@xcs-protocol/core'
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 import { assertLedgerContinuity } from './continuity.js'
 import type {
   Checkpoint,
   CredentialMutation,
+  DatabaseScope,
   IndexerHaltStatus,
   IndexerRepository,
   IndexerStatusUpdate,
@@ -40,6 +42,19 @@ export class IndexerRepositoryError extends Error {
     super(message)
     this.name = 'IndexerRepositoryError'
   }
+}
+
+export class IndexerDatabaseScopeError extends Error {
+  readonly code = 'DATABASE_SCOPE_CONFLICT'
+
+  constructor(profileId: string) {
+    super(`Exclusive database scope for ${profileId} rejects a database containing another profile`)
+    this.name = 'IndexerDatabaseScopeError'
+  }
+}
+
+export interface PostgresIndexerRepositoryOptions {
+  databaseScope?: DatabaseScope
 }
 
 type StoredNetworkProfile = Pick<
@@ -104,13 +119,9 @@ function plainDatabaseJson(value: unknown): JsonValue {
 }
 
 async function ensureNetworkProfile(database: XcsDatabase, profile: NetworkProfile): Promise<void> {
-  const [storedProfile] = await database
-    .select()
-    .from(networkProfiles)
-    .where(eq(networkProfiles.profileId, profile.profileId))
-    .limit(1)
-  if (storedProfile === undefined) {
-    await database.insert(networkProfiles).values({
+  await database
+    .insert(networkProfiles)
+    .values({
       profileId: profile.profileId,
       xcsVersion: profile.xcsVersion,
       networkId: profile.networkId,
@@ -120,17 +131,34 @@ async function ensureNetworkProfile(database: XcsDatabase, profile: NetworkProfi
       activationLedgerIndex: profile.activationLedgerIndex,
       activationLedgerHash: profile.activationLedgerHash.toLowerCase(),
     })
-  } else {
-    assertStoredProfileMatches(storedProfile, profile)
-  }
+    .onConflictDoNothing({ target: networkProfiles.profileId })
+  const [storedProfile] = await database
+    .select()
+    .from(networkProfiles)
+    .where(eq(networkProfiles.profileId, profile.profileId))
+    .limit(1)
+  if (storedProfile === undefined) throw new Error('Network profile insert returned no row')
+  assertStoredProfileMatches(storedProfile, profile)
 }
 
 export class PostgresIndexerRepository implements IndexerRepository {
-  constructor(private readonly db: XcsDatabase) {}
+  private readonly databaseScope: DatabaseScope
+
+  constructor(
+    private readonly db: XcsDatabase,
+    options: PostgresIndexerRepositoryOptions = {},
+  ) {
+    this.databaseScope = options.databaseScope ?? 'shared'
+  }
 
   async initializeProfile(profile: NetworkProfile): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${profile.profileId}, 0))`)
+    await runSerializableTransaction(this.db, async (tx) => {
+      if (this.databaseScope === 'exclusive-profile') {
+        const rows = await tx.select({ profileId: networkProfiles.profileId }).from(networkProfiles)
+        if (rows.some((row) => row.profileId !== profile.profileId)) {
+          throw new IndexerDatabaseScopeError(profile.profileId)
+        }
+      }
       await ensureNetworkProfile(tx as unknown as XcsDatabase, profile)
     })
   }
@@ -228,9 +256,6 @@ export class PostgresIndexerRepository implements IndexerRepository {
     }
     return this.db.transaction(async (tx) => {
       await lockActiveIndexerLease(tx as unknown as XcsDatabase, token)
-      // A per-profile transaction lock prevents two replicas from projecting
-      // different ledgers concurrently while still allowing different networks.
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${profile.profileId}, 0))`)
 
       await ensureNetworkProfile(tx as unknown as XcsDatabase, profile)
 

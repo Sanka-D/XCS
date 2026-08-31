@@ -11,6 +11,7 @@ import {
   type NetworkProfile,
   type SchemaDefinition,
 } from '@xcs-protocol/core'
+import { hashes, Wallet } from 'xrpl'
 
 const API_PREFIX = '/__e2e-api'
 const PROFILE_ID = 'xrpl-testnet-xcs-browser-e2e'
@@ -58,6 +59,22 @@ const CANONICAL_PAYLOAD = canonicalize({
   claims: CLAIMS,
 } as JsonValue)
 const CREDENTIAL_URI = createHttpsPayloadUri(PAYLOAD_URL, CANONICAL_PAYLOAD)
+const RECOVERY_OPERATION_ID = 'browser-recovery-after-reload'
+const RECOVERY_LAST_LEDGER_SEQUENCE = 100_021
+const RECOVERY_SIGNER = Wallet.fromEntropy(
+  Uint8Array.from({ length: 16 }, (_, index) => index + 1),
+  { masterAddress: ISSUER },
+)
+const RECOVERY_TX_BLOB = RECOVERY_SIGNER.sign({
+  TransactionType: 'Payment',
+  Account: ISSUER,
+  Destination: SUBJECT,
+  Amount: '1',
+  Fee: '12',
+  Sequence: 1,
+  LastLedgerSequence: RECOVERY_LAST_LEDGER_SEQUENCE,
+}).tx_blob
+const RECOVERY_TX_HASH = hashes.hashSignedTx(RECOVERY_TX_BLOB).toUpperCase()
 const PROFILE: NetworkProfile = {
   profileId: PROFILE_ID,
   xcsVersion: '0.1',
@@ -506,6 +523,94 @@ async function browserOperationPersistence(page: Page): Promise<
   )
 }
 
+async function seedSignedRecoveryOperation(
+  page: Page,
+  overrides: { readonly lastLedgerSequence?: number; readonly txHash?: string } = {},
+): Promise<void> {
+  const lastLedgerSequence = overrides.lastLedgerSequence ?? RECOVERY_LAST_LEDGER_SEQUENCE
+  const txHash = overrides.txHash ?? RECOVERY_TX_HASH
+  await page.goto('/operations')
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await page.evaluate(
+    ({ operationId, txBlob, txHash, lastLedgerSequence, profileId, account }) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('xcs-wallet-journal', 1)
+        request.onupgradeneeded = () => {
+          if (!request.result.objectStoreNames.contains('operations')) {
+            request.result.createObjectStore('operations', { keyPath: 'operationId' })
+          }
+        }
+        request.onerror = () => reject(request.error ?? new Error('INDEXED_DB_OPEN_FAILED'))
+        request.onsuccess = () => {
+          const database = request.result
+          const transaction = database.transaction('operations', 'readwrite')
+          transaction.objectStore('operations').put({
+            operationId,
+            account,
+            profileId,
+            networkId: 1,
+            transactionType: 'Payment',
+            createdAt: '2026-08-30T12:00:00.000Z',
+            updatedAt: '2026-08-30T12:00:00.000Z',
+            stage: 'signed',
+            txBlob,
+            txHash,
+            lastLedgerSequence,
+          })
+          transaction.oncomplete = () => {
+            database.close()
+            resolve()
+          }
+          transaction.onerror = () =>
+            reject(transaction.error ?? new Error('INDEXED_DB_WRITE_FAILED'))
+          transaction.onabort = () =>
+            reject(transaction.error ?? new Error('INDEXED_DB_WRITE_ABORTED'))
+        }
+      }),
+    {
+      operationId: RECOVERY_OPERATION_ID,
+      txBlob: RECOVERY_TX_BLOB,
+      txHash,
+      lastLedgerSequence,
+      profileId: PROFILE_ID,
+      account: ISSUER,
+    },
+  )
+  await page.reload()
+  await page.locator('[data-client-ready="true"]').waitFor()
+}
+
+async function browserStoredRecoveryOperation(page: Page): Promise<{
+  stage: unknown
+  txBlob: unknown
+  txHash: unknown
+  lastLedgerSequence: unknown
+}> {
+  return page.evaluate(
+    (operationId) =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('xcs-wallet-journal', 1)
+        request.onerror = () => reject(request.error ?? new Error('INDEXED_DB_OPEN_FAILED'))
+        request.onsuccess = () => {
+          const database = request.result
+          const transaction = database.transaction('operations', 'readonly')
+          const row = transaction.objectStore('operations').get(operationId)
+          row.onerror = () => reject(row.error ?? new Error('INDEXED_DB_READ_FAILED'))
+          row.onsuccess = () => {
+            const operation = row.result as Record<string, unknown>
+            resolve({
+              stage: operation.stage,
+              txBlob: operation.txBlob,
+              txHash: operation.txHash,
+              lastLedgerSequence: operation.lastLedgerSequence,
+            })
+          }
+        }
+      }),
+    RECOVERY_OPERATION_ID,
+  )
+}
+
 function consumeExpectedReadiness503(page: Page): void {
   const errors = browserErrors.get(page) ?? []
   const expected =
@@ -613,6 +718,86 @@ test('does not persist or submit a signature when readiness disappears in the wa
   expect(await browserOperationPersistence(page)).toEqual([
     { stage: 'failed', hasTxBlob: false, hasTxHash: false },
   ])
+})
+
+test('resumes a signed operation after reload without asking the wallet to sign again', async ({
+  page,
+}) => {
+  let readinessRequests = 0
+  await installApiMock(page, {
+    signingReadiness: () => {
+      readinessRequests += 1
+      return 'ready'
+    },
+  })
+  await seedSignedRecoveryOperation(page)
+
+  const operation = page.getByTestId('operation-card').filter({ hasText: RECOVERY_TX_HASH }).first()
+  await expect(operation).toContainText('signed')
+  await operation.getByRole('button', { name: /Reprendre|Resume/u }).click()
+
+  await expect(operation).toContainText('validated')
+  await expect(operation).toContainText('tesSUCCESS')
+  expect(readinessRequests).toBe(1)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 1 })
+  expect(await browserOperationPersistence(page)).toEqual([
+    { stage: 'validated', hasTxBlob: false, hasTxHash: true },
+  ])
+})
+
+test('keeps a signed recovery operation when readiness is unavailable after reload', async ({
+  page,
+}) => {
+  let readinessRequests = 0
+  await installApiMock(page, {
+    signingReadiness: () => {
+      readinessRequests += 1
+      return 'unavailable'
+    },
+  })
+  await seedSignedRecoveryOperation(page)
+
+  const operation = page.getByTestId('operation-card').filter({ hasText: RECOVERY_TX_HASH }).first()
+  await expect(operation).toContainText('signed')
+  await operation.getByRole('button', { name: /Reprendre|Resume/u }).click()
+
+  await expect(page.locator('.error-box')).toContainText('INDEXER_SIGNING_READINESS_UNAVAILABLE')
+  consumeExpectedReadiness503(page)
+  expect(readinessRequests).toBe(1)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+  expect(await browserStoredRecoveryOperation(page)).toEqual({
+    stage: 'signed',
+    txBlob: RECOVERY_TX_BLOB,
+    txHash: RECOVERY_TX_HASH,
+    lastLedgerSequence: RECOVERY_LAST_LEDGER_SEQUENCE,
+  })
+})
+
+test('rejects inconsistent signed recovery metadata without losing the blob', async ({ page }) => {
+  let readinessRequests = 0
+  await installApiMock(page, {
+    signingReadiness: () => {
+      readinessRequests += 1
+      return 'ready'
+    },
+  })
+  await seedSignedRecoveryOperation(page, { lastLedgerSequence: 1 })
+
+  const operation = page.getByTestId('operation-card').filter({ hasText: RECOVERY_TX_HASH }).first()
+  await expect(operation).toContainText('signed')
+  await operation.getByRole('button', { name: /Reprendre|Resume/u }).click()
+
+  await expect(page.locator('.error-box')).toContainText(
+    'OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_MISMATCH',
+  )
+  expect(readinessRequests).toBe(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+  expect(await browserStoredRecoveryOperation(page)).toEqual({
+    stage: 'signed',
+    txBlob: RECOVERY_TX_BLOB,
+    txHash: RECOVERY_TX_HASH,
+    lastLedgerSequence: 1,
+  })
 })
 
 test('issues, reconfirms, then accepts a credential with exact indexed evidence', async ({

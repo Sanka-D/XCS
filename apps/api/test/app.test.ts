@@ -2,8 +2,10 @@ import {
   canonicalize,
   computeSchemaUid,
   encodeUtf8,
+  MAX_SCHEMA_CATALOG_ENTRIES,
   sha256Hex,
   validateSchema,
+  validateSchemaCatalogBundle,
   type JsonValue,
 } from '@xcs-protocol/core'
 import type {
@@ -153,6 +155,112 @@ const registeredSchemaEvidence: SchemaProjectionEvidence = {
   schema: registeredSchemaRow,
   registration: acceptedSchemaRegistration,
 }
+
+function schemaCatalogFixture() {
+  const parentDefinition = {
+    xcsVersion: '0.1' as const,
+    name: 'Course base',
+    description: 'Base course evidence.',
+    fields: { courseId: { type: 'string' as const } },
+  }
+  const parentUid = computeSchemaUid({
+    schema: parentDefinition,
+    networkId: network.networkId,
+    ledgerHash: checkpoint.ledgerHash,
+    ledgerIndex: checkpoint.ledgerIndex,
+    transactionIndex: 0,
+    publisher: ISSUER,
+  })
+  const supersededDefinition = {
+    xcsVersion: '0.1' as const,
+    name: 'Legacy completion',
+    description: 'Legacy completion evidence.',
+    fields: { legacyId: { type: 'string' as const } },
+  }
+  const supersededUid = computeSchemaUid({
+    schema: supersededDefinition,
+    networkId: network.networkId,
+    ledgerHash: checkpoint.ledgerHash,
+    ledgerIndex: checkpoint.ledgerIndex,
+    transactionIndex: 1,
+    publisher: ISSUER,
+  })
+  const targetDefinition = {
+    xcsVersion: '0.1' as const,
+    name: 'Course completion v2',
+    description: 'Current completion evidence.',
+    extends: parentUid,
+    supersedes: supersededUid,
+    fields: { grade: { type: 'uint' as const } },
+  }
+  const targetUid = computeSchemaUid({
+    schema: targetDefinition,
+    networkId: network.networkId,
+    ledgerHash: checkpoint.ledgerHash,
+    ledgerIndex: checkpoint.ledgerIndex,
+    transactionIndex: 2,
+    publisher: ISSUER,
+  })
+
+  const evidence = [
+    {
+      uid: parentUid,
+      definition: parentDefinition,
+      transactionIndex: 0,
+      transactionHash: '10'.repeat(32),
+      fields: parentDefinition.fields,
+      lineage: [],
+    },
+    {
+      uid: supersededUid,
+      definition: supersededDefinition,
+      transactionIndex: 1,
+      transactionHash: '20'.repeat(32),
+      fields: supersededDefinition.fields,
+      lineage: [],
+    },
+    {
+      uid: targetUid,
+      definition: targetDefinition,
+      transactionIndex: 2,
+      transactionHash: '30'.repeat(32),
+      fields: { ...parentDefinition.fields, ...targetDefinition.fields },
+      lineage: [parentUid],
+    },
+  ].map(({ uid, definition, transactionIndex, transactionHash, fields, lineage }) => {
+    const normalizedDefinition = validateSchema(definition)
+    const registration: SchemaEventRow = {
+      profileId: network.profileId,
+      transactionHash,
+      ledgerIndex: checkpoint.ledgerIndex,
+      ledgerHash: checkpoint.ledgerHash,
+      transactionIndex,
+      publisher: ISSUER,
+      status: 'accepted',
+      reasonCode: null,
+      schemaUid: uid,
+      memoJson: normalizedDefinition,
+      recordedAt: NOW,
+    }
+    const schema: SchemaRow = {
+      profileId: network.profileId,
+      schemaUid: uid,
+      publisher: ISSUER,
+      name: normalizedDefinition.name,
+      description: normalizedDefinition.description,
+      parentUid: normalizedDefinition.extends ?? null,
+      supersedesUid: normalizedDefinition.supersedes ?? null,
+      definition: { ...normalizedDefinition },
+      resolvedDefinition: { definition: { ...normalizedDefinition }, fields, lineage },
+      registrationTransactionHash: transactionHash,
+      ledgerIndex: checkpoint.ledgerIndex,
+      transactionIndex,
+      registeredAt: NOW,
+    }
+    return { schema, registration }
+  })
+  return { parentUid, supersededUid, targetUid, target: evidence[2]!.schema, evidence }
+}
 function publicSchemaSearchFixture() {
   return {
     schemaUid: registeredSchemaRow.schemaUid,
@@ -196,6 +304,9 @@ class RouteRepository implements ApiRepository {
     return undefined
   }
   async getSchemaProjectionEvidence(): Promise<SchemaProjectionEvidence[]> {
+    return []
+  }
+  async getSchemaCatalogEvidence(): Promise<SchemaProjectionEvidence[]> {
     return []
   }
   async getSchemaRegistrationByTransaction(
@@ -333,10 +444,12 @@ describe('read API', () => {
 
   it('keeps operational metrics absent unless explicitly configured', async () => {
     const instance = await app()
-    const response = await instance.inject({ method: 'GET', url: '/internal/metrics' })
-
-    expect(response.statusCode).toBe(404)
+    for (const url of ['/internal/metrics', '/internal/metrics/prometheus']) {
+      const response = await instance.inject({ method: 'GET', url })
+      expect(response.statusCode).toBe(404)
+    }
     expect(instance.swagger().paths).not.toHaveProperty('/internal/metrics')
+    expect(instance.swagger().paths).not.toHaveProperty('/internal/metrics/prometheus')
   })
 
   it('protects operational metrics, keeps them outside quotas, and hides them from OpenAPI', async () => {
@@ -383,7 +496,7 @@ describe('read API', () => {
       expect(response.statusCode).toBe(200)
       expect(response.headers['cache-control']).toBe('no-store')
       expect(response.json()).toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         clockSource: 'database',
         database: {
           available: true,
@@ -405,6 +518,59 @@ describe('read API', () => {
       verify: 0,
       pinning: 0,
     })
+  })
+
+  it('serves OpenMetrics behind the metrics token without entering public quotas', async () => {
+    let snapshotCalls = 0
+    const metricsRepository: OperationalMetricsRepository = {
+      getSnapshot: async () => {
+        snapshotCalls += 1
+        return {
+          observedAt: NOW,
+          database: { usedConnections: 3, maxConnections: 100, sizeBytes: 9_999 },
+          profiles: [],
+        }
+      },
+    }
+    const instance = await configuredApp({
+      globalRateLimit: 1,
+      operationalMetrics: { token: METRICS_TOKEN, repository: metricsRepository },
+    })
+
+    const unauthorized = await instance.inject({
+      method: 'GET',
+      url: '/internal/metrics/prometheus',
+    })
+    expect(unauthorized.statusCode).toBe(401)
+    expect(snapshotCalls).toBe(0)
+
+    const headers = { authorization: `Bearer ${METRICS_TOKEN}` }
+    const response = await instance.inject({
+      method: 'GET',
+      url: '/internal/metrics/prometheus',
+      headers,
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['cache-control']).toBe('no-store')
+    expect(response.headers['content-type']).toContain(
+      'application/openmetrics-text; version=1.0.0',
+    )
+    expect(response.body).toContain('xcs_database_available 1')
+    expect(response.body.endsWith('# EOF\n')).toBe(true)
+    expect(snapshotCalls).toBe(1)
+    expect(instance.swagger().paths).not.toHaveProperty('/internal/metrics/prometheus')
+
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(200)
+    expect((await instance.inject({ method: 'GET', url: '/v1/networks' })).statusCode).toBe(429)
+    expect(
+      (
+        await instance.inject({
+          method: 'GET',
+          url: '/internal/metrics/prometheus',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200)
   })
 
   it('returns process metrics without leaking database errors when the snapshot fails', async () => {
@@ -1335,6 +1501,94 @@ describe('read API', () => {
     expect(snapshotCalls).toBe(2)
   })
 
+  it('serves an authoritative topological schema catalog from one snapshot', async () => {
+    const fixture = schemaCatalogFixture()
+    const repository = new RouteRepository()
+    let catalogReads = 0
+    repository.getSchema = async (_profileId, uid) =>
+      uid === fixture.targetUid ? fixture.target : undefined
+    repository.getSchemaCatalogEvidence = async () => {
+      catalogReads += 1
+      return fixture.evidence.toReversed()
+    }
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/schemas/${fixture.targetUid}/catalog`,
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['cache-control']).toBe('no-store')
+    const catalog = validateSchemaCatalogBundle(response.json())
+    expect(catalog.targetUid).toBe(fixture.targetUid)
+    expect(catalog.profile).toMatchObject({
+      profileId: network.profileId,
+      requiredAmendment: network.requiredAmendment.toUpperCase(),
+      registrationAmountDrops: '1',
+    })
+    expect(catalog.checkpoint).toEqual({
+      ledgerIndex: checkpoint.ledgerIndex,
+      ledgerHash: checkpoint.ledgerHash,
+    })
+    expect(catalog.schemas.map((entry) => entry.uid)).toEqual([
+      fixture.parentUid,
+      fixture.supersededUid,
+      fixture.targetUid,
+    ])
+    expect(catalogReads).toBe(1)
+
+    const openApiPath =
+      instance.swagger().paths?.['/v1/networks/{network}/schemas/{uid}/catalog']?.get
+    expect(openApiPath?.responses).toHaveProperty('200')
+    expect(openApiPath?.responses).toHaveProperty('400')
+    expect(openApiPath?.responses).toHaveProperty('404')
+    expect(openApiPath?.responses).toHaveProperty('429')
+    expect(openApiPath?.responses).toHaveProperty('503')
+    expect(openApiPath?.responses).toHaveProperty('500')
+  })
+
+  it('returns 404 only after authoritative readiness and fails closed on incomplete catalogs', async () => {
+    const missingRepository = new RouteRepository()
+    const missingInstance = await configuredApp({ repository: missingRepository })
+    const missing = await missingInstance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/schemas/${UID}/catalog`,
+    })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.headers['cache-control']).toBe('no-store')
+    expect(missing.json()).toMatchObject({ error: 'SCHEMA_NOT_FOUND' })
+
+    const fixture = schemaCatalogFixture()
+    const incompleteRepository = new RouteRepository()
+    incompleteRepository.getSchema = async () => fixture.target
+    incompleteRepository.getSchemaCatalogEvidence = async () => fixture.evidence.slice(1)
+    const incompleteInstance = await configuredApp({ repository: incompleteRepository })
+    const incomplete = await incompleteInstance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/schemas/${fixture.targetUid}/catalog`,
+    })
+    expect(incomplete.statusCode).toBe(503)
+    expect(incomplete.headers['cache-control']).toBe('no-store')
+    expect(incomplete.json()).toMatchObject({ error: 'SCHEMA_PROJECTION_INVALID' })
+  })
+
+  it('fails closed when catalog evidence exceeds the normative closure bound', async () => {
+    const fixture = schemaCatalogFixture()
+    const repository = new RouteRepository()
+    repository.getSchema = async () => fixture.target
+    repository.getSchemaCatalogEvidence = async () =>
+      Array.from({ length: MAX_SCHEMA_CATALOG_ENTRIES + 1 }, () => fixture.evidence[0]!)
+    const instance = await configuredApp({ repository })
+    const response = await instance.inject({
+      method: 'GET',
+      url: `/v1/networks/testnet/schemas/${fixture.targetUid}/catalog`,
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(response.headers['cache-control']).toBe('no-store')
+    expect(response.json()).toMatchObject({ error: 'SCHEMA_PROJECTION_INVALID' })
+  })
+
   it.each(['exact', 'list'] as const)(
     'fails closed when the %s schema read contains an incoherent root projection',
     async (surface) => {
@@ -1905,6 +2159,10 @@ describe('read API', () => {
       projectionReads += 1
       return []
     }
+    repository.getSchemaCatalogEvidence = async () => {
+      projectionReads += 1
+      return []
+    }
     repository.getCredential = async () => {
       projectionReads += 1
       return generation
@@ -1953,6 +2211,7 @@ describe('read API', () => {
 
     const responses = await Promise.all([
       instance.inject({ method: 'GET', url: schemaUrl }),
+      instance.inject({ method: 'GET', url: `/v1/networks/testnet/schemas/${UID}/catalog` }),
       instance.inject({ method: 'GET', url: schemaRegistrationUrl }),
       instance.inject({ method: 'GET', url: '/v1/networks/testnet/schemas' }),
       instance.inject({ method: 'GET', url: credentialUrl }),
@@ -1972,7 +2231,7 @@ describe('read API', () => {
         payload: { network: 'testnet', issuer: ISSUER, subject: SUBJECT, schemaUid: UID },
       }),
     ])
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(12).fill(503))
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(13).fill(503))
     expect(projectionReads).toBe(0)
   })
 

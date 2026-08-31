@@ -2,9 +2,10 @@ import { readFile } from 'node:fs/promises'
 
 import { sha256Hex, validateNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
 
-import type { RegistryPolicy } from './types.js'
+import type { DatabaseScope, RegistryPolicy } from './types.js'
 
 export const CONTROLLED_PILOT_ACKNOWLEDGEMENT = 'DISPOSABLE_PROFILE_AND_DATABASE' as const
+export const CONTROLLED_PILOT_PROFILE_ID = 'commons-testnet-xcs-v0.1-controlled-pilot' as const
 
 export interface IndexerRuntimeConfig {
   databaseUrl: string
@@ -13,6 +14,7 @@ export interface IndexerRuntimeConfig {
   batchSize: number
   profile: NetworkProfile
   registryPolicy: RegistryPolicy
+  databaseScope: DatabaseScope
 }
 
 export interface IndexerConfig extends IndexerRuntimeConfig {
@@ -31,12 +33,14 @@ export interface IndexerPreflightConfig extends LedgerRpcConfig {
   profile: NetworkProfile
   profileSha256: string
   registryPolicy: RegistryPolicy
+  databaseScope: DatabaseScope
 }
 
 interface LoadedProfileConfig {
   profile: NetworkProfile
   profileSha256: string
   registryPolicy: RegistryPolicy
+  databaseScope: DatabaseScope
 }
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -121,10 +125,24 @@ export function resolveRegistryPolicy(
   if (profile.networkId !== 1) {
     throw new Error('controlled-testnet-pilot requires networkId 1')
   }
-  if (!controlledPilotProfile) {
-    throw new Error('controlled-testnet-pilot requires a profileId ending in -controlled-pilot')
+  if (profile.profileId !== CONTROLLED_PILOT_PROFILE_ID) {
+    throw new Error(`controlled-testnet-pilot requires profileId ${CONTROLLED_PILOT_PROFILE_ID}`)
   }
   return policy
+}
+
+export function resolveDatabaseScope(
+  registryPolicy: RegistryPolicy,
+  environment: NodeJS.ProcessEnv = process.env,
+): DatabaseScope {
+  const scope = environment.XCS_DATABASE_SCOPE ?? 'shared'
+  if (scope !== 'shared' && scope !== 'exclusive-profile') {
+    throw new Error('XCS_DATABASE_SCOPE must be either shared or exclusive-profile')
+  }
+  if (registryPolicy === 'controlled-testnet-pilot' && scope !== 'exclusive-profile') {
+    throw new Error('controlled-testnet-pilot requires XCS_DATABASE_SCOPE=exclusive-profile')
+  }
+  return scope
 }
 
 async function loadProfileConfig(environment: NodeJS.ProcessEnv): Promise<LoadedProfileConfig> {
@@ -132,10 +150,12 @@ async function loadProfileConfig(environment: NodeJS.ProcessEnv): Promise<Loaded
   const profileFileBytes = await readFile(profilePath)
   const profileJson: unknown = JSON.parse(profileFileBytes.toString('utf8'))
   const profile = validateNetworkProfile(profileJson)
+  const registryPolicy = resolveRegistryPolicy(profile, environment)
   return {
     profile,
     profileSha256: sha256Hex(profileFileBytes),
-    registryPolicy: resolveRegistryPolicy(profile, environment),
+    registryPolicy,
+    databaseScope: resolveDatabaseScope(registryPolicy, environment),
   }
 }
 
@@ -162,7 +182,7 @@ export async function loadIndexerConfig(
 export async function loadIndexerRuntimeConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<IndexerRuntimeConfig> {
-  const { profile, registryPolicy } = await loadProfileConfig(environment)
+  const { profile, registryPolicy, databaseScope } = await loadProfileConfig(environment)
   const pollIntervalMs = Number(
     environment.XCS_INDEXER_POLL_INTERVAL_MS ?? environment.INDEXER_POLL_INTERVAL_MS ?? '4000',
   )
@@ -190,5 +210,6 @@ export async function loadIndexerRuntimeConfig(
     batchSize,
     profile,
     registryPolicy,
+    databaseScope,
   }
 }

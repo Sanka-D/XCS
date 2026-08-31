@@ -8,6 +8,7 @@ import {
   schemas,
   type XcsDatabase,
 } from '@xcs-protocol/db'
+import { MAX_SCHEMA_CATALOG_ENTRIES } from '@xcs-protocol/core'
 import {
   and,
   asc,
@@ -113,6 +114,33 @@ export class PostgresApiRepository implements ApiRepository {
           inArray(schemas.schemaUid, [...input.schemaUids]),
         ),
       )
+  }
+
+  async getSchemaCatalogEvidence(input: Parameters<ApiRepository['getSchemaCatalogEvidence']>[0]) {
+    const rows = await this.db.execute<{ schemaUid: string }>(sql`
+      WITH RECURSIVE catalog AS (
+        SELECT schema_uid, parent_uid, supersedes_uid
+        FROM schemas
+        WHERE profile_id = ${input.profileId}
+          AND schema_uid = ${input.targetUid}
+        UNION
+        SELECT related.schema_uid, related.parent_uid, related.supersedes_uid
+        FROM catalog AS current_schema
+        JOIN schemas AS related
+          ON related.profile_id = ${input.profileId}
+         AND (
+           related.schema_uid = current_schema.parent_uid
+           OR related.schema_uid = current_schema.supersedes_uid
+         )
+      )
+      SELECT schema_uid AS "schemaUid"
+      FROM catalog
+      LIMIT ${MAX_SCHEMA_CATALOG_ENTRIES + 1}
+    `)
+    return this.getSchemaProjectionEvidence({
+      profileId: input.profileId,
+      schemaUids: rows.map((row) => row.schemaUid),
+    })
   }
 
   async getSchemaRegistrationByTransaction(

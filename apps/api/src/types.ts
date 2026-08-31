@@ -70,6 +70,10 @@ export interface ApiRepository {
     profileId: string
     schemaUids: readonly string[]
   }): Promise<SchemaProjectionEvidence[]>
+  getSchemaCatalogEvidence(input: {
+    profileId: string
+    targetUid: string
+  }): Promise<SchemaProjectionEvidence[]>
   getSchemaRegistrationByTransaction(input: {
     profileId: string
     transactionHash: string

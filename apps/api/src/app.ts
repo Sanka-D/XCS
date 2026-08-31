@@ -7,6 +7,7 @@ import {
   computeSchemaUid,
   encodeUtf8,
   isClassicAddress,
+  MAX_SCHEMA_CATALOG_ENTRIES,
   sha256Hex,
   validateSchema,
   type JsonValue,
@@ -30,6 +31,7 @@ import {
 import {
   OperationalMetricsCollector,
   rateLimitMetric,
+  renderPrometheusMetrics,
   type OperationalMetricsRepository,
 } from './operational-metrics.js'
 import {
@@ -39,6 +41,7 @@ import {
   encodeSchemaRegistrationCursor,
 } from './pagination.js'
 import { DemoPinningService, PinningError } from './pinning.js'
+import { authoritativeSchemaCatalogBundle } from './schema-catalog.js'
 import {
   authoritativeResolvedSchema,
   SchemaProjectionInvalidError,
@@ -345,6 +348,76 @@ const xcsSchemaDefinitionSchema = {
     extends: { type: 'string', pattern: UID_PATTERN },
     supersedes: { type: 'string', pattern: UID_PATTERN },
     fields: xcsFieldsSchema,
+  },
+} as const
+
+const schemaCatalogResponseSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['format', 'profile', 'targetUid', 'checkpoint', 'schemas'],
+  properties: {
+    format: { type: 'string', const: 'xcs-schema-catalog/1' },
+    profile: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'profileId',
+        'xcsVersion',
+        'networkId',
+        'requiredAmendment',
+        'registryAddress',
+        'registrationAmountDrops',
+        'activationLedgerIndex',
+        'activationLedgerHash',
+      ],
+      properties: {
+        profileId: { type: 'string', pattern: PROFILE_PATTERN },
+        xcsVersion: { type: 'string', const: '0.1' },
+        networkId: { type: 'integer', minimum: 0, maximum: MAX_UINT32 },
+        requiredAmendment: { type: 'string', pattern: '^[0-9A-F]{64}$' },
+        registryAddress: { type: 'string', pattern: ADDRESS_PATTERN },
+        registrationAmountDrops: { type: 'string', const: '1' },
+        activationLedgerIndex: { type: 'integer', minimum: 1, maximum: MAX_UINT32 },
+        activationLedgerHash: { type: 'string', pattern: UID_PATTERN },
+      },
+    },
+    targetUid: { type: 'string', pattern: UID_PATTERN },
+    checkpoint: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['ledgerIndex', 'ledgerHash'],
+      properties: {
+        ledgerIndex: { type: 'integer', minimum: 1, maximum: MAX_UINT32 },
+        ledgerHash: { type: 'string', pattern: UID_PATTERN },
+      },
+    },
+    schemas: {
+      type: 'array',
+      minItems: 1,
+      maxItems: MAX_SCHEMA_CATALOG_ENTRIES,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'uid',
+          'definition',
+          'publisher',
+          'ledgerIndex',
+          'ledgerHash',
+          'transactionIndex',
+          'transactionHash',
+        ],
+        properties: {
+          uid: { type: 'string', pattern: UID_PATTERN },
+          definition: xcsSchemaDefinitionSchema,
+          publisher: { type: 'string', pattern: ADDRESS_PATTERN },
+          ledgerIndex: { type: 'integer', minimum: 1, maximum: MAX_UINT32 },
+          ledgerHash: { type: 'string', pattern: UID_PATTERN },
+          transactionIndex: { type: 'integer', minimum: 0, maximum: MAX_UINT32 },
+          transactionHash: { type: 'string', pattern: UID_PATTERN },
+        },
+      },
+    },
   },
 } as const
 
@@ -1140,7 +1213,10 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
   const metricsCollector =
     options.operationalMetrics === undefined
       ? undefined
-      : new OperationalMetricsCollector(options.now)
+      : new OperationalMetricsCollector(
+          options.now,
+          options.readinessMaxLedgerAgeSeconds ?? DEFAULT_LEDGER_MAX_AGE_SECONDS,
+        )
   const payloadResolver =
     metricsCollector !== undefined && options.operationalMetrics?.observePayloadResolver === true
       ? metricsCollector.observePayloadResolver(options.resolver)
@@ -1345,6 +1421,30 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
             .send({ error: 'UNAUTHORIZED', message: 'Authentication required' })
         }
         return metricsCollector.collect(options.operationalMetrics!.repository)
+      },
+    )
+    app.get(
+      '/internal/metrics/prometheus',
+      {
+        config: { rateLimit: false },
+        schema: { hide: true },
+      },
+      async (request, reply) => {
+        reply.header('cache-control', 'no-store')
+        const authorization = singleHeader(request, INTERNAL_METRICS_TOKEN_HEADER)
+        const presentedToken = authorization?.startsWith('Bearer ')
+          ? authorization.slice('Bearer '.length)
+          : undefined
+        if (!tokensMatch(options.operationalMetrics!.token, presentedToken)) {
+          return reply
+            .code(401)
+            .header('www-authenticate', 'Bearer realm="xcs-metrics"')
+            .send({ error: 'UNAUTHORIZED', message: 'Authentication required' })
+        }
+        const metrics = await metricsCollector.collect(options.operationalMetrics!.repository)
+        return reply
+          .type('application/openmetrics-text; version=1.0.0; charset=utf-8')
+          .send(renderPrometheusMetrics(metrics))
       },
     )
   }
@@ -1953,6 +2053,66 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
         }
       })
     },
+  )
+
+  app.get<{
+    Params: { network: string; uid: string }
+  }>(
+    '/v1/networks/:network/schemas/:uid/catalog',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['network', 'uid'],
+          properties: {
+            network: { type: 'string', pattern: PROFILE_PATTERN },
+            uid: { type: 'string', pattern: UID_PATTERN },
+          },
+        },
+        response: {
+          200: schemaCatalogResponseSchema,
+          400: errorResponseSchema,
+          404: errorResponseSchema,
+          429: rateLimitResponseSchema,
+          503: errorResponseSchema,
+          500: errorResponseSchema,
+        },
+      },
+      onSend: async (_request, reply, payload) => {
+        reply.header('cache-control', 'no-store')
+        return payload
+      },
+    },
+    async (request, reply) =>
+      options.repository.withConsistentSnapshot(async (repository) => {
+        const network = await repository.getNetwork(request.params.network)
+        if (network === undefined) {
+          return reply.code(404).send({ error: 'NETWORK_NOT_FOUND', message: 'Network not found' })
+        }
+        const now = await authoritativeTime(repository)
+        const status = await preflightAuthoritativeRead(repository, request.params.network, now)
+        const target = await repository.getSchema(request.params.network, request.params.uid)
+        const evidence =
+          target === undefined
+            ? []
+            : await repository.getSchemaCatalogEvidence({
+                profileId: request.params.network,
+                targetUid: request.params.uid,
+              })
+        const checkpoint = await requireAuthoritativeCheckpoint(
+          repository,
+          request.params.network,
+          status,
+          now,
+          evidence.map((item) => item.schema.ledgerIndex),
+          network.activationLedgerIndex,
+        )
+        if (target === undefined) {
+          return reply.code(404).send({ error: 'SCHEMA_NOT_FOUND', message: 'Schema not found' })
+        }
+        return authoritativeSchemaCatalogBundle({ network, checkpoint, target, evidence })
+      }),
   )
 
   app.get<{

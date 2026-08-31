@@ -168,6 +168,9 @@ class FakeApiRepository implements ApiRepository {
         input.schemaUids.includes(item.schema.schemaUid),
     )
   }
+  async getSchemaCatalogEvidence(): Promise<SchemaProjectionEvidence[]> {
+    return []
+  }
   async getSchemaRegistrationByTransaction(
     _input: Parameters<ApiRepository['getSchemaRegistrationByTransaction']>[0],
   ): Promise<SchemaEventRow | undefined> {

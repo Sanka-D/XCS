@@ -170,6 +170,49 @@ export const indexerStatuses = pgTable(
   ],
 )
 
+export const indexerIncidents = pgTable(
+  'indexer_incidents',
+  {
+    profileId: text('profile_id')
+      .notNull()
+      .references(() => networkProfiles.profileId, { onDelete: 'restrict' }),
+    writerEpoch: bigint('writer_epoch', { mode: 'number' }).notNull(),
+    errorCode: text('error_code').notNull(),
+    primarySourceTip: bigint('primary_source_tip', { mode: 'number' }),
+    secondarySourceTip: bigint('secondary_source_tip', { mode: 'number' }),
+    lastAgreedLedgerIndex: bigint('last_agreed_ledger_index', { mode: 'number' }),
+    lastAgreedLedgerHash: text('last_agreed_ledger_hash'),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'indexer_incidents_pk',
+      columns: [table.profileId, table.writerEpoch],
+    }),
+    check(
+      'indexer_incidents_writer_epoch',
+      sql`${table.writerEpoch} BETWEEN 1 AND 9007199254740991`,
+    ),
+    check('indexer_incidents_error_code', sql`${table.errorCode} ~ ${ERROR_CODE_PATTERN}`),
+    check(
+      'indexer_incidents_primary_tip',
+      sql`${table.primarySourceTip} IS NULL OR ${table.primarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_incidents_secondary_tip',
+      sql`${table.secondarySourceTip} IS NULL OR ${table.secondarySourceTip} BETWEEN 0 AND 4294967295`,
+    ),
+    check(
+      'indexer_incidents_agreed_ledger',
+      sql`(${table.lastAgreedLedgerIndex} IS NULL AND ${table.lastAgreedLedgerHash} IS NULL)
+          OR (${table.lastAgreedLedgerIndex} IS NOT NULL
+          AND ${table.lastAgreedLedgerHash} IS NOT NULL
+          AND ${table.lastAgreedLedgerIndex} BETWEEN 0 AND 4294967295
+          AND ${table.lastAgreedLedgerHash} ~ ${HASH_PATTERN})`,
+    ),
+  ],
+)
+
 export const schemaEvents = pgTable(
   'schema_events',
   {
@@ -533,6 +576,8 @@ export type NewNetworkProfileRow = typeof networkProfiles.$inferInsert
 export type LedgerCheckpointRow = typeof ledgerCheckpoints.$inferSelect
 export type IndexerStatusRow = typeof indexerStatuses.$inferSelect
 export type NewIndexerStatusRow = typeof indexerStatuses.$inferInsert
+export type IndexerIncidentRow = typeof indexerIncidents.$inferSelect
+export type NewIndexerIncidentRow = typeof indexerIncidents.$inferInsert
 export type SchemaEventRow = typeof schemaEvents.$inferSelect
 export type SchemaRow = typeof schemas.$inferSelect
 export type CredentialGenerationRow = typeof credentialGenerations.$inferSelect

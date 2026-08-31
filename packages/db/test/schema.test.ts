@@ -8,6 +8,7 @@ import {
   credentialEvents,
   credentialGenerations,
   demoPins,
+  indexerIncidents,
   indexerStatuses,
   ledgerCheckpoints,
   networkProfiles,
@@ -50,6 +51,7 @@ describe('database schema', () => {
         networkProfiles,
         ledgerCheckpoints,
         indexerStatuses,
+        indexerIncidents,
         schemaEvents,
         schemas,
         credentialGenerations,
@@ -61,6 +63,7 @@ describe('database schema', () => {
       'network_profiles',
       'ledger_checkpoints',
       'indexer_status',
+      'indexer_incidents',
       'schema_events',
       'schemas',
       'credential_generations',
@@ -68,6 +71,41 @@ describe('database schema', () => {
       'pin_challenges',
       'demo_pins',
     ])
+  })
+
+  it('adds an immutable fenced halt history in migration 0004', () => {
+    const incidentConfig = getTableConfig(indexerIncidents)
+    expect(incidentConfig.primaryKeys.map((key) => key.getName())).toContain('indexer_incidents_pk')
+    expect(incidentConfig.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        'indexer_incidents_writer_epoch',
+        'indexer_incidents_error_code',
+        'indexer_incidents_primary_tip',
+        'indexer_incidents_secondary_tip',
+        'indexer_incidents_agreed_ledger',
+      ]),
+    )
+
+    const migration = readFileSync(
+      new URL('../drizzle/0004_indexer_incidents.sql', import.meta.url),
+      'utf8',
+    )
+    expect(migration).toContain('CREATE TABLE "indexer_incidents"')
+    expect(migration).toContain('PRIMARY KEY("profile_id","writer_epoch")')
+    expect(migration).toContain(
+      'GRANT SELECT, INSERT ON TABLE "public"."indexer_incidents" TO xcs_indexer',
+    )
+    expect(migration).toContain('GRANT SELECT ON TABLE "public"."indexer_incidents" TO xcs_api')
+    expect(migration).not.toMatch(/^\s*(?:DROP|DELETE|UPDATE)\b/imu)
+
+    const journal = JSON.parse(
+      readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'),
+    ) as { entries: Array<{ idx: number; tag: string }> }
+    expect(journal.entries.find(({ idx }) => idx === 4)).toMatchObject({
+      idx: 4,
+      tag: '0004_indexer_incidents',
+    })
+    expect(journal.entries.filter(({ idx }) => idx === 4)).toHaveLength(1)
   })
 
   it('declares durable fencing and nullable transaction-root constraints', () => {
@@ -153,7 +191,7 @@ describe('database schema', () => {
     const journal = JSON.parse(
       readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'),
     ) as { entries: Array<{ idx: number; tag: string }> }
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find(({ idx }) => idx === 3)).toMatchObject({
       idx: 3,
       tag: '0003_projection_integrity',
     })

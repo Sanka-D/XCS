@@ -11,6 +11,7 @@ export type { NetworkProfile, RegisteredSchema, ResolvedSchema, SchemaDefinition
 export type { AcquiredIndexerLease, IndexerLeaseToken }
 
 export type RegistryPolicy = 'blackholed' | 'controlled-testnet-pilot'
+export type DatabaseScope = 'shared' | 'exclusive-profile'
 
 export interface LedgerTransaction {
   hash: string

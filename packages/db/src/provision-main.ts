@@ -1,5 +1,9 @@
 import { createDatabaseClient } from './client.js'
-import { provisionRuntimeDatabaseRoles } from './provision.js'
+import {
+  databasePasswordFromUrl,
+  parseDatabaseClusterScope,
+  provisionRuntimeDatabaseRoles,
+} from './provision.js'
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name]
@@ -14,14 +18,20 @@ async function main(): Promise<void> {
     process.env.XCS_MIGRATOR_DATABASE_URL ??
     process.env.XCS_DATABASE_URL ??
     requiredEnvironment('DATABASE_URL')
+  const administratorPassword = databasePasswordFromUrl(databaseUrl)
   const client = createDatabaseClient(databaseUrl)
 
   try {
     await provisionRuntimeDatabaseRoles(client, {
+      clusterScope: parseDatabaseClusterScope(process.env.XCS_DATABASE_CLUSTER_SCOPE),
+      administratorPassword,
       indexerPassword: requiredEnvironment('XCS_INDEXER_DATABASE_PASSWORD'),
       apiPassword: requiredEnvironment('XCS_API_DATABASE_PASSWORD'),
+      monitorPassword: requiredEnvironment('XCS_MONITOR_DATABASE_PASSWORD'),
     })
-    process.stdout.write(`${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api'] })}\n`)
+    process.stdout.write(
+      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor'] })}\n`,
+    )
   } finally {
     await client.close()
   }

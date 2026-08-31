@@ -5,6 +5,7 @@ import {
   OperationalMetricsEvidenceError,
   OperationalMetricsCollector,
   rateLimitMetric,
+  renderPrometheusMetrics,
   type OperationalMetricsRepository,
 } from '../src/operational-metrics.js'
 import { PayloadInvalidError, PayloadUnavailableError } from '../src/payload-resolver.js'
@@ -21,10 +22,12 @@ function repository(): OperationalMetricsRepository {
         profiles: [
           {
             profileId: 'missing',
+            activationLedgerIndex: 100,
             status: undefined,
             checkpoint: undefined,
             acceptedRegistrations: 0,
             rejectedRegistrations: 0,
+            haltHistory: { total: 0, latest: undefined },
           },
           {
             profileId: 'testnet',
@@ -35,15 +38,30 @@ function repository(): OperationalMetricsRepository {
               lastAgreedLedgerIndex: 1_001,
               lastAgreedLedgerHash: 'a'.repeat(64),
               errorCode: 'LEDGER_PARENT_MISMATCH',
+              writerPresent: false,
+              leaseExpiresAt: null,
               updatedAt: new Date('2026-08-26T14:29:58.000Z'),
             },
             checkpoint: {
               ledgerIndex: 1_001,
               ledgerHash: 'a'.repeat(64),
               closeTime: CLOSE_TIME,
+              transactionRootPresent: true,
             },
+            activationLedgerIndex: 100,
             acceptedRegistrations: 42,
             rejectedRegistrations: 3,
+            haltHistory: {
+              total: 2,
+              latest: {
+                writerEpoch: 7,
+                errorCode: 'LEDGER_PARENT_MISMATCH',
+                primarySourceTip: 1_004,
+                secondarySourceTip: 1_003,
+                lastAgreedLedgerIndex: 1_001,
+                recordedAt: new Date('2026-08-26T14:29:59.000Z'),
+              },
+            },
           },
         ],
       }
@@ -56,7 +74,7 @@ describe('operational metrics', () => {
     const collector = new OperationalMetricsCollector(() => NOW)
 
     await expect(collector.collect(repository())).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: NOW.toISOString(),
       clockSource: 'database',
       database: {
@@ -70,6 +88,7 @@ describe('operational metrics', () => {
       profiles: [
         {
           profileId: 'missing',
+          ready: false,
           state: 'missing',
           errorCode: null,
           statusUpdatedAt: null,
@@ -79,9 +98,11 @@ describe('operational metrics', () => {
           checkpoint: null,
           continuityFailure: null,
           registrations: { accepted: 0, rejected: 0 },
+          haltHistory: { total: 0, latest: null },
         },
         {
           profileId: 'testnet',
+          ready: false,
           state: 'halted',
           errorCode: 'LEDGER_PARENT_MISMATCH',
           statusUpdatedAt: '2026-08-26T14:29:58.000Z',
@@ -96,6 +117,16 @@ describe('operational metrics', () => {
           },
           continuityFailure: 'LEDGER_PARENT_MISMATCH',
           registrations: { accepted: 42, rejected: 3 },
+          haltHistory: {
+            total: 2,
+            latest: {
+              writerEpoch: 7,
+              errorCode: 'LEDGER_PARENT_MISMATCH',
+              sourceTips: { primary: 1_004, secondary: 1_003 },
+              lastAgreedLedgerIndex: 1_001,
+              recordedAt: '2026-08-26T14:29:59.000Z',
+            },
+          },
         },
       ],
       api: {
@@ -109,12 +140,57 @@ describe('operational metrics', () => {
       },
       coverage: {
         continuityFailures: 'active_halt_only',
+        haltHistory: 'durable_fenced_halts_only',
         submissionOutcomes: 'not_observed_client_local',
         payloadResolution: 'server_only',
         databasePoolSaturation: 'not_observed',
         diskUsage: 'logical_database_size_only',
       },
     })
+  })
+
+  it('reports readiness only for a live lease and a fresh exact checkpoint', async () => {
+    const snapshot = await repository().getSnapshot()
+    const profile = snapshot.profiles[1]!
+    profile.status = {
+      state: 'ready',
+      primarySourceTip: 1_002,
+      secondarySourceTip: 1_001,
+      lastAgreedLedgerIndex: 1_001,
+      lastAgreedLedgerHash: 'a'.repeat(64),
+      errorCode: null,
+      writerPresent: true,
+      leaseExpiresAt: new Date(NOW.getTime() + 60_000),
+      updatedAt: NOW,
+    }
+    const readyRepository: OperationalMetricsRepository = {
+      getSnapshot: async () => snapshot,
+    }
+
+    const fresh = await new OperationalMetricsCollector(() => NOW, 4).collect(readyRepository)
+    expect(fresh.profiles[1]?.ready).toBe(true)
+    expect(renderPrometheusMetrics(fresh)).toContain('xcs_indexer_ready{profile_id="testnet"} 1')
+
+    const stale = await new OperationalMetricsCollector(() => NOW, 3).collect(readyRepository)
+    expect(stale.profiles[1]?.ready).toBe(false)
+  })
+
+  it('renders token-ready OpenMetrics without hashes or request identifiers', async () => {
+    const collector = new OperationalMetricsCollector(() => NOW)
+    collector.recordRateLimited('verify')
+    const document = await collector.collect(repository())
+    const output = renderPrometheusMetrics(document)
+
+    expect(output).toContain('xcs_database_available 1')
+    expect(output).toContain('xcs_indexer_ready{profile_id="testnet"} 0')
+    expect(output).toContain('xcs_indexer_state{profile_id="testnet",state="halted"} 1')
+    expect(output).toContain('xcs_indexer_halts_total{profile_id="testnet"} 2')
+    expect(output).toContain('xcs_api_rate_limited_responses_total{scope="verify"} 1')
+    expect(output).not.toContain('a'.repeat(64))
+    expect(output).not.toContain('issuer')
+    expect(output).not.toContain('subject')
+    expect(output).not.toContain('uri')
+    expect(output.endsWith('# EOF\n')).toBe(true)
   })
 
   it('keeps process counters available and increments failures when PostgreSQL is unavailable', async () => {

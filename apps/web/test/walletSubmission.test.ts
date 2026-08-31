@@ -8,7 +8,14 @@ import {
   type ReliableSubmissionResult,
   type SubmissionJournalEntry,
 } from '@xcs-protocol/sdk'
-import { hashes, Wallet, type Client, type Payment, type SubmittableTransaction } from 'xrpl'
+import {
+  encode,
+  hashes,
+  Wallet,
+  type Client,
+  type Payment,
+  type SubmittableTransaction,
+} from 'xrpl'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -29,6 +36,7 @@ import {
   assertValidatedTesSuccess,
   createWalletSigner,
   normalizeWalletSignature,
+  validateStoredRecoveryMaterial,
 } from '../app/utils/walletSubmission'
 
 function signedPayment() {
@@ -280,6 +288,149 @@ describe('wallet sign-only normalization', () => {
     expect(persistSigned).not.toHaveBeenCalled()
     expect(submit).not.toHaveBeenCalled()
     expect(entries.map((entry) => entry.stage)).toEqual(['prepared', 'failed'])
+  })
+})
+
+describe('stored recovery material validation', () => {
+  function recoveryMaterial(
+    overrides: Partial<Parameters<typeof validateStoredRecoveryMaterial>[0]> = {},
+  ): Parameters<typeof validateStoredRecoveryMaterial>[0] {
+    const { transaction, signed } = signedPayment()
+    return {
+      txBlob: signed.tx_blob,
+      txHash: signed.hash.toUpperCase(),
+      lastLedgerSequence: transaction.LastLedgerSequence!,
+      account: transaction.Account,
+      transactionType: transaction.TransactionType,
+      networkId: 1,
+      ...overrides,
+    }
+  }
+
+  it('accepts recovery material whose blob is strictly bound to its stored metadata', () => {
+    expect(() => validateStoredRecoveryMaterial(recoveryMaterial())).not.toThrow()
+  })
+
+  it('accepts an explicit NetworkID only when it matches the stored network', () => {
+    const signer = Wallet.generate()
+    const transaction: Payment = {
+      TransactionType: 'Payment',
+      Account: signer.address,
+      Destination: Wallet.generate().address,
+      Amount: '1',
+      Fee: '12',
+      Sequence: 1,
+      LastLedgerSequence: 100,
+      NetworkID: 1,
+    }
+    const signed = signer.sign(transaction)
+
+    expect(() =>
+      validateStoredRecoveryMaterial({
+        txBlob: signed.tx_blob,
+        txHash: signed.hash.toUpperCase(),
+        lastLedgerSequence: 100,
+        account: signer.address,
+        transactionType: 'Payment',
+        networkId: 1,
+      }),
+    ).not.toThrow()
+  })
+
+  it('rejects an undecodable signed blob', () => {
+    expect(() => validateStoredRecoveryMaterial(recoveryMaterial({ txBlob: 'NOT_HEX' }))).toThrow(
+      'OPERATION_RECOVERY_BLOB_INVALID',
+    )
+  })
+
+  it('rejects decodable recovery material without a valid single signature', () => {
+    const { transaction } = signedPayment()
+    const unsigned = encode({ ...transaction, SigningPubKey: '' })
+    expect(() =>
+      validateStoredRecoveryMaterial(
+        recoveryMaterial({
+          txBlob: unsigned,
+          txHash: hashes.hashSignedTx(unsigned).toUpperCase(),
+        }),
+      ),
+    ).toThrow('OPERATION_RECOVERY_BLOB_INVALID')
+  })
+
+  it('rejects a stored hash that is not derived from the blob', () => {
+    expect(() =>
+      validateStoredRecoveryMaterial(recoveryMaterial({ txHash: '0'.repeat(64) })),
+    ).toThrow('OPERATION_RECOVERY_HASH_MISMATCH')
+  })
+
+  it('requires a positive LastLedgerSequence in both the blob and stored metadata', () => {
+    const signer = Wallet.generate()
+    const transaction = {
+      TransactionType: 'Payment',
+      Account: signer.address,
+      Destination: Wallet.generate().address,
+      Amount: '1',
+      Fee: '12',
+      Sequence: 1,
+    } as Payment
+    const signed = signer.sign(transaction)
+
+    expect(() =>
+      validateStoredRecoveryMaterial({
+        txBlob: signed.tx_blob,
+        txHash: signed.hash.toUpperCase(),
+        lastLedgerSequence: 100,
+        account: signer.address,
+        transactionType: 'Payment',
+        networkId: 1,
+      }),
+    ).toThrow('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_INVALID')
+    expect(() =>
+      validateStoredRecoveryMaterial(recoveryMaterial({ lastLedgerSequence: 0 })),
+    ).toThrow('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_INVALID')
+  })
+
+  it('rejects a LastLedgerSequence that differs from the blob', () => {
+    expect(() =>
+      validateStoredRecoveryMaterial(recoveryMaterial({ lastLedgerSequence: 101 })),
+    ).toThrow('OPERATION_RECOVERY_LAST_LEDGER_SEQUENCE_MISMATCH')
+  })
+
+  it('rejects an account that differs from the signed transaction', () => {
+    expect(() =>
+      validateStoredRecoveryMaterial(recoveryMaterial({ account: Wallet.generate().address })),
+    ).toThrow('OPERATION_RECOVERY_ACCOUNT_MISMATCH')
+  })
+
+  it('rejects a transaction type that differs from the signed transaction', () => {
+    expect(() =>
+      validateStoredRecoveryMaterial(recoveryMaterial({ transactionType: 'CredentialCreate' })),
+    ).toThrow('OPERATION_RECOVERY_TRANSACTION_TYPE_MISMATCH')
+  })
+
+  it('rejects an explicit NetworkID that differs from the stored network', () => {
+    const signer = Wallet.generate()
+    const transaction: Payment = {
+      TransactionType: 'Payment',
+      Account: signer.address,
+      Destination: Wallet.generate().address,
+      Amount: '1',
+      Fee: '12',
+      Sequence: 1,
+      LastLedgerSequence: 100,
+      NetworkID: 2,
+    }
+    const signed = signer.sign(transaction)
+
+    expect(() =>
+      validateStoredRecoveryMaterial({
+        txBlob: signed.tx_blob,
+        txHash: signed.hash.toUpperCase(),
+        lastLedgerSequence: 100,
+        account: signer.address,
+        transactionType: 'Payment',
+        networkId: 1,
+      }),
+    ).toThrow('OPERATION_RECOVERY_NETWORK_ID_MISMATCH')
   })
 })
 

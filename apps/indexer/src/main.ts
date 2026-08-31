@@ -17,7 +17,9 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 const worker = new IndexerWorker({
   profile: config.profile,
-  repository: new PostgresIndexerRepository(database.db),
+  repository: new PostgresIndexerRepository(database.db, {
+    databaseScope: config.databaseScope,
+  }),
   source: new QuorumLedgerSource(
     new XrplLedgerSource(config.xrplRpcUrlPrimary, 'primary', config.registryPolicy),
     new XrplLedgerSource(config.xrplRpcUrlSecondary, 'secondary', config.registryPolicy),

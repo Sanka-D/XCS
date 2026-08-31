@@ -164,7 +164,9 @@ async function runReplay(): Promise<void> {
     const worker = new IndexerWorker({
       profile: config.profile,
       source,
-      repository: new PostgresIndexerRepository(database.db),
+      repository: new PostgresIndexerRepository(database.db, {
+        databaseScope: config.databaseScope,
+      }),
       pollIntervalMs: config.pollIntervalMs,
       leaseDurationMs: config.leaseDurationMs,
       batchSize: config.batchSize,

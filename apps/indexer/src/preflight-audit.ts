@@ -10,6 +10,7 @@ export function createPreflightAudit(
     profileId: config.profile.profileId,
     profileSha256: config.profileSha256,
     registryPolicy: config.registryPolicy,
+    databaseScope: config.databaseScope,
     networkId: result.networkId,
     activationLedger: {
       ledgerIndex: result.activationLedger.ledgerIndex,

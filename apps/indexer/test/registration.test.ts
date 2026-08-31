@@ -147,4 +147,48 @@ describe('interpretSchemaRegistration', () => {
       ),
     ).toMatchObject({ status: 'rejected', reasonCode: 'REGISTRATION_NOT_CANONICAL' })
   })
+
+  it('keeps a UTF-8 BOM visible in every schema memo field', () => {
+    const memoType = payment()
+    const memoTypeFields = (
+      memoType.transaction.Memos as Array<{ Memo: Record<string, unknown> }>
+    )[0]!.Memo
+    memoTypeFields.MemoType = hex(`\uFEFFxcs:schema_register`)
+    expect(
+      interpretSchemaRegistration(
+        memoType,
+        { ledgerHash: HASH, ledgerIndex: 100 },
+        profile,
+        new Map(),
+      ),
+    ).toBeUndefined()
+
+    const memoFormat = payment()
+    const memoFormatFields = (
+      memoFormat.transaction.Memos as Array<{ Memo: Record<string, unknown> }>
+    )[0]!.Memo
+    memoFormatFields.MemoFormat = hex(`\uFEFFapplication/json`)
+    expect(
+      interpretSchemaRegistration(
+        memoFormat,
+        { ledgerHash: HASH, ledgerIndex: 100 },
+        profile,
+        new Map(),
+      ),
+    ).toMatchObject({ status: 'rejected', reasonCode: 'REGISTRATION_MEMO_FORMAT' })
+
+    const memoData = payment()
+    const memoDataFields = (
+      memoData.transaction.Memos as Array<{ Memo: Record<string, unknown> }>
+    )[0]!.Memo
+    memoDataFields.MemoData = hex(`\uFEFF${canonicalize(schema as unknown as JsonValue)}`)
+    expect(
+      interpretSchemaRegistration(
+        memoData,
+        { ledgerHash: HASH, ledgerIndex: 100 },
+        profile,
+        new Map(),
+      ),
+    ).toMatchObject({ status: 'rejected', reasonCode: 'JSON_INVALID' })
+  })
 })
