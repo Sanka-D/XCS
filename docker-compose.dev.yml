@@ -1,0 +1,16 @@
+services:
+  postgres:
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_POSTGRES_PORT_PUBLISHED:-5432}:5432'
+
+  prometheus:
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_PROMETHEUS_PORT_PUBLISHED:-9090}:9090'
+
+  grafana:
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_GRAFANA_PORT_PUBLISHED:-3002}:3000'
+
+  ipfs:
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_IPFS_GATEWAY_PORT_PUBLISHED:-8080}:8080'

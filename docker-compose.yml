@@ -1,0 +1,424 @@
+name: xcs
+
+x-node-build: &node-build
+  context: .
+  dockerfile: docker/Dockerfile.node
+  args:
+    XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+    XCS_REVISION: ${XCS_REVISION:-local}
+    XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+
+x-runtime-hardening: &runtime-hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - '/tmp:rw,noexec,nosuid,size=64m'
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  pids_limit: 200
+  stop_grace_period: 30s
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: ${XCS_LOG_MAX_SIZE:-10m}
+      max-file: ${XCS_LOG_MAX_FILES:-5}
+
+x-one-shot-hardening: &one-shot-hardening
+  init: true
+  read_only: true
+  tmpfs:
+    - '/tmp:rw,noexec,nosuid,size=64m'
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  pids_limit: 100
+  stop_grace_period: 30s
+  restart: 'no'
+  logging:
+    driver: json-file
+    options:
+      max-size: ${XCS_LOG_MAX_SIZE:-10m}
+      max-file: ${XCS_LOG_MAX_FILES:-5}
+
+services:
+  postgres:
+    image: ${XCS_POSTGRES_IMAGE:-postgres:18-alpine}
+    environment:
+      POSTGRES_DB: xcs
+      POSTGRES_USER: xcs_admin
+      POSTGRES_PASSWORD: ${XCS_POSTGRES_ADMIN_PASSWORD:-}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U xcs_admin -d xcs']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    # PostgreSQL is intentionally not published. Use docker-compose.dev.yml for an
+    # explicit loopback-only development binding.
+    expose: ['5432']
+    volumes:
+      - xcs-postgres:/var/lib/postgresql
+    networks: [database]
+    init: true
+    shm_size: 256m
+    stop_grace_period: 60s
+    restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 300
+    mem_limit: ${XCS_POSTGRES_MEMORY_LIMIT:-1g}
+    cpus: ${XCS_POSTGRES_CPU_LIMIT:-1.0}
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  migrate:
+    <<: *one-shot-hardening
+    image: ${XCS_DB_IMAGE:-xcs-db:local}
+    build:
+      <<: *node-build
+      args:
+        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+        XCS_PACKAGE: '@xcs-protocol/db'
+        XCS_REVISION: ${XCS_REVISION:-local}
+        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    command: ['node', 'dist/migrate.js']
+    environment:
+      XCS_DATABASE_URL_TARGET: XCS_MIGRATOR_DATABASE_URL
+      XCS_DATABASE_USER: xcs_admin
+      XCS_DATABASE_PASSWORD: ${XCS_POSTGRES_ADMIN_PASSWORD:-}
+      XCS_MIGRATION_STATEMENT_TIMEOUT_MS: ${XCS_MIGRATION_STATEMENT_TIMEOUT_MS:-1800000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    mem_limit: ${XCS_JOB_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_JOB_CPU_LIMIT:-0.5}
+
+  provision:
+    <<: *one-shot-hardening
+    image: ${XCS_DB_IMAGE:-xcs-db:local}
+    build:
+      <<: *node-build
+      args:
+        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+        XCS_PACKAGE: '@xcs-protocol/db'
+        XCS_REVISION: ${XCS_REVISION:-local}
+        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    command: ['node', 'dist/provision-main.js']
+    environment:
+      XCS_DATABASE_URL_TARGET: XCS_MIGRATOR_DATABASE_URL
+      XCS_DATABASE_USER: xcs_admin
+      XCS_DATABASE_PASSWORD: ${XCS_POSTGRES_ADMIN_PASSWORD:-}
+      XCS_DATABASE_CLUSTER_SCOPE: dedicated
+      XCS_INDEXER_DATABASE_PASSWORD: ${XCS_INDEXER_DATABASE_PASSWORD:-}
+      XCS_API_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
+      XCS_MONITOR_DATABASE_PASSWORD: ${XCS_MONITOR_DATABASE_PASSWORD:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [database]
+    mem_limit: ${XCS_JOB_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_JOB_CPU_LIMIT:-0.5}
+
+  api:
+    <<: *runtime-hardening
+    image: ${XCS_API_IMAGE:-xcs-api:local}
+    build:
+      <<: *node-build
+      args:
+        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+        XCS_PACKAGE: '@xcs-protocol/api'
+        XCS_REVISION: ${XCS_REVISION:-local}
+        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    environment:
+      XCS_API_HOST: 0.0.0.0
+      XCS_API_PORT: 3001
+      XCS_DATABASE_URL_TARGET: XCS_DATABASE_URL
+      XCS_DATABASE_USER: xcs_api
+      XCS_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
+      XCS_INTERNAL_API_TOKEN: ${XCS_INTERNAL_API_TOKEN:-}
+      XCS_METRICS_ENABLED: ${XCS_METRICS_ENABLED:-false}
+      XCS_METRICS_TOKEN: ${XCS_METRICS_TOKEN:-}
+      XCS_ALLOWED_ORIGINS: ${XCS_ALLOWED_ORIGINS:-http://localhost:3000}
+      XCS_TRUSTED_PROXY_CIDRS: ${XCS_TRUSTED_PROXY_CIDRS:-}
+      XCS_READINESS_MAX_LEDGER_AGE_SECONDS: ${XCS_READINESS_MAX_LEDGER_AGE_SECONDS:-120}
+      XCS_PAYLOAD_FETCH_ENABLED: ${XCS_PAYLOAD_FETCH_ENABLED:-false}
+      XCS_IPFS_GATEWAY_URL: ${XCS_IPFS_GATEWAY_URL:-https://ipfs.io/}
+      XCS_TRUSTED_ISSUERS: ${XCS_TRUSTED_ISSUERS:-}
+      XCS_UNTRUSTED_ISSUERS: ${XCS_UNTRUSTED_ISSUERS:-}
+      XCS_DEMO_PINNING_ENABLED: ${XCS_DEMO_PINNING_ENABLED:-false}
+      XCS_PINNING_IP_HASH_SECRET: ${XCS_PINNING_IP_HASH_SECRET:-}
+      XCS_PINNING_NETWORKS: ${XCS_PINNING_NETWORKS:-}
+      XCS_IPFS_API_URL: ${XCS_IPFS_API_URL:-http://ipfs:5001}
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health/live').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_API_PORT_PUBLISHED:-3001}:3001'
+    volumes:
+      - ./config/networks:/workspace/config/networks:ro
+    networks: [edge, database, monitoring]
+    mem_limit: ${XCS_API_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_API_CPU_LIMIT:-0.75}
+
+  indexer:
+    <<: *runtime-hardening
+    image: ${XCS_INDEXER_IMAGE:-xcs-indexer:local}
+    build:
+      <<: *node-build
+      args:
+        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+        XCS_PACKAGE: '@xcs-protocol/indexer'
+        XCS_REVISION: ${XCS_REVISION:-local}
+        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    environment:
+      XCS_DATABASE_URL_TARGET: XCS_INDEXER_DATABASE_URL
+      XCS_DATABASE_USER: xcs_indexer
+      XCS_DATABASE_PASSWORD: ${XCS_INDEXER_DATABASE_PASSWORD:-}
+      XCS_NETWORK_PROFILE: ${XCS_NETWORK_PROFILE:-/workspace/config/networks/testnet.json}
+      XCS_RPC_URL_PRIMARY: ${XCS_RPC_URL_PRIMARY:-}
+      XCS_RPC_URL_SECONDARY: ${XCS_RPC_URL_SECONDARY:-}
+      XCS_REGISTRY_POLICY: ${XCS_REGISTRY_POLICY:-blackholed}
+      XCS_CONTROLLED_PILOT_ACK: ${XCS_CONTROLLED_PILOT_ACK:-}
+      XCS_DATABASE_SCOPE: ${XCS_DATABASE_SCOPE:-exclusive-profile}
+      XCS_INDEXER_POLL_INTERVAL_MS: ${XCS_INDEXER_POLL_INTERVAL_MS:-4000}
+      XCS_INDEXER_BATCH_SIZE: ${XCS_INDEXER_BATCH_SIZE:-20}
+      XCS_INDEXER_LEASE_DURATION_MS: ${XCS_INDEXER_LEASE_DURATION_MS:-30000}
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    volumes:
+      - ./config/networks:/workspace/config/networks:ro
+    networks: [edge, database]
+    mem_limit: ${XCS_INDEXER_MEMORY_LIMIT:-768m}
+    cpus: ${XCS_INDEXER_CPU_LIMIT:-1.0}
+
+  web:
+    <<: *runtime-hardening
+    profiles: ['site']
+    image: ${XCS_WEB_IMAGE:-xcs-web:local}
+    build:
+      <<: *node-build
+      args:
+        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
+        XCS_PACKAGE: '@xcs-protocol/web'
+        XCS_REVISION: ${XCS_REVISION:-local}
+        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    command: ['node', '.output/server/index.mjs']
+    environment:
+      NUXT_HOST: 0.0.0.0
+      NUXT_PORT: 3000
+      NUXT_API_BASE_URL: http://api:3001
+      NUXT_API_INTERNAL_TOKEN: ${XCS_INTERNAL_API_TOKEN:-}
+      NUXT_TRUSTED_PROXY_CIDRS: ${XCS_TRUSTED_PROXY_CIDRS:-}
+      NUXT_PUBLIC_API_BASE_URL: ${XCS_PUBLIC_API_BASE_URL:-http://localhost:3001}
+      NUXT_PUBLIC_PROFILE_ID: ${XCS_PUBLIC_PROFILE_ID:-}
+      NUXT_PUBLIC_RPC_URL: ${XCS_PUBLIC_RPC_URL:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_WEB_PORT_PUBLISHED:-3000}:3000'
+    networks: [edge]
+    mem_limit: ${XCS_WEB_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_WEB_CPU_LIMIT:-0.75}
+
+  ipfs:
+    image: ${XCS_IPFS_IMAGE:-ipfs/kubo:v0.35.0}
+    profiles: ['demo-pinning']
+    volumes:
+      - xcs-ipfs:/data/ipfs
+    networks: [edge]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=64m'
+    cap_drop: [ALL]
+    stop_grace_period: 30s
+    restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 200
+    mem_limit: ${XCS_IPFS_MEMORY_LIMIT:-1g}
+    cpus: ${XCS_IPFS_CPU_LIMIT:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  prometheus:
+    image: ${XCS_PROMETHEUS_IMAGE:-prom/prometheus:v3.14.0}
+    profiles: ['monitoring']
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${XCS_METRICS_RETENTION:-30d}
+      - --storage.tsdb.wal-compression
+    volumes:
+      - ./ops/monitoring/prometheus:/etc/prometheus:ro
+      - xcs-prometheus:/prometheus
+    secrets: [xcs_metrics_token]
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres-exporter:
+        condition: service_started
+      node-exporter:
+        condition: service_started
+    networks: [monitoring]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=32m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 150
+    stop_grace_period: 30s
+    restart: unless-stopped
+    mem_limit: ${XCS_PROMETHEUS_MEMORY_LIMIT:-768m}
+    cpus: ${XCS_PROMETHEUS_CPU_LIMIT:-0.75}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  grafana:
+    image: ${XCS_GRAFANA_IMAGE:-grafana/grafana:13.1.0}
+    profiles: ['monitoring']
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_SECURITY_ADMIN_USER: ${XCS_GRAFANA_ADMIN_USER:-xcs_admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SECURITY_DISABLE_GRAVATAR: 'true'
+      GF_SECURITY_COOKIE_SECURE: ${XCS_GRAFANA_COOKIE_SECURE:-true}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./ops/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - xcs-grafana:/var/lib/grafana
+    secrets: [grafana_admin_password]
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks: [monitoring]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=64m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 200
+    stop_grace_period: 30s
+    restart: unless-stopped
+    mem_limit: ${XCS_GRAFANA_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_GRAFANA_CPU_LIMIT:-0.5}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  postgres-exporter:
+    image: ${XCS_POSTGRES_EXPORTER_IMAGE:-quay.io/prometheuscommunity/postgres-exporter:v0.20.1}
+    profiles: ['monitoring']
+    environment:
+      DATA_SOURCE_URI: postgres:5432/xcs?sslmode=disable
+      DATA_SOURCE_USER: xcs_monitor
+      DATA_SOURCE_PASS_FILE: /run/secrets/monitor_database_password
+    secrets: [monitor_database_password]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      provision:
+        condition: service_completed_successfully
+    networks: [database, monitoring]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=32m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 100
+    stop_grace_period: 20s
+    restart: unless-stopped
+    mem_limit: ${XCS_EXPORTER_MEMORY_LIMIT:-128m}
+    cpus: ${XCS_EXPORTER_CPU_LIMIT:-0.25}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  node-exporter:
+    image: ${XCS_NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.12.1}
+    profiles: ['monitoring']
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/containers/storage/.+)($|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    networks: [monitoring]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=32m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 100
+    stop_grace_period: 20s
+    restart: unless-stopped
+    mem_limit: ${XCS_EXPORTER_MEMORY_LIMIT:-128m}
+    cpus: ${XCS_EXPORTER_CPU_LIMIT:-0.25}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+networks:
+  # Only edge has host/network egress. The database and monitoring planes are
+  # isolated Docker networks and publish no ports by default.
+  edge:
+  database:
+    internal: true
+  monitoring:
+    internal: true
+
+volumes:
+  xcs-postgres:
+  xcs-ipfs:
+  xcs-prometheus:
+  xcs-grafana:
+
+secrets:
+  xcs_metrics_token:
+    file: ${XCS_METRICS_TOKEN_FILE:-./ops/secrets/xcs_metrics_token}
+  grafana_admin_password:
+    file: ${XCS_GRAFANA_ADMIN_PASSWORD_FILE:-./ops/secrets/grafana_admin_password}
+  monitor_database_password:
+    file: ${XCS_MONITOR_DATABASE_PASSWORD_FILE:-./ops/secrets/monitor_database_password}

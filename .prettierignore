@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+.turbo
+.nuxt
+.output
+pnpm-lock.yaml
+XCS_draft0.pdf

@@ -1,0 +1,74 @@
+# Independent Go verifier
+
+This module is an independent offline implementation of the XCS v0.1 deterministic
+rules. It uses the pinned Go-maintained `golang.org/x/net/idna` package for the
+normative Unicode 15.0.0 WHATWG/UTS #46 host profile selected by Go 1.26. It does
+not import or execute the TypeScript implementation.
+
+The module checks `idna.UnicodeVersion` at runtime and in tests. A Go toolchain
+that selects different IDNA tables fails closed instead of silently changing URI
+validity; run this verifier with the repository-pinned Go 1.26 toolchain.
+
+Run its shared conformance suite:
+
+```sh
+GOCACHE=/tmp/xcs-go-cache go test ./...
+```
+
+Build the CLI:
+
+```sh
+go build -o xcs-verify ./cmd/xcs-verify
+```
+
+Commands:
+
+```text
+xcs-verify uid UID_INPUT.json
+xcs-verify schema SCHEMA.json
+xcs-verify claims SCHEMA.json CLAIMS.json
+xcs-verify claims --catalog CATALOG.json CLAIMS.json
+xcs-verify catalog CATALOG.json
+xcs-verify payload SCHEMA.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID
+xcs-verify payload --catalog CATALOG.json PAYLOAD.json URI ISSUER SUBJECT SCHEMA_UID
+```
+
+Every command writes one JSON result. Protocol errors are written to stderr with
+a stable `code`, `path`, and `message`, then the process exits non-zero. A structurally valid payload
+whose bytes do not match its URI digest writes `valid:false` to stdout and exits with status `1`.
+
+The Go library can resolve inheritance and supersession through `ResolveSchema`.
+Callers supply a `SchemaResolutionContext` whose `GetSchema` callback reads a
+complete, network-bound catalog of prior `RegisteredSchema` values. The returned
+`ResolvedSchema` contains the normalized definition, merged fields, and ordered
+parent lineage. The caller must bind the context coordinates and network to the
+schema registration being verified; the catalog is expected to contain only
+registrations whose UIDs were checked when they were indexed.
+
+`ParseCredentialPayload` accepts the same catalog through the optional
+`PayloadContext.ResolutionContext`, so library consumers can validate inherited
+claims. Omitting it preserves the offline fail-closed behavior.
+
+The `catalog` command strictly checks an `xcs-schema-catalog/1` bundle, recomputes every UID,
+validates its profile and authoritative checkpoint, rejects combined relation closures above the
+normative 256-entry limit, and resolves all relations. `claims` and
+`payload` accept that same bundle through `--catalog`; the positional schema form remains available
+for standalone definitions. Supplying an inherited child without its catalog still fails closed
+with `SCHEMA_PARENT_NOT_FOUND`.
+
+The `catalog` result explicitly reports `validationScope: "internal-consistency"` and
+`xrplRegistrationVerified: false`. A bundle has no ledger header chain, transaction metadata or
+inclusion proof; callers must trust its authoritative source/checkpoint or independently verify the
+corresponding validated XRPL evidence before claiming on-ledger registration.
+
+Library consumers can use `UnixSecondsToRippleTime`, `RippleTimeToUnixSeconds`,
+`ISO8601ToRippleTime`, and `RippleTimeToISO8601` for the v0.1 uint32 whole-second time contract.
+`ProjectCredentialLifecycle` projects pending, active, expired, or deleted from the same inputs and
+precedence as the TypeScript core. These functions remain library APIs; the CLI commands above are
+unchanged.
+
+`ClassifyCredentialPayload` is the independent network-free counterpart for the full payload
+decision. A caller supplies `PayloadRetrievalEvidence` containing retrieved bytes or an explicit
+unavailable outcome, the native URI, and a complete `PayloadContext`; the result preserves
+`valid`, `unavailable`, `tampered`, and `invalid` as separate statuses. The shared revision 12 vectors
+exercise the same contract in Go and TypeScript.

@@ -1,0 +1,94 @@
+{
+  "version": "0.1",
+  "cases": [
+    {
+      "id": "schema.accept-valid-definition",
+      "name": "accepts a structurally valid schema definition",
+      "valid": true,
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"},\"team\":{\"type\":\"string\",\"optional\":false},\"splits\":{\"type\":\"array\",\"items\":{\"type\":\"uint\"}}}}"
+    },
+    {
+      "id": "schema.reject-malformed-json",
+      "name": "classifies malformed JSON as JSON_INVALID",
+      "valid": false,
+      "errorCode": "JSON_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\""
+    },
+    {
+      "id": "schema.reject-non-object",
+      "name": "classifies a non-object root as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "[]"
+    },
+    {
+      "id": "schema.reject-unknown-schema-property",
+      "name": "classifies an unknown schema property as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}},\"future\":true}"
+    },
+    {
+      "id": "schema.reject-unknown-descriptor-property",
+      "name": "classifies an unknown descriptor property as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\",\"format\":\"decimal\"}}}"
+    },
+    {
+      "id": "schema.reject-descriptor-without-type",
+      "name": "classifies a descriptor without type as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{}}}"
+    },
+    {
+      "id": "schema.reject-non-object-descriptor",
+      "name": "classifies a non-object descriptor as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":\"uint\"}}"
+    },
+    {
+      "id": "schema.reject-wrong-property-type",
+      "name": "classifies a wrong schema property type as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":42,\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}}}"
+    },
+    {
+      "id": "schema.reject-null-fields",
+      "name": "classifies null fields as SCHEMA_INVALID",
+      "valid": false,
+      "errorCode": "SCHEMA_INVALID",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"description\":\"Confirms participation in a race.\",\"fields\":null}"
+    },
+    {
+      "id": "schema.reject-duplicate-decoded-key",
+      "name": "classifies duplicate decoded JSON keys as JSON_DUPLICATE_KEY",
+      "valid": false,
+      "errorCode": "JSON_DUPLICATE_KEY",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Race participation\",\"\\u006eame\":\"Duplicate\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}}}"
+    },
+    {
+      "id": "schema.reject-unpaired-surrogate",
+      "name": "classifies an unpaired JSON surrogate as JSON_INVALID_UNICODE",
+      "valid": false,
+      "errorCode": "JSON_INVALID_UNICODE",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Unsafe\\ud800\",\"description\":\"Confirms participation in a race.\",\"fields\":{\"bib\":{\"type\":\"uint\"}}}"
+    },
+    {
+      "id": "schema.accept-depth-sixteen",
+      "name": "accepts sixteen descriptor levels",
+      "valid": true,
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Depth boundary\",\"description\":\"Exercises the descriptor nesting limit.\",\"fields\":{\"value\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}}}}}}}}}}}}}}"
+    },
+    {
+      "id": "schema.reject-depth-seventeen",
+      "name": "rejects seventeen descriptor levels",
+      "valid": false,
+      "errorCode": "SCHEMA_DEPTH_EXCEEDED",
+      "inputJson": "{\"xcsVersion\":\"0.1\",\"name\":\"Depth boundary\",\"description\":\"Exercises the descriptor nesting limit.\",\"fields\":{\"value\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}}}}}}}}}}}}}}}"
+    }
+  ]
+}

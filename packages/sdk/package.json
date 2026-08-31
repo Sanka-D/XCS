@@ -1,0 +1,60 @@
+{
+  "name": "@xcs-protocol/sdk",
+  "version": "0.1.0-alpha.1",
+  "description": "Signer-agnostic TypeScript SDK for XCS on the XRP Ledger",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/XRPL-Commons/XCS/tree/main/packages/sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XRPL-Commons/XCS.git",
+    "directory": "packages/sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/XRPL-Commons/XCS/issues"
+  },
+  "keywords": [
+    "credentials",
+    "sdk",
+    "xrpl"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist coverage",
+    "lint": "tsc --noEmit",
+    "prepack": "pnpm build",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@xcs-protocol/core": "workspace:*",
+    "xrpl": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  }
+}
