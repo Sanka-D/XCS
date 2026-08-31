@@ -1680,7 +1680,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       ].sort((left, right) => left.roleName.localeCompare(right.roleName)),
     )
 
-    const [privilegeDrift] = await adminClient.sql<
+    const [privilegeDrift] = await database.client.sql<
       Array<{
         indexerCanRewriteIssuer: boolean
         indexerCanSetReplicationRole: boolean
