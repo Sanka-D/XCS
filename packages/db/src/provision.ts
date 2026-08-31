@@ -455,7 +455,7 @@ const SYSTEM_ROUTINE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
             CASE
               WHEN system_routine.oid < 16384
                 THEN acldefault('f'::"char", system_routine.proowner)
-              ELSE ARRAY[]::aclitem[]
+              ELSE NULL::aclitem[]
             END
           )
         ) privilege
@@ -496,7 +496,7 @@ const SYSTEM_ROUTINE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
             -- PUBLIC fallback, so provisioning cannot bless a hostile routine.
             WHEN system_routine.oid < 16384
               THEN acldefault('f'::"char", system_routine.proowner)
-            ELSE ARRAY[]::aclitem[]
+            ELSE NULL::aclitem[]
           END
         )
       ) privilege
@@ -570,7 +570,7 @@ const SYSTEM_TYPE_AND_LANGUAGE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
             CASE
               WHEN system_type.is_system_type AND system_type.oid < 16384
                 THEN acldefault('T'::"char", system_type.typowner)
-              ELSE ARRAY[]::aclitem[]
+              ELSE NULL::aclitem[]
             END
           )
         ) privilege
@@ -610,7 +610,7 @@ const SYSTEM_TYPE_AND_LANGUAGE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
           CASE
             WHEN system_type.is_system_type AND system_type.oid < 16384
               THEN acldefault('T'::"char", system_type.typowner)
-            ELSE ARRAY[]::aclitem[]
+            ELSE NULL::aclitem[]
           END
         )
       ) privilege
@@ -664,7 +664,7 @@ const SYSTEM_TYPE_AND_LANGUAGE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
             CASE
               WHEN trusted_language.oid < 16384
                 THEN acldefault('l'::"char", trusted_language.lanowner)
-              ELSE ARRAY[]::aclitem[]
+              ELSE NULL::aclitem[]
             END
           )
         ) privilege
@@ -702,7 +702,7 @@ const SYSTEM_TYPE_AND_LANGUAGE_PUBLIC_PRIVILEGE_NORMALIZATION_SQL = `
           CASE
             WHEN trusted_language.oid < 16384
               THEN acldefault('l'::"char", trusted_language.lanowner)
-            ELSE ARRAY[]::aclitem[]
+            ELSE NULL::aclitem[]
           END
         )
       ) privilege

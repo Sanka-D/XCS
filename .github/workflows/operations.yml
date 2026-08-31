@@ -109,7 +109,8 @@ jobs:
             ] | all(.host_ip == "127.0.0.1")
           ' "$RUNNER_TEMP/xcs-compose-dev.json"
 
-          docker compose -f docker-compose.yml -f docker-compose.secrets.yml config --format json \
+          docker compose -f docker-compose.yml -f docker-compose.secrets.yml \
+            --profile site --profile monitoring config --format json \
             > "$RUNNER_TEMP/xcs-compose-secrets.json"
           jq -e '
             (.services.postgres.environment.POSTGRES_PASSWORD == null) and
@@ -134,6 +135,7 @@ jobs:
             (.services.indexer.environment.XCS_RPC_URL_SECONDARY == null) and
             (.services.indexer.environment.XCS_RPC_URL_SECONDARY_FILE == "/run/secrets/rpc_url_secondary") and
             (.services.web.environment.NUXT_API_INTERNAL_TOKEN == null) and
+            (.services.web.environment.NUXT_API_INTERNAL_TOKEN_FILE == "/run/secrets/internal_api_token") and
             (.services["postgres-exporter"].environment.DATA_SOURCE_USER == "xcs_monitor") and
             (.services["postgres-exporter"].environment.DATA_SOURCE_PASS_FILE == "/run/secrets/monitor_database_password")
           ' "$RUNNER_TEMP/xcs-compose-secrets.json"
@@ -266,11 +268,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep --fixed-strings -- 'pnpm --filter "$XCS_PACKAGE" --prod deploy' docker/Dockerfile.node
+          grep --fixed-strings -- "pnpm --filter \"\$XCS_PACKAGE\" --prod deploy" docker/Dockerfile.node
           grep --fixed-strings -- 'USER node' docker/Dockerfile.node
           grep --fixed-strings -- 'ENTRYPOINT ["/usr/local/bin/xcs-entrypoint"]' docker/Dockerfile.node
           grep --fixed-strings -- '^node:24-alpine@sha256:[0-9a-f]{64}$' .github/workflows/release-artifacts.yml
-          RELEASE_NODE_BASE_USES="$(grep --count --fixed-strings -- '--build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE"' .github/workflows/release-artifacts.yml)"
+          RELEASE_NODE_BASE_USES="$(grep --count --fixed-strings -- "--build-arg XCS_NODE_IMAGE=\"\$XCS_RELEASE_NODE_IMAGE\"" .github/workflows/release-artifacts.yml)"
           test "$RELEASE_NODE_BASE_USES" = '3'
           sh -n docker/node-entrypoint.sh
           sh ops/ci/test-node-entrypoint.sh
