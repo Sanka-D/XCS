@@ -112,28 +112,28 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.secrets.yml config --format json \
             > "$RUNNER_TEMP/xcs-compose-secrets.json"
           jq -e '
-            (.services.postgres.environment | has("POSTGRES_PASSWORD") | not) and
+            (.services.postgres.environment.POSTGRES_PASSWORD == null) and
             (.services.postgres.environment.POSTGRES_PASSWORD_FILE == "/run/secrets/postgres_admin_password") and
-            (.services.migrate.environment | has("XCS_DATABASE_PASSWORD") | not) and
-            (.services.provision.environment | has("XCS_DATABASE_PASSWORD") | not) and
+            (.services.migrate.environment.XCS_DATABASE_PASSWORD == null) and
+            (.services.provision.environment.XCS_DATABASE_PASSWORD == null) and
             (.services.provision.environment.XCS_DATABASE_PASSWORD_FILE == "/run/secrets/postgres_admin_password") and
             (.services.provision.environment.XCS_DATABASE_CLUSTER_SCOPE == "dedicated") and
-            (.services.provision.environment | has("XCS_INDEXER_DATABASE_PASSWORD") | not) and
-            (.services.provision.environment | has("XCS_API_DATABASE_PASSWORD") | not) and
-            (.services.provision.environment | has("XCS_MONITOR_DATABASE_PASSWORD") | not) and
+            (.services.provision.environment.XCS_INDEXER_DATABASE_PASSWORD == null) and
+            (.services.provision.environment.XCS_API_DATABASE_PASSWORD == null) and
+            (.services.provision.environment.XCS_MONITOR_DATABASE_PASSWORD == null) and
             (.services.provision.environment.XCS_MONITOR_DATABASE_PASSWORD_FILE == "/run/secrets/monitor_database_password") and
-            (.services.api.environment | has("XCS_DATABASE_PASSWORD") | not) and
+            (.services.api.environment.XCS_DATABASE_PASSWORD == null) and
             (.services.api.environment.XCS_DATABASE_PASSWORD_FILE == "/run/secrets/api_database_password") and
-            (.services.api.environment | has("XCS_INTERNAL_API_TOKEN") | not) and
+            (.services.api.environment.XCS_INTERNAL_API_TOKEN == null) and
             (.services.api.environment.XCS_INTERNAL_API_TOKEN_FILE == "/run/secrets/internal_api_token") and
-            (.services.api.environment | has("XCS_METRICS_TOKEN") | not) and
+            (.services.api.environment.XCS_METRICS_TOKEN == null) and
             (.services.api.environment.XCS_METRICS_TOKEN_FILE == "/run/secrets/xcs_metrics_token") and
-            (.services.indexer.environment | has("XCS_DATABASE_PASSWORD") | not) and
-            (.services.indexer.environment | has("XCS_RPC_URL_PRIMARY") | not) and
+            (.services.indexer.environment.XCS_DATABASE_PASSWORD == null) and
+            (.services.indexer.environment.XCS_RPC_URL_PRIMARY == null) and
             (.services.indexer.environment.XCS_RPC_URL_PRIMARY_FILE == "/run/secrets/rpc_url_primary") and
-            (.services.indexer.environment | has("XCS_RPC_URL_SECONDARY") | not) and
+            (.services.indexer.environment.XCS_RPC_URL_SECONDARY == null) and
             (.services.indexer.environment.XCS_RPC_URL_SECONDARY_FILE == "/run/secrets/rpc_url_secondary") and
-            (.services.web.environment | has("NUXT_API_INTERNAL_TOKEN") | not) and
+            (.services.web.environment.NUXT_API_INTERNAL_TOKEN == null) and
             (.services["postgres-exporter"].environment.DATA_SOURCE_USER == "xcs_monitor") and
             (.services["postgres-exporter"].environment.DATA_SOURCE_PASS_FILE == "/run/secrets/monitor_database_password")
           ' "$RUNNER_TEMP/xcs-compose-secrets.json"
@@ -186,9 +186,9 @@ jobs:
           curl --fail --silent --show-error \
             --header "Authorization: Bearer $XCS_METRICS_TOKEN" \
             http://127.0.0.1:3001/internal/metrics/prometheus \
-            | rg --fixed-strings 'xcs_database_available'
+            | grep --fixed-strings 'xcs_database_available'
 
-          if "${COMPOSE[@]}" ps --services --status running | rg '^(web|prometheus|grafana|postgres-exporter|node-exporter)$'; then
+          if "${COMPOSE[@]}" ps --services --status running | grep --extended-regexp '^(web|prometheus|grafana|postgres-exporter|node-exporter)$'; then
             echo 'A non-core profile service started unexpectedly' >&2
             exit 1
           fi
@@ -266,15 +266,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rg --fixed-strings 'pnpm --filter "$XCS_PACKAGE" --prod deploy' docker/Dockerfile.node
-          rg --fixed-strings 'USER node' docker/Dockerfile.node
-          rg --fixed-strings 'ENTRYPOINT ["/usr/local/bin/xcs-entrypoint"]' docker/Dockerfile.node
-          rg --fixed-strings '^node:24-alpine@sha256:[0-9a-f]{64}$' .github/workflows/release-artifacts.yml
-          RELEASE_NODE_BASE_USES="$(rg --count --fixed-strings -- '--build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE"' .github/workflows/release-artifacts.yml)"
+          grep --fixed-strings -- 'pnpm --filter "$XCS_PACKAGE" --prod deploy' docker/Dockerfile.node
+          grep --fixed-strings -- 'USER node' docker/Dockerfile.node
+          grep --fixed-strings -- 'ENTRYPOINT ["/usr/local/bin/xcs-entrypoint"]' docker/Dockerfile.node
+          grep --fixed-strings -- '^node:24-alpine@sha256:[0-9a-f]{64}$' .github/workflows/release-artifacts.yml
+          RELEASE_NODE_BASE_USES="$(grep --count --fixed-strings -- '--build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE"' .github/workflows/release-artifacts.yml)"
           test "$RELEASE_NODE_BASE_USES" = '3'
           sh -n docker/node-entrypoint.sh
           sh ops/ci/test-node-entrypoint.sh
-          if rg 'COPY --from=build /workspace($|/)' docker/Dockerfile.node; then
+          if grep --extended-regexp 'COPY --from=build /workspace($|/)' docker/Dockerfile.node; then
             echo 'The production image must not copy the complete build workspace' >&2
             exit 1
           fi

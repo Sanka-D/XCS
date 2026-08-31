@@ -2307,7 +2307,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     })
 
     await expect(repository.haltIndexer(token, {}, 'SOURCE_DIVERGENCE')).rejects.toMatchObject({
-      code: '23505',
+      cause: { code: '23505' },
     })
 
     const [status] = await database.client.db

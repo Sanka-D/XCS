@@ -1195,10 +1195,36 @@ async function terminateNonAdministratorBackends(
   }
 }
 
+async function runReservedSqlTransaction<T>(
+  sql: DatabaseClient['sql'],
+  operation: (transactionSql: DatabaseClient['sql']) => Promise<T>,
+): Promise<T> {
+  // postgres.js reserve() pins one connection but its runtime object does not
+  // expose begin(), despite the published TypeScript type inheriting it. Use
+  // explicit transaction control so the advisory lock and every mutation stay
+  // on that same reserved backend.
+  await sql`BEGIN`
+  try {
+    const result = await operation(sql)
+    await sql`COMMIT`
+    return result
+  } catch (error) {
+    try {
+      await sql`ROLLBACK`
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        'XCS provisioning failed and its reserved transaction could not be rolled back',
+      )
+    }
+    throw error
+  }
+}
+
 async function validatedProjectionConstraintDefinitionCount(
   client: DatabaseClient,
 ): Promise<number> {
-  return client.sql.begin(async (sql) => {
+  return runReservedSqlTransaction(client.sql, async (sql) => {
     // PostgreSQL deparses both the installed and expected CHECK expressions.
     // Building the expected side in pg_temp avoids duplicating version-sensitive
     // pg_node_tree output while leaving no persistent object behind.
@@ -1522,7 +1548,7 @@ export async function provisionRuntimeDatabaseRoles(
     // Advisory locks are scoped to one database. The cluster-wide marker makes
     // the first successfully provisioned database the only valid control plane
     // for every later rotation.
-    await reservedSql.begin(async (sql) => {
+    await runReservedSqlTransaction(reservedSql, async (sql) => {
       await sql.unsafe(CONTROL_DATABASE_MARKER_SQL)
     })
 
@@ -1536,7 +1562,7 @@ export async function provisionRuntimeDatabaseRoles(
       // A non-superuser can hold the reserved key only because of historical
       // privilege drift. Remove every route to raw advisory locks before
       // terminating it, so it cannot reconnect and reacquire the key.
-      await reservedSql.begin(async (sql) => {
+      await runReservedSqlTransaction(reservedSql, async (sql) => {
         await sql.unsafe(RUNTIME_ROLE_QUARANTINE_SQL)
         await sql.unsafe(RUNTIME_ROLE_MEMBERSHIP_PURGE_SQL)
         await sql.unsafe(ADVISORY_LOCK_PRIVILEGE_PURGE_SQL)
@@ -1548,14 +1574,14 @@ export async function provisionRuntimeDatabaseRoles(
       }
     }
 
-    await reservedSql.begin(async (sql) => {
+    await runReservedSqlTransaction(reservedSql, async (sql) => {
       await sql.unsafe(RUNTIME_ROLE_QUARANTINE_SQL)
       await sql.unsafe(RUNTIME_ROLE_MEMBERSHIP_PURGE_SQL)
       await sql.unsafe(ADVISORY_LOCK_PRIVILEGE_PURGE_SQL)
     })
     await terminateNonAdministratorBackends(reservedClient, 'after')
 
-    await reservedSql.begin(async (sql) => {
+    await runReservedSqlTransaction(reservedSql, async (sql) => {
       await sql`SELECT set_config('password_encryption', 'scram-sha-256', true)`
       await sql`SELECT set_config(
       'xcs.bootstrap.indexer_password',
@@ -1964,7 +1990,7 @@ export async function provisionRuntimeDatabaseRoles(
     // Remove any backend that retained a formerly delegated current_role, then
     // enable only the three reconciled roles in the final atomic step.
     await terminateNonAdministratorBackends(reservedClient, 'after')
-    await reservedSql.begin(async (sql) => {
+    await runReservedSqlTransaction(reservedSql, async (sql) => {
       await sql.unsafe(`
         ALTER ROLE xcs_indexer LOGIN;
         ALTER ROLE xcs_api LOGIN;

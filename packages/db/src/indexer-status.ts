@@ -267,26 +267,39 @@ export async function acquireIndexerLease(
   input: AcquireIndexerLeaseInput,
 ): Promise<AcquiredIndexerLease> {
   const lease = normalizeIndexerLeaseRequest(input)
-  const now = databaseNow(input.now)
-  const leaseExpiresAt = databaseLeaseExpiration(input.now, input.leaseDurationMs)
-  const [row] = await database
-    .insert(indexerStatuses)
-    .values({
-      profileId: lease.profileId,
-      state: 'starting',
-      primarySourceTip: null,
-      secondarySourceTip: null,
-      lastAgreedLedgerIndex: null,
-      lastAgreedLedgerHash: null,
-      errorCode: null,
-      writerId: lease.writerId,
-      writerEpoch: 1,
-      leaseExpiresAt,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: indexerStatuses.profileId,
-      set: {
+  return database.transaction(async (transaction) => {
+    const tx = transaction as unknown as XcsDatabase
+    const [inserted] = await tx
+      .insert(indexerStatuses)
+      .values({
+        profileId: lease.profileId,
+        state: 'starting',
+        primarySourceTip: null,
+        secondarySourceTip: null,
+        lastAgreedLedgerIndex: null,
+        lastAgreedLedgerHash: null,
+        errorCode: null,
+        writerId: null,
+        writerEpoch: 1,
+        leaseExpiresAt: null,
+        updatedAt: databaseNow(input.now),
+      })
+      .onConflictDoNothing()
+      .returning({ profileId: indexerStatuses.profileId })
+
+    // A separate locked read makes every clock expression in the following
+    // UPDATE run after conflict/row-lock waits, never before them.
+    await tx
+      .select({ profileId: indexerStatuses.profileId })
+      .from(indexerStatuses)
+      .where(eq(indexerStatuses.profileId, lease.profileId))
+      .for('update')
+      .limit(1)
+
+    const now = databaseNow(input.now)
+    const [row] = await tx
+      .update(indexerStatuses)
+      .set({
         state: 'starting',
         primarySourceTip: null,
         secondarySourceTip: null,
@@ -294,18 +307,26 @@ export async function acquireIndexerLease(
         lastAgreedLedgerHash: null,
         errorCode: null,
         writerId: lease.writerId,
-        writerEpoch: sql`${indexerStatuses.writerEpoch} + 1`,
-        leaseExpiresAt,
+        writerEpoch:
+          inserted === undefined
+            ? sql`${indexerStatuses.writerEpoch} + 1`
+            : indexerStatuses.writerEpoch,
+        leaseExpiresAt: databaseLeaseExpiration(input.now, input.leaseDurationMs),
         updatedAt: now,
-      },
-      where: and(
-        or(isNull(indexerStatuses.leaseExpiresAt), lte(indexerStatuses.leaseExpiresAt, now)),
-        lte(indexerStatuses.writerEpoch, MAX_SAFE_EPOCH - 1),
-      )!,
-    })
-    .returning()
-  if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_UNAVAILABLE')
-  return acquiredLease(row)
+      })
+      .where(
+        inserted === undefined
+          ? and(
+              eq(indexerStatuses.profileId, lease.profileId),
+              or(isNull(indexerStatuses.leaseExpiresAt), lte(indexerStatuses.leaseExpiresAt, now)),
+              lte(indexerStatuses.writerEpoch, MAX_SAFE_EPOCH - 1),
+            )
+          : eq(indexerStatuses.profileId, lease.profileId),
+      )
+      .returning()
+    if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_UNAVAILABLE')
+    return acquiredLease(row)
+  })
 }
 
 export async function renewIndexerLease(
@@ -315,15 +336,27 @@ export async function renewIndexerLease(
 ): Promise<AcquiredIndexerLease> {
   const token = normalizeToken(tokenInput)
   normalizeLeaseDuration(input.leaseDurationMs)
-  const now = databaseNow(input.now)
-  const leaseExpiresAt = databaseLeaseExpiration(input.now, input.leaseDurationMs)
-  const [row] = await database
-    .update(indexerStatuses)
-    .set({ leaseExpiresAt, updatedAt: now })
-    .where(activeTokenFilter(token, now))
-    .returning()
-  if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_LOST')
-  return acquiredLease(row)
+  return database.transaction(async (transaction) => {
+    const tx = transaction as unknown as XcsDatabase
+    await tx
+      .select({ profileId: indexerStatuses.profileId })
+      .from(indexerStatuses)
+      .where(tokenFilter(token))
+      .for('update')
+      .limit(1)
+
+    const now = databaseNow(input.now)
+    const [row] = await tx
+      .update(indexerStatuses)
+      .set({
+        leaseExpiresAt: databaseLeaseExpiration(input.now, input.leaseDurationMs),
+        updatedAt: now,
+      })
+      .where(activeTokenFilter(token, now))
+      .returning()
+    if (row === undefined) throw new IndexerLeaseError('INDEXER_LEASE_LOST')
+    return acquiredLease(row)
+  })
 }
 
 export async function updateIndexerStatus(
