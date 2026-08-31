@@ -1,6 +1,15 @@
-FROM node:24-alpine AS build
+# syntax=docker/dockerfile:1.7
 
-RUN corepack enable
+# Override with an immutable reference such as node:24-alpine@sha256:<digest> in
+# release/deployment automation. The tag default keeps local builds ergonomic.
+ARG XCS_NODE_IMAGE=node:24-alpine
+FROM ${XCS_NODE_IMAGE} AS build
+
+ARG XCS_PACKAGE
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN corepack enable && corepack prepare pnpm@10.34.4 --activate
 WORKDIR /workspace
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
@@ -8,22 +17,49 @@ COPY packages ./packages
 COPY apps ./apps
 COPY config ./config
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=xcs-pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm install --frozen-lockfile
 
-ARG XCS_PACKAGE
 RUN test -n "$XCS_PACKAGE" && pnpm --filter "$XCS_PACKAGE..." build
 
-FROM node:24-alpine AS runtime
+# The database package's normal library build does not emit its two operational
+# entrypoints. Compile them into the same runtime artifact without shipping tsx.
+RUN if [ "$XCS_PACKAGE" = '@xcs-protocol/db' ]; then \
+      pnpm --filter '@xcs-protocol/db' exec tsup \
+        src/index.ts src/schema.ts src/migrate.ts src/provision-main.ts \
+        --format esm --dts --clean; \
+    fi
 
-RUN corepack enable
-WORKDIR /workspace
-ENV NODE_ENV=production
+# pnpm deploy rewrites workspace links and keeps only production dependencies.
+# Legacy mode is explicit because this repository does not inject workspace
+# packages; the lockfile remains the single dependency source of truth.
+RUN --mount=type=cache,id=xcs-pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store && \
+    pnpm --filter "$XCS_PACKAGE" --prod deploy --legacy /runtime && \
+    rm -rf /runtime/src /runtime/test /runtime/coverage /runtime/.turbo
 
-COPY --from=build /workspace /workspace
+FROM ${XCS_NODE_IMAGE} AS runtime
 
 ARG XCS_PACKAGE
-ENV XCS_PACKAGE=$XCS_PACKAGE
+ARG XCS_REVISION=unknown
+ARG XCS_VERSION=0.0.0
+
+LABEL org.opencontainers.image.title="XCS ${XCS_PACKAGE}" \
+      org.opencontainers.image.description="XCS production runtime" \
+      org.opencontainers.image.source="https://github.com/XRPL-Commons/XCS" \
+      org.opencontainers.image.revision="${XCS_REVISION}" \
+      org.opencontainers.image.version="${XCS_VERSION}" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV NODE_ENV=production
+WORKDIR /workspace
+
+COPY --from=build --chown=node:node /runtime/ ./
+COPY --chmod=0555 docker/node-entrypoint.sh /usr/local/bin/xcs-entrypoint
 
 USER node
+EXPOSE 3001
 
-CMD ["sh", "-c", "pnpm --filter \"$XCS_PACKAGE\" start"]
+ENTRYPOINT ["/usr/local/bin/xcs-entrypoint"]
+CMD ["node", "dist/main.js"]

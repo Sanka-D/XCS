@@ -6,30 +6,36 @@ XCS protects deterministic schema identifiers, ledger-derived lifecycle state, p
 
 Untrusted inputs include schema memos, all XRPL metadata, API path/query/body values, fetched HTTPS/IPFS bytes, wallet responses and deployment configuration.
 
+The PostgreSQL superuser/migration owner and the reviewed migration artifacts are trusted
+administrative inputs. The exact preflight protects the recorded five-migration history and the 16
+upgrade `CHECK` constraints; it does not attest every schema object against a malicious or
+compromised superuser. Runtime roles own no objects and have no DDL privileges, so a runtime-secret
+compromise does not cross that administrative boundary by itself.
+
 ## Implemented controls
 
-| Threat                                 | Control                                                                                                  |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Ambiguous JSON or hash divergence      | Strict parser, duplicate-key rejection, I-JSON checks, JCS and cross-language vectors                    |
-| Cross-language protocol drift          | Exhaustive manifest; shared schema, payload, Ripple-time and lifecycle vectors; independent Go runner    |
-| Forged payload content                 | URI-bound SHA-256/CID verification plus envelope linkage                                                 |
-| False issuer endorsement               | State, payload and trust reported separately                                                             |
-| Seed/key disclosure                    | No seed API; injected wallet signer; redacted errors and logs                                            |
-| Database runtime compromise            | Separate admin, projection-writer and API roles; no runtime DDL; idempotent secret-redacted provisioning |
-| Private RPC credential disclosure      | Dedicated no-secret public browser RPC; both indexer quorum settings remain server-only                  |
-| SSRF                                   | Fetch disabled by default; on-ledger URI only; HTTPS; DNS/IP checks; redirect, timeout and size limits   |
-| History gaps or inconsistent providers | Two full-history sources; deep normalized comparison; transaction-root checkpoint; fail-closed status    |
-| Accidental controlled-registry rollout | Exact Testnet profile suffix, explicit policy plus acknowledgement, private staging and disposable DB    |
-| Stale/concurrent indexer writer        | PostgreSQL lease epoch, row lock and status/checkpoint update in the same transaction                    |
-| Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard    |
-| Wallet signing against stale state     | Non-cacheable profile readiness before wallet invocation and again before blob persistence/submission    |
-| Duplicate/replayed ingestion           | Unique event keys and transactional, idempotent projections; deterministic replay digest                 |
-| Operational metrics disclosure/abuse   | Disabled by default; dedicated constant-time bearer; no-store; monitoring-ingress restriction            |
-| Moving-tip replay divergence           | Mandatory index/hash target, quorum verification and a fixed inclusive worker bound                      |
-| Account privacy amplification          | Exact shared-coordinate lookup only; no subject feed, account-wide listing or claims search              |
-| Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                    |
-| Public pin abuse                       | Testnet-only, wallet challenge, IP/address rate limit and payload quota                                  |
-| Package substitution or workspace leak | Reproducible tarballs; closed inventory; isolated consumer smoke; signed tag; OIDC staging plus 2FA      |
+| Threat                                 | Control                                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Ambiguous JSON or hash divergence      | Strict parser, duplicate-key rejection, I-JSON checks, JCS and cross-language vectors                   |
+| Cross-language protocol drift          | Exhaustive manifest; shared schema, payload, Ripple-time and lifecycle vectors; independent Go runner   |
+| Forged payload content                 | URI-bound SHA-256/CID verification plus envelope linkage                                                |
+| False issuer endorsement               | State, payload and trust reported separately                                                            |
+| Seed/key disclosure                    | No seed API; injected wallet signer; redacted errors and logs                                           |
+| Database runtime compromise            | Dedicated PG18; exact preflight; SCRAM verifiers; 2PC/raw locks disabled; quarantine and ACL/role audit |
+| Private RPC credential disclosure      | Dedicated no-secret public browser RPC; both indexer quorum settings remain server-only                 |
+| SSRF                                   | Fetch disabled by default; on-ledger URI only; HTTPS; DNS/IP checks; redirect, timeout and size limits  |
+| History gaps or inconsistent providers | Two full-history sources; deep normalized comparison; transaction-root checkpoint; fail-closed status   |
+| Accidental controlled-registry rollout | Exact Testnet profile suffix, explicit policy plus acknowledgement, private staging and disposable DB   |
+| Stale/concurrent indexer writer        | Lease epoch plus `FOR UPDATE` fencing row before projection/checkpoint/status in one transaction        |
+| Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard   |
+| Wallet signing against stale state     | Non-cacheable profile readiness before wallet invocation and again before blob persistence/submission   |
+| Duplicate/replayed ingestion           | Unique event keys and transactional, idempotent projections; deterministic replay digest                |
+| Operational metrics disclosure/abuse   | Disabled by default; dedicated constant-time bearer; no-store; monitoring-ingress restriction           |
+| Moving-tip replay divergence           | Mandatory index/hash target, quorum verification and a fixed inclusive worker bound                     |
+| Account privacy amplification          | Exact shared-coordinate lookup only; no subject feed, account-wide listing or claims search             |
+| Public read exhaustion                 | Bounded queries; IP budgets; deterministic SSR HMAC keys; explicit narrow proxy trust                   |
+| Public pin abuse                       | Testnet-only, wallet challenge, IP/address rate limit and payload quota                                 |
+| Package substitution or workspace leak | Reproducible tarballs; closed inventory; isolated consumer smoke; signed tag; OIDC staging plus 2FA     |
 
 ## Browser policy rollout boundary
 
@@ -97,3 +103,26 @@ a separate data-flow, retention and access review.
   an additional shared limiter at a trusted edge. Incorrectly omitting an ingress proxy CIDR safely
   collapses its visitors into one budget; trusting an unnecessarily broad CIDR increases spoofing
   risk, so catch-all `/0` ranges are rejected.
+- The database hardening assumes a trusted PostgreSQL superuser/migration owner and trusted
+  migration artifacts. Exact migration-journal and upgrade-constraint checks detect the covered
+  drift, but do not constitute an anti-superuser attestation of every schema object. Protect and
+  audit the administrator identity and migration supply chain independently.
+- Provisioning forces and verifies SCRAM-SHA-256 password verifiers for runtime roles, but the
+  operator still owns client transport and `pg_hba.conf` authentication policy. Require TLS where
+  traffic crosses a host boundary and explicit `scram-sha-256` role-to-database allow entries; do
+  not treat verifier format as a network-access control.
+- PostgreSQL connection limits and container limits provide coarse resource bounds, but the
+  provisioned statement, lock and idle-in-transaction timeouts are `USERSET` role defaults rather
+  than security ceilings. A client holding a stolen runtime credential can override them for its
+  session, consume every allowed connection, hold permitted row locks and run expensive authorized
+  work. Two-phase commit is disabled and runtime roles cannot call a raw advisory-lock function, but
+  operators still need independently enforced connection/query/resource quotas, workload isolation
+  and alerts on long transactions, row-lock pressure and disk growth. The reserved two-integer
+  advisory namespace is reachable only by the superuser provisioner during maintenance.
+- Revoking `EXECUTE` on `pg_notify()` and `pg_logical_emit_message()` closes those function entry
+  points, but PostgreSQL does not use that function ACL for the SQL `LISTEN` and `NOTIFY` commands.
+  A stolen runtime credential can still subscribe to channels or enqueue notifications and create a
+  denial-of-service workload. Operators must constrain connections and workload externally, monitor
+  notification-queue pressure, and set an explicit `max_notify_queue_pages` appropriate to the
+  deployment where PostgreSQL exposes that control; the provisioner does not turn notification ACLs
+  into a security boundary.

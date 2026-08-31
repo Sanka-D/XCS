@@ -85,6 +85,20 @@ may resolve an exact schema UID, Credential generation ID and transaction hash. 
 same repeatable-read snapshot and fail-closed checkpoint guard as verification. None reads payload
 claims or creates an issuer/subject Credential listing.
 
+`GET /v1/networks/:network/schemas/:uid/catalog` exports the target's complete,
+registration-evidenced lineage as `xcs-schema-catalog/1`. The API derives it inside the same
+fail-closed repeatable-read snapshot, binds it to the authoritative checkpoint, and marks the
+response `no-store`. Core, the CLI and the independent Go verifier each revalidate the profile,
+registration coordinates, recomputed UIDs and relation graph before resolving inherited fields. A
+combined `extends`/`supersedes` closure contains at most 256 unique schemas; the API queries one
+lookahead row and fails explicitly instead of truncating. This is a portable-transport bound, not a
+new on-ledger registration-validity rule.
+
+The portable bundle proves internal consistency, not XRPL inclusion by itself: it carries no ledger
+header chain, transaction metadata or inclusion proof. The reference CLI trusts its configured
+authoritative API projection. An independent verifier must instead trust a checkpoint/source out of
+band or verify the corresponding validated ledger evidence before claiming on-ledger registration.
+
 ## Persistence
 
 Raw XCS-relevant events are append-only. Current schema and Credential views are rebuildable
@@ -98,11 +112,12 @@ snapshot. It fails with `503` if the writer lease expired, either source disagre
 checkpoint differ, transaction-root evidence is absent, or the checkpoint is stale.
 
 An optional internal metrics reader uses its own read-only repeatable-read transaction and a secret
-that is distinct from the Nuxt SSR identity. Its JSON snapshot combines rebuildable database gauges
-with process-local API counters and labels their scope explicitly. It exposes no request identity or
-payload content and is not protocol truth. Client-side wallet submissions, physical disk capacity,
-API pool saturation, and past continuity incidents are outside this first snapshot because the API
-does not reliably observe them.
+that is distinct from the Nuxt SSR identity. Its JSON `schemaVersion: 2` snapshot and Prometheus
+endpoint combine rebuildable database gauges with process-local API counters and label their scope
+explicitly. They expose the active halt plus the count and latest durable fenced halt incident, but
+no request identity or payload content; none of these signals is protocol truth. Client-side wallet
+submissions, physical disk capacity and API pool saturation remain outside the API snapshot because
+the process does not reliably observe them.
 
 The initial migration is create-only for a fresh XCS projection database. It is not compatible with
 the database used by the historical `XRPL-Commons/xcs` MVP. Later migrations within this
@@ -114,17 +129,60 @@ schema ordering/search/activity and lifecycle aggregates without changing a tabl
 constraint or row. Old binaries ignore the indexes. The deployment and lock considerations for a
 populated database are documented in [`runbooks/deployment.md`](./runbooks/deployment.md).
 
-PostgreSQL uses three fixed trust identities. `xcs_admin` owns schema changes and runs migrations
-plus the post-migration provisioner; it is absent from runtime services. `xcs_indexer` receives only
-projection `SELECT`/`INSERT`/`UPDATE`, while `xcs_api` receives projection `SELECT` and CRUD on the
-isolated pinning tables. Neither runtime identity can create objects in `public`. Provisioning is
-idempotent so every migration and password rotation can reassert the complete grant set without
-logging connection URLs or passwords.
+After the projection-integrity checks in migration `0003`, migration
+`0004_indexer_incidents.sql` adds `indexer_incidents`, keyed by profile and writer lease epoch. A
+fenced writer records the halt status and incident in one transaction; runtime grants make the
+history append-only for `xcs_indexer` and read-only for `xcs_api`. A failed incident insert rolls back
+the halt update rather than publishing partial operational evidence.
+
+PostgreSQL uses four fixed trust identities. `xcs_admin` owns schema changes and runs migrations plus
+the post-migration provisioner; it is absent from runtime services. `xcs_indexer` receives
+`SELECT`/`INSERT` on append-only projections and column-limited `UPDATE` only for indexer status and
+Credential lifecycle transitions. `xcs_api` receives projection `SELECT` and CRUD on isolated
+pinning tables. `xcs_monitor` inherits `pg_monitor` but no application-schema DML. Runtime roles
+cannot create objects, have finite connection limits, and can connect only to the selected XCS
+database.
+
+The PostgreSQL superuser/migration owner and the reviewed migration artifacts are inside this trust
+boundary. The release-coupled preflight detects drift in the five recorded migrations and the 16
+upgrade `CHECK` constraints, but it is not an anti-superuser attestation of every object in the
+schema. Runtime identities remain outside that administrative boundary: they own no database
+objects and receive no DDL capability.
+
+Because PostgreSQL roles and several ACLs are cluster-wide, provisioning requires an explicitly
+dedicated PostgreSQL 18 cluster with two-phase commit disabled
+(`max_prepared_transactions = 0`). Before binding `xcs_provision_control` to the first control
+database, it requires the exact hash/timestamp identities of the five migration-journal entries,
+eight schema sentinels and all 16 named projection constraints in both their validated and canonical
+definition state. Password rotation holds one reserved superuser session lock across a committed
+`NOLOGIN` quarantine, global non-admin session
+termination, membership purge, `pg_shdepend` ownership audit, exhaustive runtime `DROP OWNED`, and
+the final password/grant transaction. An audit failure leaves runtimes quarantined; success
+terminates stale sessions before restoring `LOGIN` atomically.
+
+Provisioning removes every raw advisory-lock capability from runtime and all other non-superuser
+roles. It normalizes application, column, type, trusted-language, FDW/server, Large Object and
+system `PUBLIC` ACLs against the recorded PostgreSQL install baseline, removes runtime and `PUBLIC`
+default-ACL drift, and validates the attributes, membership graph and ACLs of the built-in
+`pg_monitor` role family before `xcs_monitor` can inherit it. Password rotation forces and verifies
+SCRAM-SHA-256 verifiers independently of the caller's session setting.
+
+Runtime concurrency therefore uses native transactions and row locks. A shared helper runs profile
+initialization and demo-pin reservation at `SERIALIZABLE`, retrying serialization failures and
+deadlocks with bounded full jitter within a five-attempt budget; pin reservation also locks its
+challenge row. Every ledger-persistence transaction first locks and validates the active writer
+lease row with `FOR UPDATE`, then commits projections, checkpoint and status together, so a lease
+takeover cannot race a projection write. No database URL or password is logged.
 
 PostgreSQL contains ledger-derived schemas, lifecycle events, current projections, checkpoints and
 optional demo-pinning administration rows. It contains no XRPL signing key and the Commons beta does
 not ingest or persist credential claims. Public credential payloads remain exact canonical HTTPS
 documents on issuer-controlled infrastructure.
+
+`XCS_DATABASE_SCOPE=shared` permits several immutable network profiles in one projection database.
+`exclusive-profile` rejects initialization when any different profile is already present. The
+disposable controlled-pilot policy requires `exclusive-profile`, preventing its staging history from
+sharing a database with another profile.
 
 A maintenance replay has a content-addressed upper bound: the operator supplies a ledger index and
 hash, both sources quorum-verify that ledger, and the worker never processes beyond it even if the
@@ -142,6 +200,27 @@ authoritative reads. The diagnostic `/status` route and public submission RPC ar
 authority. This is a product safety boundary, not a normative dependency of core XCS or the generic
 SDK. The API marks every readiness outcome `private, no-store`, the browser explicitly bypasses its
 cache, and the deployment ingress must preserve the header and never cache or synthesize the route.
+Recovery first decodes the stored blob and matches its derived hash, `LastLedgerSequence`, account,
+transaction type and any explicit `NetworkID` against the journal. Only then may it inspect that
+hash against XRPL without a readiness proof, because the read has no ledger side effect. If the
+transaction is still unvalidated, the browser must obtain a fresh readiness proof and reassert its
+IndexedDB business lock immediately before retransmitting the exact stored blob. Any failed
+integrity or readiness proof leaves the blob recoverable and creates no submission.
+
+The headless CLI applies the same boundary across an offline signer. `tx prepare` first proves that
+the transaction is one of the profile-bound XCS operations. Every `Credential*` operation must also
+obtain and validate the referenced authoritative schema catalog. The CLI commits the exact profile
+SHA-256 and checkpoint digest in an `xcs:prepared` Memo **before** autofill, then writes the final
+transaction to an `xcs-prepared-transaction/1` envelope. The external signature therefore protects
+the profile/checkpoint context together with `Fee`, `Sequence` and `LastLedgerSequence`.
+
+`tx submit --prepared` requires a cryptographically valid XRPL single-signature, rejects multisign
+in this alpha and permits no non-signature field mutation. Immediately before its first relay side
+effect it obtains final non-cacheable readiness and only then reads `ledger_current` to prove the
+window remains open. Non-loopback CLI XRPL endpoints require WSS, and profile, envelope, catalog and
+API JSON use strict UTF-8/JSON parsing that does not silently discard a BOM. The envelope contains
+public review material rather than a key; the signed blob remains an executable authorization and is
+never written to the sanitized operation journal.
 
 The Testnet beta performs one wallet operation at a time through Crossmark or GemWallet. It has no
 XCS account, server session, batch issuer, team or multi-tenant authorization layer. Recovery state

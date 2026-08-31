@@ -14,6 +14,12 @@ by XRPL Commons, not a Mainnet launch.
 
 The implementation never needs an XRPL seed. Applications construct transactions, then delegate signing to a wallet or an injected signer controlled by the issuer or subject.
 
+The headless offline flow validates that a transaction is one of the profile-bound XCS operations,
+requires authoritative schema-catalog evidence for every native `Credential*` operation, and commits
+the exact profile/checkpoint context in a signed `xcs:prepared` Memo before relay. It supports
+cryptographically verified XRPL single-signatures only in this alpha; see the offline-signing
+runbook for the complete readiness and expiry sequence.
+
 The public product takes UX inspiration from EAS and EASScan, not protocol semantics. One site
 presents Explorer, Studio and Developers surfaces while retaining native XRPL Credentials. Public
 discovery is hybrid: schemas and aggregate statistics are discoverable, while Credentials remain
@@ -24,12 +30,13 @@ boundaries are recorded in [`ADR 0002`](./docs/adr/0002-public-product-and-disco
 ## Repository map
 
 - `packages/core`: deterministic parsing, canonicalization, schemas, UIDs and payload verification.
-- `packages/sdk`: XRPL transaction builders and reliable submission primitives.
+- `packages/sdk`: profile-bound XRPL transaction validation, builders and reliable submission
+  primitives.
 - `packages/cli`: local, non-custodial command-line workflows.
 - `packages/db`: PostgreSQL schema, migrations and least-privilege role provisioning for a
   rebuildable local projection.
 - `apps/indexer`: validated-ledger ingestion and XCS projections.
-- `apps/api`: read-only schema, credential and verification API.
+- `apps/api`: read-only schema/catalog, credential and verification API.
 - `apps/web`: accountless Nuxt 4 Testnet application for exploration, issuance and verification.
 - `verifier-go`: independent conformance verifier.
 - `conformance`: language-neutral test vectors.
@@ -40,7 +47,7 @@ boundaries are recorded in [`ADR 0002`](./docs/adr/0002-public-product-and-disco
 - pnpm 10
 - Go 1.26 for the independent verifier
 - PostgreSQL 18 for API/indexer integration
-- Docker Compose for the self-hosted stack
+- Docker Compose 2.24.4 or newer for the self-hosted stack and its production secret overlay
 
 ## Developer validation
 
@@ -57,7 +64,11 @@ Nuxt application to `http://localhost:3000`. The full Compose startup and option
 procedure is in [`docs/runbooks/deployment.md`](./docs/runbooks/deployment.md).
 
 The reference deployment uses `xcs_admin` only for migrations and idempotent role provisioning,
-`xcs_indexer` for projection DML, and `xcs_api` for projection reads plus optional pinning CRUD.
+`xcs_indexer` for bounded projection DML, `xcs_api` for projection reads plus optional pinning CRUD,
+and `xcs_monitor` for PostgreSQL metrics without application-table DML. Provisioning is intentionally
+cluster-wide and requires a PostgreSQL cluster dedicated to XCS. A rotation is disruptive: it
+quarantines runtime logins and disconnects non-administrator database sessions before restoring the
+audited roles.
 `XCS_PUBLIC_RPC_URL` is a separate browser-visible submission endpoint; never put either private
 indexer quorum endpoint or its credentials in that variable.
 
@@ -68,6 +79,10 @@ uses issuer-hosted HTTPS payloads and does not store claims; signing keys remain
 wallets. Protocol and CLI support for IPFS remains available outside that hosted beta boundary.
 
 For the database and indexer workflow, see [`docs/runbooks/indexer.md`](./docs/runbooks/indexer.md).
+For Prometheus/Grafana signals and recovery objectives, see
+[`docs/runbooks/monitoring.md`](./docs/runbooks/monitoring.md).
+For external wallet or HSM preparation without giving XCS a key, see
+[`docs/runbooks/offline-signing.md`](./docs/runbooks/offline-signing.md).
 For commands and test tiers, see [`docs/TESTING.md`](./docs/TESTING.md). The reproducible tarball gate,
 one-time npm scope bootstrap, and OIDC staged-release procedure are documented in
 [`docs/runbooks/npm-packages.md`](./docs/runbooks/npm-packages.md); the three public package names

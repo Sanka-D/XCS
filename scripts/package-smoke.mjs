@@ -687,11 +687,16 @@ const courseSchema = {
 
 const typeConsumerSource = `import {
   canonicalize,
+  parseVerificationReport,
   type JsonValue,
+  type SchemaCatalogBundleV1,
   type SchemaDefinition,
 } from '@xcs-protocol/core'
 import {
   buildCredentialCreate,
+  createPreparedTransactionEnvelope,
+  parsePreparedTransactionEnvelope,
+  type AuthoritativeCheckpoint,
   type BuildCredentialCreateInput,
 } from '@xcs-protocol/sdk'
 import { createProgram, type CliExitCode } from '@xcs-protocol/cli'
@@ -705,13 +710,47 @@ const createInput: BuildCredentialCreateInput = {
   uri: 'https://example.org/credential.json',
 }
 const transaction = buildCredentialCreate(createInput)
+const checkpoint: AuthoritativeCheckpoint = {
+  ledgerIndex: 10,
+  ledgerHash: '22'.repeat(32),
+  closeTime: 800000000,
+  transactionRoot: '33'.repeat(32),
+}
+const prepared = createPreparedTransactionEnvelope({
+  profile: {
+    profileId: 'package-smoke',
+    xcsVersion: '0.1',
+    networkId: 1,
+    requiredAmendment: '44'.repeat(32),
+    registryAddress: 'rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe',
+    registrationAmountDrops: '1',
+    activationLedgerIndex: 1,
+    activationLedgerHash: '55'.repeat(32),
+  },
+  profileSha256: '66'.repeat(32),
+  checkpoint,
+  transaction: {
+    ...transaction,
+    Fee: '12',
+    Sequence: 1,
+    LastLedgerSequence: 20,
+  },
+})
+const parsedPrepared = parsePreparedTransactionEnvelope(prepared)
+const report = parseVerificationReport({
+  onChain: 'active',
+  schema: 'valid',
+  payload: 'valid',
+  issuerTrust: 'unknown',
+})
+const catalogFormat: SchemaCatalogBundleV1['format'] = 'xcs-schema-catalog/1'
 const exitCode: CliExitCode = 0
 
-void [canonical, transaction, exitCode, createProgram]
+void [canonical, transaction, parsedPrepared, report, catalogFormat, exitCode, createProgram]
 `
 
-const runtimeConsumerSource = `import { canonicalize } from '@xcs-protocol/core'
-import { buildCredentialAccept } from '@xcs-protocol/sdk'
+const runtimeConsumerSource = `import { canonicalize, parseVerificationReport } from '@xcs-protocol/core'
+import { buildCredentialAccept, PREPARED_TRANSACTION_FORMAT } from '@xcs-protocol/sdk'
 import { createProgram } from '@xcs-protocol/cli'
 
 if (canonicalize({ b: 2, a: 1 }) !== '{"a":1,"b":2}') {
@@ -722,7 +761,18 @@ const transaction = buildCredentialAccept({
   issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
   schemaUid: '11'.repeat(32),
 })
-if (transaction.TransactionType !== 'CredentialAccept' || typeof createProgram !== 'function') {
+const report = parseVerificationReport({
+  onChain: 'active',
+  schema: 'valid',
+  payload: 'valid',
+  issuerTrust: 'unknown',
+})
+if (
+  transaction.TransactionType !== 'CredentialAccept' ||
+  report.onChain !== 'active' ||
+  PREPARED_TRANSACTION_FORMAT !== 'xcs-prepared-transaction/1' ||
+  typeof createProgram !== 'function'
+) {
   throw new Error('SDK or CLI ESM import returned an unexpected value')
 }
 `

@@ -58,6 +58,15 @@ integrators.
 - PostgreSQL is a self-hostable, rebuildable reference projection, not a Commons authority and not a
   protocol requirement for third-party implementations. A MongoDB adapter would need to reproduce
   atomic checkpoints, single-writer fencing, snapshots, constraints, and deterministic replay.
+- The reference provisioner is deliberately release-coupled and supports only a dedicated
+  PostgreSQL 18 cluster with `max_prepared_transactions = 0`, the exact current migration shape and
+  hash/timestamp identities, and all named projection constraints validated with their canonical
+  definitions. It is not a shared-cluster bootstrapper or a generic forward-compatible migration
+  tool, nor an anti-superuser attestation of every schema object: the superuser/migration owner and
+  reviewed migration artifacts remain trusted. Runtime identities own no objects or DDL rights;
+  runtime concurrency uses `SERIALIZABLE` transactions and fenced row locks, and no runtime role
+  receives a raw PostgreSQL advisory-lock function. Provisioning forces SCRAM-SHA-256 verifiers,
+  while transport security and explicit SCRAM `pg_hba.conf` policy remain operator responsibilities.
 - Migration `0003_projection_integrity.sql` adds 16 PostgreSQL `CHECK` constraints for native XRPL
   uint32 bounds, non-negative event coordinates, event generation identity, and generation-ledger
   ordering. It installs them as `NOT VALID` with a 5-second lock timeout; `db:migrate` then validates

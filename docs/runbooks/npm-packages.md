@@ -20,6 +20,9 @@ tarballs into an isolated offline consumer, type-checks and imports the public E
 the packaged `xcs` binary plus an offline deterministic command. It rejects an unbuilt export, a
 missing bin, mismatched versions, a remaining `workspace:` dependency, or unexpected package files.
 Temporary artifacts are removed on success and failure.
+The isolated consumer compiles and imports the catalog, strict verification-report and prepared
+transaction-envelope exports in addition to the original builders, so those cross-package contracts
+cannot disappear from a publishable tarball unnoticed.
 
 To retain the three verified tarballs for release review, provide a new or empty output directory:
 

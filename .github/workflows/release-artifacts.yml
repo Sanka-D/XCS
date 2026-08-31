@@ -1,0 +1,308 @@
+name: Release signed artifacts
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: artifact-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      XCS_RELEASE_NODE_IMAGE: ${{ vars.XCS_RELEASE_NODE_IMAGE }}
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: Require an immutable audited Node base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$XCS_RELEASE_NODE_IMAGE" =~ ^node:24-alpine@sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Set repository variable XCS_RELEASE_NODE_IMAGE to node:24-alpine@sha256:<64 lowercase hex characters>' >&2
+            exit 1
+          fi
+
+      - name: Verify the signed release source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_NAME" != "v$VERSION" || ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$ ]]; then
+            echo "Artifact release requires a coordinated vX.Y.Z-alpha.N tag" >&2
+            exit 1
+          fi
+          if [[ "$(jq --raw-output .version package.json)" != "$VERSION" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match the repository package version" >&2
+            exit 1
+          fi
+
+          read -r OBJECT_TYPE TAG_OBJECT_SHA < <(
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+              --jq '[.object.type, .object.sha] | @tsv'
+          )
+          if [[ "$OBJECT_TYPE" != 'tag' ]]; then
+            echo "Release tag $GITHUB_REF_NAME must be annotated and signed" >&2
+            exit 1
+          fi
+          read -r VERIFIED TAGGED_COMMIT < <(
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$TAG_OBJECT_SHA" \
+              --jq '[.verification.verified, .object.sha] | @tsv'
+          )
+          if [[ "$VERIFIED" != 'true' || "$TAGGED_COMMIT" != "$(git rev-parse HEAD)" ]]; then
+            echo 'The verified tag must target the checked-out release commit' >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo 'The release commit is not part of origin/main' >&2
+            exit 1
+          fi
+
+      - name: Test and build independent verifier archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          RELEASE_DIRECTORY="$RUNNER_TEMP/xcs-release"
+          mkdir -p "$RELEASE_DIRECTORY"
+
+          (
+            cd verifier-go
+            go test ./...
+            go test -race ./...
+            go vet ./...
+          )
+
+          TARGETS=(linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64)
+          for TARGET in "${TARGETS[@]}"; do
+            GOOS_VALUE="${TARGET%/*}"
+            GOARCH_VALUE="${TARGET#*/}"
+            BINARY_NAME=xcs-verify
+            if [[ "$GOOS_VALUE" = windows ]]; then BINARY_NAME=xcs-verify.exe; fi
+
+            STAGING_DIRECTORY="$RUNNER_TEMP/xcs-verify-$GOOS_VALUE-$GOARCH_VALUE"
+            mkdir -p "$STAGING_DIRECTORY"
+            (
+              cd verifier-go
+              CGO_ENABLED=0 GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" \
+                go build -trimpath -ldflags='-s -w -buildid=' \
+                -o "$STAGING_DIRECTORY/$BINARY_NAME" ./cmd/xcs-verify
+            )
+            cp LICENSE verifier-go/README.md "$STAGING_DIRECTORY/"
+            ARCHIVE="$RELEASE_DIRECTORY/xcs-verify-$VERSION-$GOOS_VALUE-$GOARCH_VALUE"
+            tar --sort=name --mtime='UTC 1980-01-01' --owner=0 --group=0 --numeric-owner \
+              -cf "$ARCHIVE.tar" -C "$STAGING_DIRECTORY" .
+            gzip --no-name "$ARCHIVE.tar"
+          done
+          (
+            cd "$RELEASE_DIRECTORY"
+            sha256sum ./*.tar.gz > SHA256SUMS
+          )
+          echo "RELEASE_DIRECTORY=$RELEASE_DIRECTORY" >> "$GITHUB_ENV"
+
+      - name: Build release images locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          docker build \
+            --build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE" \
+            --build-arg XCS_PACKAGE=@xcs-protocol/api \
+            --build-arg XCS_REVISION="$GITHUB_SHA" \
+            --build-arg XCS_VERSION="$VERSION" \
+            --tag xcs-api:release \
+            --file docker/Dockerfile.node .
+          docker build \
+            --build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE" \
+            --build-arg XCS_PACKAGE=@xcs-protocol/indexer \
+            --build-arg XCS_REVISION="$GITHUB_SHA" \
+            --build-arg XCS_VERSION="$VERSION" \
+            --tag xcs-indexer:release \
+            --file docker/Dockerfile.node .
+          docker build \
+            --build-arg XCS_NODE_IMAGE="$XCS_RELEASE_NODE_IMAGE" \
+            --build-arg XCS_PACKAGE=@xcs-protocol/db \
+            --build-arg XCS_REVISION="$GITHUB_SHA" \
+            --build-arg XCS_VERSION="$VERSION" \
+            --tag xcs-db:release \
+            --file docker/Dockerfile.node .
+
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: xcs-api:release
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          format: table
+          version: v0.72.0
+          trivy-config: ops/security/trivy.yaml
+      - name: Scan indexer image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: xcs-indexer:release
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          format: table
+          version: v0.72.0
+          trivy-config: ops/security/trivy.yaml
+      - name: Scan database tooling image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: xcs-db:release
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          format: table
+          version: v0.72.0
+          trivy-config: ops/security/trivy.yaml
+
+      - name: Generate API image SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          image: xcs-api:release
+          format: spdx-json
+          output-file: ${{ env.RELEASE_DIRECTORY }}/xcs-api.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate indexer image SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          image: xcs-indexer:release
+          format: spdx-json
+          output-file: ${{ env.RELEASE_DIRECTORY }}/xcs-indexer.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate database tooling image SBOM
+        uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
+        with:
+          image: xcs-db:release
+          format: spdx-json
+          output-file: ${{ env.RELEASE_DIRECTORY }}/xcs-db.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Log in to GHCR with the ephemeral workflow token
+        shell: bash
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Push immutable image versions
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
+          for SERVICE in api indexer db; do
+            LOCAL_IMAGE="xcs-$SERVICE:release"
+            VERSION_IMAGE="$IMAGE_PREFIX/$SERVICE:$VERSION"
+            REVISION_IMAGE="$IMAGE_PREFIX/$SERVICE:sha-$GITHUB_SHA"
+            for IMMUTABLE_IMAGE in "$VERSION_IMAGE" "$REVISION_IMAGE"; do
+              if docker manifest inspect "$IMMUTABLE_IMAGE" > /dev/null 2>&1; then
+                echo "Refusing to overwrite existing image tag $IMMUTABLE_IMAGE" >&2
+                exit 1
+              fi
+            done
+            docker tag "$LOCAL_IMAGE" "$VERSION_IMAGE"
+            docker tag "$LOCAL_IMAGE" "$REVISION_IMAGE"
+            docker push "$VERSION_IMAGE"
+            docker push "$REVISION_IMAGE"
+            DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "$VERSION_IMAGE")"
+            DIGEST_VALUE="${DIGEST#*@}"
+            echo "${SERVICE}_name=$IMAGE_PREFIX/$SERVICE" >> "$GITHUB_OUTPUT"
+            echo "${SERVICE}_digest=$DIGEST_VALUE" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Sign images and attach signed SBOM attestations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for SERVICE in api indexer db; do
+            NAME="${{ steps.images.outputs.api_name }}"
+            DIGEST="${{ steps.images.outputs.api_digest }}"
+            case "$SERVICE" in
+              indexer)
+                NAME="${{ steps.images.outputs.indexer_name }}"
+                DIGEST="${{ steps.images.outputs.indexer_digest }}"
+                ;;
+              db)
+                NAME="${{ steps.images.outputs.db_name }}"
+                DIGEST="${{ steps.images.outputs.db_digest }}"
+                ;;
+            esac
+            cosign sign --yes "$NAME@$DIGEST"
+            cosign attest --yes \
+              --type spdxjson \
+              --predicate "$RELEASE_DIRECTORY/xcs-$SERVICE.spdx.json" \
+              "$NAME@$DIGEST"
+          done
+
+      - name: Attest API image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.images.outputs.api_name }}
+          subject-digest: ${{ steps.images.outputs.api_digest }}
+          push-to-registry: true
+      - name: Attest indexer image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.images.outputs.indexer_name }}
+          subject-digest: ${{ steps.images.outputs.indexer_digest }}
+          push-to-registry: true
+      - name: Attest database tooling image provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.images.outputs.db_name }}
+          subject-digest: ${{ steps.images.outputs.db_digest }}
+          push-to-registry: true
+
+      - name: Sign verifier archives and image SBOM files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ARTIFACT in "$RELEASE_DIRECTORY"/*.tar.gz "$RELEASE_DIRECTORY"/SHA256SUMS "$RELEASE_DIRECTORY"/*.spdx.json; do
+            cosign sign-blob --yes \
+              --bundle "$ARTIFACT.sigstore.json" \
+              "$ARTIFACT"
+          done
+
+      - name: Attest release file provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ env.RELEASE_DIRECTORY }}/*
+
+      - name: Attach new artifacts to the existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "$RELEASE_DIRECTORY"/*

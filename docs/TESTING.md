@@ -17,6 +17,8 @@ dependency, then installs them into an isolated offline consumer and exercises t
 exports, binary and an offline CLI command. CI runs this in a separate fresh-checkout job so a stale
 local `dist/` cannot hide a missing build step. See
 [`runbooks/npm-packages.md`](./runbooks/npm-packages.md) for retained artifacts and release gates.
+The isolated type/runtime consumer also imports strict verification reports, schema-catalog types
+and the prepared-transaction envelope API so a missing public export fails the release gate.
 
 The independent verifier is checked separately:
 
@@ -50,17 +52,23 @@ key. SDK and indexer mutation matrices use their own fixed seed and do not read 
 API tests also exercise the disabled-by-default operational snapshot: bearer authentication occurs
 before database reads, scrapes remain outside public budgets and OpenAPI, PostgreSQL failures do not
 leak details, invalid projection evidence has a distinct stable code, and process counters classify
-only bounded rate-limit and server-resolver outcomes.
-Repository tests reject partial or unsafe durable gauges while accepting profiles that have not yet
-published status/checkpoint rows.
+only bounded rate-limit and server-resolver outcomes. The JSON contract is `schemaVersion: 2`; the
+Prometheus rendering is derived from the same collection and includes durable fenced halt counts.
+Repository tests reject partial or unsafe durable gauges and inconsistent incident history while
+accepting profiles that have not yet published status/checkpoint rows.
 
-The v0.1 revision 9 manifest is consumed independently by TypeScript and Go. In addition to schema,
+The v0.1 revision 12 manifest is consumed independently by TypeScript and Go. In addition to schema,
 UID, JCS and claim cases, it covers inherited payload resolution, exact 1 MiB payload and 256-byte URI
-boundaries, pinned Unicode 15 UTS #46 authority normalization, port and IP boundaries, canonical
+boundaries, strict public network profiles and anchor normalization, pinned Unicode 15 UTS #46
+authority normalization, port and IP boundaries, canonical
 path/query retrieval URLs, Ripple/Unix/ISO conversion and lifecycle state precedence. Its shared
 retrieval cases also require identical `valid`, `unavailable`, `tampered`, and `invalid` outcomes,
-including invalid-URI precedence and the 1 MiB plus one byte rejection. A runner fails if a declared
-handler is missing or an undeclared vector file is present.
+including invalid-URI precedence and the 1 MiB plus one byte rejection. Schema-catalog vectors add
+the 256/257 combined relation-closure boundary and shared-ancestor deduplication. Raw JSON-token
+vectors prove that both runners accept semantically integral decimal and exponent spellings,
+normalize accepted `-0` values to positive zero before applying field bounds, and reject non-finite
+`1e400` as `JSON_NON_IJSON_NUMBER`. A runner fails if a declared handler is missing or an undeclared
+vector file is present.
 
 Go's normal test command executes every registered fuzz seed, including those loaded from the
 committed conformance vectors. Run the same bounded campaigns as CI when changing strict JSON,
@@ -86,6 +94,13 @@ pnpm --filter @xcs-protocol/web exec playwright install chromium
 pnpm test:e2e
 ```
 
+CLI unit integration covers the equivalent headless boundary without a live server. It proves the
+profile-bound transaction semantics, mandatory catalog download for every `Credential*` operation,
+pre-autofill `xcs:prepared` context commitment, deterministic single-signature verification, final
+readiness-before-`ledger_current` order, WSS policy and strict UTF-8/BOM handling. A wallet mutation,
+unsigned or invalid signature, invalid current-ledger response or regressed checkpoint is rejected
+before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
+
 ## Integration tiers
 
 1. Pure unit, conformance, generative and fuzz-corpus tests require no network.
@@ -97,7 +112,11 @@ pnpm test:e2e
 5. The deterministic Playwright browser gate uses explicitly development-only issuer and subject
    wallets plus a fake XRPL client. It proves exact application transitions and indexed business
    evidence, including the subject's payload consent, separate trust-neutral acknowledgement, and
-   the two readiness gates around wallet signing and blob persistence/submission;
+   the two readiness gates around wallet signing and blob persistence/submission. It also reloads a
+   signed IndexedDB operation and proves that retransmission requires fresh readiness, uses no new
+   wallet signature, preserves recovery material when blocked and removes it after terminal XRPL
+   validation. A corrupted stored expiry is rejected before reconciliation and leaves the exact blob
+   untouched;
    real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
 
 Never use a production seed in tests. A Testnet reset invalidates the activation profile and
@@ -105,32 +124,63 @@ requires a new fixture/profile rather than editing historical expected UIDs.
 
 The destructive PostgreSQL integration suite receives an **admin database URL**, creates random
 databases named `xcs_it_<uuid>` or `xcs_api_it_<uuid>` and the fixed `xcs_indexer`/`xcs_api` roles,
-then removes those exact objects after each suite. It refuses to run a provisioning case if either
-role already exists. Use only a disposable CI/test cluster; never point this suite at a shared or
+plus `xcs_monitor` and the `xcs_provision_control` marker, then removes those exact objects after
+each suite. It refuses to run a provisioning case if any fixed role already exists. Provisioning
+revokes database, function and other shared ACLs cluster-wide, so use only a disposable dedicated
+CI/test cluster with `max_prepared_transactions = 0`; never point this suite at a shared or
 production PostgreSQL instance.
 
 ```sh
-XCS_TEST_DATABASE_URL=postgres://postgres:password@127.0.0.1:5432/postgres pnpm test:postgres
+XCS_TEST_DATABASE_URL=postgres://postgres:postgres-integration-password-0001@127.0.0.1:5432/postgres pnpm test:postgres
 ```
 
-It requires PostgreSQL 18 and proves migrations `0000` through `0003`, including the discovery
-indexes, NULL-safe constraints, and all 16 projection-integrity constraints. The `0003` case proves
-that `CHECK NOT VALID` installation is followed by post-commit, table-by-table validation; invalid
-historical projection data fails closed while preserving a retry path after rebuild/replay. The
-suite also covers lease takeover/fencing, rollback, restart/idempotence, transaction-root
-persistence, and equal timestamp-free digests across two replays. It provisions the fixed runtime
-roles in the isolated cluster, proves their positive and denied permissions, and confirms that the
-least-privilege `xcs_api` role may read logical database size and client-connection gauges. It then
-proves that two replays with different source tips stop at the same quorum-verified index/hash
-boundary. The unit suite separately proves that a tip advancing during replay cannot move that
-boundary. A tenth indexer case captures a deterministic four-ledger bundle, validates and opens it
+It requires PostgreSQL 18 and proves migrations `0000` through `0004`, including the discovery
+indexes, NULL-safe constraints, all 16 projection-integrity constraints and the durable
+`indexer_incidents` history. Provisioning compares the exact `hash`/`created_at` identity of all five
+journal rows and the canonical PostgreSQL 18 definition of every named projection constraint; count
+or name equality alone is insufficient. It rejects an empty, rewritten or incompletely validated
+database before creating the control marker, then binds a fully migrated database and rejects
+another migrated database in the same cluster. The `0003` case proves that `CHECK NOT VALID`
+installation is followed by post-commit, table-by-table validation; invalid historical projection
+data fails closed while preserving a retry path after rebuild/replay. The `0004` cases prove
+append-only runtime grants, fenced incident identity and atomic rollback when an incident cannot be
+recorded.
+
+The twelve indexer cases also cover `shared` versus `exclusive-profile` database initialization,
+lease takeover/fencing, projection rollback, restart/idempotence, transaction-root persistence, and
+equal timestamp-free digests across two replays. They provision the fixed runtime roles in the
+isolated cluster, prove exact column-level mutations, hostile-schema and cross-database denial,
+finite connection limits, membership options, password rotation/session termination, and confirm
+that caller-forced `password_encryption=md5` cannot prevent all runtime passwords from receiving
+verified SCRAM-SHA-256 verifiers. Ownership drift across databases, Large Objects and collations
+fails closed with runtime roles left `NOLOGIN`. The cases also exercise a delegated `SET ROLE`
+session, recovery from a legacy runtime-held provision lock, removal of every raw runtime
+advisory-lock capability, exhaustive runtime/default ACL removal, hostile
+system-catalog/column/type/trusted-language/FDW/server/Large-Object/parameter/tablespace `PUBLIC`
+ACL normalization, and Large Object function denial. Deliberate `pg_monitor` membership and DML
+drift fails closed before the exact built-in monitoring baseline is granted to `xcs_monitor`.
+Concurrent exclusive-profile
+initialization admits exactly one profile, while the fenced lease cases reject stale writers before
+projection persistence. Two replays with different source tips must stop at the same
+quorum-verified index/hash boundary; the unit suite separately proves that a tip advancing during
+replay cannot move that boundary. The complete-bundle case captures a deterministic four-ledger
+bundle, validates and opens it
 independently twice, and runs the normal worker through schema registration, six Credential
 creations, acceptance and all six deletion causes. Both empty projections must match the pinned
 complete digest and exact rows. This exercises the real bundle pipeline locally; a reviewed capture
-from public Testnet remains separate release evidence. An eleventh API case applies the migrations
-to another empty database and executes the operational snapshot's real SQL and runtime type
-normalization. Normal `pnpm test` skips these eleven cases when the admin URL is absent; CI runs them
-as a required separate job.
+from public Testnet remains separate release evidence.
+
+Three API cases apply all migrations to another empty database. They execute the operational
+metrics SQL and runtime type normalization, including `schemaVersion: 2` halt history; serialize
+concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock without advisory
+locks; and execute the recursive schema-catalog CTE against a real 256/257-node DAG, shared ancestor
+and corrupted cycle, proving deduplication, termination and explicit overflow rather than
+truncation. Normal `pnpm test` skips these fifteen PostgreSQL cases when the admin URL is absent; CI
+runs them as a required separate job.
+
+The database unit suite exercises the shared `SERIALIZABLE` helper independently: it retries the
+complete unit for SQLSTATE `40001` and `40P01` with bounded full-jitter delay, does not retry an
+unrelated database error, and stops at the five-attempt default budget.
 
 ## Captured ledger bundles
 
