@@ -51,8 +51,16 @@ integrity locally and sends the parsed object for schema verification. Commons d
 cache, enumerate or search payload claims.
 
 The beta has no XCS user account, organization account or custodial signing service. Signing keys
-remain in Crossmark or GemWallet, and the browser journal remains local to the device. Issuance is
+remain in the issuer- or subject-controlled wallet behind the pinned XRPL Connect sign-only
+boundary, and the browser journal remains local to the device. The factory covers Xaman, Crossmark,
+GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap, with Xaman and WalletConnect enabled
+only when their public application identifiers are configured. XCS never delegates submission
+through `signAndSubmit`: it verifies, persists and submits the signed transaction itself. Issuance is
 unitary; batch issuance, teams, role-based access and hosted automation are outside the beta.
+
+This surface does not promise that every wallet is compatible. WalletConnect discovery is useful
+only when the selected wallet supports the XRPL Testnet namespace and native `Credential*`
+transactions, and every enabled adapter still needs real Testnet certification.
 
 The public integration contract is REST-first. GraphQL may be reconsidered only after real REST
 usage demonstrates a need. The initial end-to-end pilot covers course participation/completion and
@@ -73,6 +81,9 @@ may rebuild and compare the same projection.
 - Issuers must operate a CORS-compatible HTTPS payload host and retain the exact canonical bytes.
 - The accountless beta avoids authentication and multi-tenant authorization state, but its local
   operation history does not automatically follow an issuer across browsers or devices.
+- Xaman and WalletConnect application identifiers are public browser configuration, not signing
+  secrets. Removing them or restricting the adapter factory is a wallet-only rollback with no
+  protocol or database-schema migration.
 - Permissionless schemas require clear non-endorsement messaging and abuse-resistant presentation;
   moderation must never rewrite protocol validity.
 - Product and API additions remain non-normative and backward-compatible with frozen v0.1 data.

@@ -28,7 +28,11 @@
   "wallet": {
     "connect": "Connect wallet",
     "choose": "Choose a compatible wallet",
-    "none": "No supported wallet is available in this browser."
+    "available": "Available",
+    "unavailable": "Not detected",
+    "select": "Connect",
+    "setup": "Install or open",
+    "none": "No XRPL Connect adapter is configured."
   },
   "transaction": {
     "preview": "Review before signing",
@@ -263,6 +267,7 @@
     "profile": "Profile",
     "networkId": "XRPL network ID",
     "registry": "Blackholed registry",
+    "controlledRegistry": "Controlled registry",
     "activation": "Activation ledger",
     "primaryTip": "Primary source tip",
     "secondaryTip": "Secondary source tip",

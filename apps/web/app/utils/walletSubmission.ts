@@ -1,5 +1,5 @@
 import type { ReliableSubmissionResult, Signer, SignerResult } from '@xcs-protocol/sdk'
-import { decode, hashes, verifySignature } from 'xrpl'
+import { decode, encode, hashes, verifySignature } from 'xrpl'
 import type { SignedTransaction, Transaction } from 'xrpl-connect'
 
 interface WalletSignOnly {
@@ -68,26 +68,89 @@ export function validateStoredRecoveryMaterial(material: StoredRecoveryMaterial)
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeAssertedHash(value: unknown): string {
+  if (value === undefined || value === '') return ''
+  if (typeof value !== 'string') throw new Error('WALLET_SIGNED_HASH_INVALID')
+  const normalized = value.trim().toUpperCase()
+  if (!HASH_PATTERN.test(normalized)) throw new Error('WALLET_SIGNED_HASH_INVALID')
+  return normalized
+}
+
 /**
- * Crossmark and GemWallet currently return an empty hash from sign-only flows.
- * The signed blob is the source of truth, so derive its canonical XRPL hash and
- * only treat a wallet-provided hash as an additional consistency assertion.
+ * Normalize every XRPL Connect sign-only result into the complete signed blob
+ * required by the XCS SDK. Most adapters return `tx_blob`; WalletConnect 1.0
+ * returns signed `tx_json`, which is encoded locally before the same validation
+ * and application-owned submission pipeline is used.
  */
 export function normalizeWalletSignature(signed: SignedTransaction): SignerResult {
-  const txBlob = typeof signed.tx_blob === 'string' ? signed.tx_blob.trim() : ''
-  if (txBlob.length === 0) throw new Error('WALLET_SIGNED_BLOB_MISSING')
+  if (signed.tx_blob !== undefined && typeof signed.tx_blob !== 'string') {
+    throw new Error('WALLET_SIGNED_BLOB_INVALID')
+  }
+  const suppliedBlob = typeof signed.tx_blob === 'string' ? signed.tx_blob.trim() : ''
 
+  let encodedJson = ''
+  let jsonHash = ''
+  if (signed.tx_json !== undefined) {
+    if (!isRecord(signed.tx_json)) throw new Error('WALLET_SIGNED_JSON_INVALID')
+    const txJson = { ...signed.tx_json }
+    jsonHash = normalizeAssertedHash(txJson.hash)
+    delete txJson.hash
+    try {
+      encodedJson = encode(txJson)
+      if (encodedJson.length === 0) throw new Error('empty signed transaction')
+    } catch {
+      throw new Error('WALLET_SIGNED_JSON_INVALID')
+    }
+  }
+
+  if (suppliedBlob.length === 0 && encodedJson.length === 0) {
+    throw new Error('WALLET_SIGNED_BLOB_MISSING')
+  }
+  if (
+    suppliedBlob.length > 0 &&
+    encodedJson.length > 0 &&
+    suppliedBlob.toUpperCase() !== encodedJson.toUpperCase()
+  ) {
+    throw new Error('WALLET_SIGNED_ARTIFACT_MISMATCH')
+  }
+  const txBlob = suppliedBlob || encodedJson
+
+  let decoded: Record<string, unknown>
   let derivedHash: string
   try {
+    decoded = decode(txBlob)
     derivedHash = hashes.hashSignedTx(txBlob).toUpperCase()
   } catch {
     throw new Error('WALLET_SIGNED_BLOB_INVALID')
   }
 
-  const suppliedHash = typeof signed.hash === 'string' ? signed.hash.trim().toUpperCase() : ''
-  if (suppliedHash.length > 0) {
-    if (!HASH_PATTERN.test(suppliedHash)) throw new Error('WALLET_SIGNED_HASH_INVALID')
-    if (suppliedHash !== derivedHash) throw new Error('WALLET_SIGNED_HASH_MISMATCH')
+  for (const suppliedHash of [normalizeAssertedHash(signed.hash), jsonHash]) {
+    if (suppliedHash.length > 0 && suppliedHash !== derivedHash) {
+      throw new Error('WALLET_SIGNED_HASH_MISMATCH')
+    }
+  }
+
+  if (signed.signature !== undefined) {
+    if (
+      typeof signed.signature !== 'string' ||
+      typeof decoded.TxnSignature !== 'string' ||
+      signed.signature.trim().toUpperCase() !== decoded.TxnSignature.toUpperCase()
+    ) {
+      throw new Error('WALLET_SIGNED_SIGNATURE_MISMATCH')
+    }
+  }
+
+  if (signed.signerAddress !== undefined) {
+    if (
+      typeof signed.signerAddress !== 'string' ||
+      signed.signerAddress.trim() !== decoded.Account
+    ) {
+      throw new Error('WALLET_SIGNER_ADDRESS_MISMATCH')
+    }
   }
 
   return { hash: derivedHash, txBlob }

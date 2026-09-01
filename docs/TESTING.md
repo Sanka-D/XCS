@@ -101,6 +101,12 @@ readiness-before-`ledger_current` order, WSS policy and strict UTF-8/BOM handlin
 unsigned or invalid signature, invalid current-ledger response or regressed checkpoint is rejected
 before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
 
+Web unit tests compose the six self-configuring XRPL Connect adapters and all eight when the optional
+Xaman and WalletConnect public identifiers are present. They also normalize sign-only `tx_blob` and
+signed `tx_json` responses and reject mismatched artifacts, hashes, signatures, signer addresses or
+reviewed fields before persistence/submission. These tests never call `signAndSubmit` and do not
+replace real wallet compatibility evidence.
+
 ## Integration tiers
 
 1. Pure unit, conformance, generative and fuzz-corpus tests require no network.
@@ -117,7 +123,9 @@ before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
    wallet signature, preserves recovery material when blocked and removes it after terminal XRPL
    validation. A corrupted stored expiry is rejected before reconciliation and leaves the exact blob
    untouched;
-   real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
+   real Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap signing
+   remains a separate manual Testnet gate. WalletConnect candidates must additionally prove the XRPL
+   Testnet namespace and native `Credential*` support; QR/deep-link discovery alone is insufficient.
 
 Never use a production seed in tests. A Testnet reset invalidates the activation profile and
 requires a new fixture/profile rather than editing historical expected UIDs.
@@ -170,13 +178,14 @@ creations, acceptance and all six deletion causes. Both empty projections must m
 complete digest and exact rows. This exercises the real bundle pipeline locally; a reviewed capture
 from public Testnet remains separate release evidence.
 
-Three API cases apply all migrations to another empty database. They execute the operational
-metrics SQL and runtime type normalization, including `schemaVersion: 2` halt history; serialize
-concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock without advisory
-locks; and execute the recursive schema-catalog CTE against a real 256/257-node DAG, shared ancestor
-and corrupted cycle, proving deduplication, termination and explicit overflow rather than
-truncation. Normal `pnpm test` skips these fifteen PostgreSQL cases when the admin URL is absent; CI
-runs them as a required separate job.
+Four API cases apply all migrations to another empty database. They prove that authoritative
+read-only snapshots decode database time through the real driver and least-privilege role; execute
+the operational metrics SQL and runtime type normalization, including `schemaVersion: 2` halt
+history; serialize concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock
+without advisory locks; and execute the recursive schema-catalog CTE against a real 256/257-node
+DAG, shared ancestor and corrupted cycle, proving deduplication, termination and explicit overflow
+rather than truncation. Normal `pnpm test` skips these sixteen PostgreSQL cases when the admin URL is
+absent; CI runs them as a required separate job.
 
 The database unit suite exercises the shared `SERIALIZABLE` helper independently: it retries the
 complete unit for SQLSTATE `40001` and `40P01` with bounded full-jitter delay, does not retry an

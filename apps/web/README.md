@@ -51,11 +51,25 @@ invited to turn shared coordinates into a secondary public directory.
 
 ## Wallet support
 
-The alpha deliberately enables only `CrossmarkAdapter` and `GemWalletAdapter` from `xrpl-connect@0.8.2`. Xaman is disabled because this flow requires a complete `tx_blob` from a sign-only request before the application controls submission and recovery.
+The web app pins `xrpl-connect@1.0.0-rc.0` and registers its eight official adapters: Xaman,
+Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap. Crossmark, GemWallet,
+Ledger, Xyra, Otsu and MetaMask Snap are registered without deployment-specific configuration.
+Xaman is added only when `NUXT_PUBLIC_XAMAN_API_KEY` is set, and WalletConnect only when
+`NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` is set. Both values identify a public application to its
+wallet provider; they are browser-visible identifiers, not secrets.
 
-Crossmark and GemWallet currently return `hash: ""` from their sign-only adapters. The application derives the transaction hash from `tx_blob` with `xrpl.hashes.hashSignedTx`. If a future adapter returns a non-empty hash, it must exactly match the derived value or the operation is rejected before submission.
+XCS filters this surface to adapters that expose `sign()` and never calls `signAndSubmit`. A wallet
+may return a `tx_blob` or signed `tx_json`; the application normalizes the artifact, derives and
+checks its hash, verifies the XRPL signature and optional `signerAddress`, and proves that no
+reviewed transaction field changed. Only then does it persist the signed blob and submit it through
+the configured public RPC itself. A missing, malformed or contradictory wallet artifact is rejected
+before persistence or relay.
 
-The adapters still require real browser-extension testing for each native Credential transaction type. Unit tests cover the application-side blob, hash, persistence, and validation invariants; they do not prove that a particular released wallet UI supports XLS-70 transactions.
+This adapter list does not promise compatibility with every wallet. WalletConnect broadens the
+discovery surface, but each candidate wallet must support the XRPL Testnet namespace and native
+`Credential*` transaction types. Real extension, hardware-device, popup and QR/deep-link tests for
+every enabled adapter remain a release gate; unit tests prove the application-side normalization,
+signature, persistence and submission invariants, not a released wallet UI.
 
 ## Deterministic browser gate
 
@@ -130,13 +144,15 @@ Policy in `Content-Security-Policy-Report-Only`. The observed policy has no `uns
 response. Production browser connections are limited to the same origin, HTTPS and WSS. Local
 development additionally permits HTTP and WS for the separate development API and Vite HMR.
 
-The CSP is intentionally report-only until released Crossmark and GemWallet versions pass the
-manual Testnet matrix. Other headers, including clickjacking protection, MIME sniffing prevention,
-referrer suppression, HSTS and a restrictive Permissions Policy, are enforced immediately. COEP is
-disabled and COOP uses `same-origin-allow-popups` to avoid introducing an untested cross-origin
-isolation or popup boundary into injected-wallet flows. The response does not configure a CSP report
-collector: violation documents can contain exact Credential permalinks, so collection requires a
-separate privacy and retention design.
+The CSP is intentionally report-only until every enabled XRPL Connect adapter passes the manual
+Testnet matrix. WalletConnect modal styles/images must also be observed and qualified before
+enforcement. Other headers, including clickjacking protection, MIME sniffing prevention, referrer
+suppression, HSTS and a restrictive Permissions Policy, are enforced immediately. That policy
+allows same-origin `hid` and `usb` access for the user-initiated Ledger flow while denying those
+features to cross-origin content. COEP is disabled and COOP uses `same-origin-allow-popups` to avoid
+introducing an untested cross-origin isolation or popup boundary into injected-wallet flows. The
+response does not configure a CSP report collector: violation documents can contain exact
+Credential permalinks, so collection requires a separate privacy and retention design.
 
 Every rendered HTML response, including Nuxt error documents, is `private, no-store` so an
 intermediary cannot replay a response-bound nonce. Fingerprinted `/_nuxt/` assets remain public and
@@ -162,6 +178,8 @@ NUXT_TRUSTED_PROXY_CIDRS=10.42.0.2/32
 NUXT_PUBLIC_API_BASE_URL=https://xcs-api.example
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
+NUXT_PUBLIC_XAMAN_API_KEY=optional-public-xaman-application-id
+NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=optional-public-reown-project-id
 ```
 
 `NUXT_API_BASE_URL` is the server-side/SSR endpoint; in Compose it is `http://api:3001`.
@@ -178,6 +196,12 @@ profile is fetched from the XCS API, parsed by the SDK, and matched against the 
 `network_id` before autofill and again before signing or recovery. This alpha rejects profiles other
 than XRPL Testnet (`networkId: 1`). If `NUXT_PUBLIC_PROFILE_ID` is omitted, exactly one Testnet
 profile must be returned by the API.
+
+`NUXT_PUBLIC_XAMAN_API_KEY` and `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` are optional public
+application identifiers. Omitting either variable removes only that adapter; it does not prevent the
+other six adapters from loading. Do not put a Xaman secret, WalletConnect relay secret, wallet key or
+other credential in either value. In Compose, set the corresponding operator variables
+`XCS_PUBLIC_XAMAN_API_KEY` and `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`.
 
 When the configured API profile selector ends in `-controlled-pilot`, the site renders a persistent
 Commons controlled-pilot warning. The suffix is the only UI signal: there is no separate browser
@@ -242,9 +266,10 @@ visible alongside the payload evidence.
 
 ## Durable submission journal
 
-Signed transaction blobs are stored in the origin's IndexedDB database `xcs-wallet-journal` before
-the first submit call, but only after the SDK has validated the wallet hash/blob and proved that the
-signed fields exactly equal the reviewed transaction. SDK journal stages are retained with the hash,
+Wallet `tx_blob` and signed `tx_json` responses are first normalized to one verified signed blob.
+That blob is stored in the origin's IndexedDB database `xcs-wallet-journal` before the first submit
+call, but only after the SDK has validated its hash and signature and proved that the signed fields
+exactly equal the reviewed transaction. SDK journal stages are retained with the hash,
 `LastLedgerSequence`, profile, XRPL result and the minimum business context needed to reconcile the
 operation. Schema registration stores publisher, canonical schema digest and exact memo size.
 Issuance stores the tuple, public URI, payload digest and optional expiration. Tuple-only actions

@@ -28,7 +28,11 @@
   "wallet": {
     "connect": "Connecter un wallet",
     "choose": "Choisissez un wallet compatible",
-    "none": "Aucun wallet pris en charge n’est disponible dans ce navigateur."
+    "available": "Disponible",
+    "unavailable": "Non détecté",
+    "select": "Connecter",
+    "setup": "Installer ou ouvrir",
+    "none": "Aucun adaptateur XRPL Connect n’est configuré."
   },
   "transaction": {
     "preview": "Vérification avant signature",
@@ -266,6 +270,7 @@
     "profile": "Profil",
     "networkId": "Network ID XRPL",
     "registry": "Registre blackholé",
+    "controlledRegistry": "Registre contrôlé",
     "activation": "Ledger d’activation",
     "primaryTip": "Tip source primaire",
     "secondaryTip": "Tip source secondaire",
