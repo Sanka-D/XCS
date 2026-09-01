@@ -40,11 +40,21 @@ export class PostgresApiRepository implements ApiRepository {
   }
 
   async getDatabaseTime(): Promise<Date> {
-    const [row] = await this.db.execute<{ now: Date }>(sql`SELECT CURRENT_TIMESTAMP AS "now"`)
-    if (row === undefined || !Number.isFinite(row.now.getTime())) {
+    // Raw timestamptz values are strings in postgres.js. Asking PostgreSQL for
+    // epoch milliseconds keeps this boundary independent from timestamp text
+    // parsing and from the server's DateStyle setting.
+    const [row] = await this.db.execute<{ nowMilliseconds: number }>(sql`
+      SELECT (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::double precision
+        AS "nowMilliseconds"
+    `)
+    if (row === undefined || !Number.isFinite(row.nowMilliseconds)) {
       throw new Error('PostgreSQL returned an invalid current timestamp')
     }
-    return row.now
+    const now = new Date(row.nowMilliseconds)
+    if (!Number.isFinite(now.getTime())) {
+      throw new Error('PostgreSQL returned an invalid current timestamp')
+    }
+    return now
   }
 
   async ping(): Promise<void> {

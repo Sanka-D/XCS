@@ -237,6 +237,20 @@ describePostgres('PostgreSQL 18 API integration', () => {
     }
   })
 
+  it('decodes database time inside an authoritative read snapshot', async () => {
+    if (runtimeApiClient === undefined) {
+      throw new Error('PostgreSQL test database is not initialized')
+    }
+
+    const repository = new PostgresApiRepository(runtimeApiClient.db)
+    const observedAt = await repository.withConsistentSnapshot((snapshot) =>
+      snapshot.getDatabaseTime(),
+    )
+
+    expect(observedAt).toBeInstanceOf(Date)
+    expect(Number.isFinite(observedAt.getTime())).toBe(true)
+  })
+
   it('reads exact durable metrics with the least-privilege xcs_api role', async () => {
     if (databaseClient === undefined || runtimeApiClient === undefined) {
       throw new Error('PostgreSQL test database is not initialized')
