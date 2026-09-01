@@ -8,7 +8,12 @@ import {
   type ReliableSubmissionResult,
 } from '@xcs-protocol/sdk'
 import type { SubmittableTransaction } from 'xrpl'
-import type { AccountInfo, NetworkInfo, Transaction } from 'xrpl-connect'
+import {
+  supportsFetchAccount,
+  type AccountInfo,
+  type NetworkInfo,
+  type Transaction,
+} from 'xrpl-connect'
 import {
   reconfirmValidatedBusinessOperation,
   waitForIndexedBusinessEvidence,
@@ -46,6 +51,13 @@ let journal: IndexedDbOperationJournal | undefined
 export interface WalletSubmissionResult extends ReliableSubmissionResult {
   readonly businessConfirmation?: Exclude<BusinessConfirmation, 'pending'> | undefined
   readonly businessEvidence?: BusinessEvidence | undefined
+}
+
+export interface WalletChoice {
+  readonly id: string
+  readonly name: string
+  readonly available: boolean
+  readonly url?: string | undefined
 }
 
 function operationJournal(): IndexedDbOperationJournal {
@@ -212,8 +224,55 @@ export function useWallet() {
     })
   }
 
-  async function availableWallets() {
-    return $walletManager.getAvailableWallets()
+  function safeWalletUrl(value: string | undefined): string | undefined {
+    if (!value) return undefined
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' ? url.href : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  async function refreshConnectedWallet(): Promise<void> {
+    const adapter = $walletManager.wallet
+    if (!adapter || !supportsFetchAccount(adapter)) return
+    const refreshed = await $walletManager.fetchAccount()
+    if (!refreshed) {
+      replaceAccount(null)
+      throw new Error('WALLET_NOT_CONNECTED')
+    }
+    assertWalletTestnet(refreshed)
+    if (
+      !account.value ||
+      account.value.address !== refreshed.address ||
+      account.value.network.id !== refreshed.network.id
+    ) {
+      replaceAccount(refreshed)
+      return
+    }
+    account.value = refreshed
+  }
+
+  async function walletChoices(): Promise<WalletChoice[]> {
+    let availableIds = new Set<string>()
+    try {
+      availableIds = new Set(
+        (await $walletManager.getAvailableWallets()).map((wallet) => wallet.id),
+      )
+    } catch (error) {
+      walletError.value = error instanceof Error ? error.message : String(error)
+    }
+
+    return $walletManager.wallets.map((wallet) => {
+      const url = safeWalletUrl(wallet.url)
+      return {
+        id: wallet.id,
+        name: wallet.name,
+        available: availableIds.has(wallet.id),
+        ...(url ? { url } : {}),
+      }
+    })
   }
 
   async function connect(walletId: string) {
@@ -242,6 +301,7 @@ export function useWallet() {
     transaction: Transaction,
     expectedProfile?: NetworkProfile,
   ): Promise<Transaction> {
+    await refreshConnectedWallet()
     if (!account.value) throw new Error('WALLET_NOT_CONNECTED')
     assertWalletTestnet(account.value)
     assertTransactionSigner(transaction, account.value.address)
@@ -274,6 +334,7 @@ export function useWallet() {
     afterSignatureValidated?: () => void | Promise<void>,
     afterLedgerValidated?: (result: ReliableSubmissionResult) => void | Promise<void>,
   ): Promise<WalletSubmissionResult> {
+    await refreshConnectedWallet()
     if (!account.value) throw new Error('WALLET_NOT_CONNECTED')
     assertWalletTestnet(account.value)
     assertTransactionSigner(transaction, account.value.address)
@@ -327,6 +388,7 @@ export function useWallet() {
             throw new Error('NETWORK_PROFILE_CHANGED_AFTER_PREVIEW')
           }
           await getNetworkReadiness(activeProfile.profileId)
+          await refreshConnectedWallet()
           assertWalletContext(transaction, signingAddress, signingSession)
           assertCurrent?.()
           return walletSigner.sign(preparedTransaction)
@@ -341,6 +403,7 @@ export function useWallet() {
           journal: operationStore,
           operationId,
           onValidatedSignature: async ({ txBlob, txHash, lastLedgerSequence }) => {
+            await refreshConnectedWallet()
             assertWalletContext(transaction, signingAddress, signingSession)
             assertCurrent?.()
             await assertBusinessGenerationCurrent(normalizedBusiness, activeProfile.profileId)
@@ -529,7 +592,7 @@ export function useWallet() {
     busy: readonly(walletBusy),
     error: readonly(walletError),
     operations: readonly(operations),
-    availableWallets,
+    walletChoices,
     connect,
     disconnect,
     prepare,

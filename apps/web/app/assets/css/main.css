@@ -446,7 +446,7 @@ pre {
   position: absolute;
   right: 0;
   top: calc(100% + 0.6rem);
-  width: 17rem;
+  width: 21rem;
   display: grid;
   gap: 0.5rem;
   padding: 1rem;
@@ -455,16 +455,32 @@ pre {
   border-radius: 0.8rem;
   box-shadow: 0 18px 50px #17243b30;
 }
-.wallet-choice,
+.wallet-choice button,
 .text-button {
   border: 0;
   cursor: pointer;
   text-align: left;
 }
 .wallet-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.7rem;
   border-radius: 0.45rem;
   background: #eef3ff;
+}
+.wallet-choice > span {
+  display: grid;
+  gap: 0.15rem;
+}
+.wallet-choice small {
+  color: var(--muted);
+}
+.wallet-action {
+  flex: none;
+  font: inherit;
+  font-size: 0.85rem;
 }
 .text-button {
   padding: 0.25rem;

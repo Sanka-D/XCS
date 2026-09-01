@@ -98,8 +98,8 @@ integrators.
   confirmation remains mandatory.
 - Nitro emits the initial browser CSP in report-only mode. It records violations in local browser
   tooling but blocks nothing, so it is not yet an XSS or signed-blob exfiltration control. Enforcement
-  remains gated on the real Crossmark and GemWallet matrix; the ingress must preserve one policy
-  instead of appending its own.
+  remains gated on the real XRPL Connect wallet matrix, including qualification of WalletConnect
+  modal styles and images; the ingress must preserve one policy instead of appending its own.
 - The policy's `connect-src https:` allowance is intentional: permissionless issuer-hosted payload
   domains cannot be known at deployment time. Host display, explicit consent, exact-generation
   revalidation and payload integrity checks remain the application boundary. Narrowing this to a
@@ -113,15 +113,32 @@ integrators.
 
 ## Wallets
 
-- The Nuxt alpha exposes only Crossmark and GemWallet. Xaman is disabled because the currently
-  published adapter does not provide a trustworthy sign-only flow with an explicit network.
-- `xrpl-connect` 0.8.2 has no published TypeScript declarations and is not safe to import during SSR.
-  The web app isolates it in a client-only plugin and carries a narrow local declaration until a
-  corrected package is released.
-- Crossmark and GemWallet intentionally return a signed blob with an empty hash. XCS derives and
-  checks the hash, persists the blob locally before submission, and verifies that signing did not
-  alter the preview. A manual Testnet matrix for CredentialCreate, CredentialAccept, and
-  CredentialDelete is still a release gate.
+- The Nuxt alpha pins the release candidate `xrpl-connect@1.0.0-rc.0`. Its factory covers the eight
+  official adapters—Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask
+  Snap—but only the six self-configuring adapters are registered by default. Xaman requires the
+  public `NUXT_PUBLIC_XAMAN_API_KEY`; WalletConnect requires the public
+  `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`. Their Compose inputs are
+  `XCS_PUBLIC_XAMAN_API_KEY` and `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`. These identifiers are not
+  secrets, and their absence removes the corresponding adapter.
+- XCS invokes only adapter `sign()`. It normalizes a returned `tx_blob` or signed `tx_json`, checks
+  the derived hash, XRPL signature, optional `signerAddress` and exact equality with the reviewed
+  transaction, then persists and submits the blob itself. Calling or falling back to
+  `signAndSubmit` would bypass the recovery and pre-submission controls and is forbidden.
+- Eight adapters do not mean every wallet is compatible. WalletConnect can discover more wallets,
+  but each one still needs the XRPL Testnet namespace and native `CredentialCreate`,
+  `CredentialAccept` and `CredentialDelete` support. Real browser extensions, Xaman popup,
+  WalletConnect QR/deep links and Ledger hardware access remain an adapter-by-adapter manual gate.
+- The release candidate declares the peer range `xrpl ^3 || ^4`, while XCS uses `xrpl` 5. This
+  combination passes only repository-side compatibility checks until upstream declares or a stable
+  release proves support; it remains a release risk. The RC also adds a substantial browser
+  dependency tree and bundle cost that must be measured before the public beta.
+- The published RC reports Otsu available without checking the injected provider marker. XCS keeps
+  a narrow local availability override equivalent to the adapter's connect-time marker check. Drop
+  that workaround only after upgrading to a release containing the upstream correction.
+- The same RC asks Otsu for `read`, `sign`, `submit` and `switchNetwork` scopes even though XCS never
+  invokes wallet submission. It also proposes extra WalletConnect methods that some otherwise
+  sign-capable XRPL wallets may reject. Both permission surfaces need an upstream least-privilege
+  fix and real-wallet evidence before those adapters can be promoted beyond the controlled pilot.
 
 ## URI interoperability
 

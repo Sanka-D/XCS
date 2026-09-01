@@ -1,4 +1,4 @@
-import { hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
+import { decode, hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
 import type {
   AccountInfo,
   SignedTransaction,
@@ -67,6 +67,11 @@ const BROWSER_E2E_WALLETS = [
 
 class BrowserE2eWalletManager {
   private readonly listeners = new Map<string, Set<WalletListener>>()
+  private readonly walletAdapters = BROWSER_E2E_WALLETS.map(({ id, name }) => ({
+    id,
+    name,
+    isAvailable: async () => true,
+  })) as unknown as WalletAdapter[]
   private currentAccount: AccountInfo | null = null
 
   public get account(): AccountInfo | null {
@@ -77,6 +82,10 @@ class BrowserE2eWalletManager {
     return this.currentAccount !== null
   }
 
+  public get wallets(): WalletAdapter[] {
+    return [...this.walletAdapters]
+  }
+
   public on(event: string, listener: WalletListener): this {
     const listeners = this.listeners.get(event) ?? new Set<WalletListener>()
     listeners.add(listener)
@@ -85,11 +94,7 @@ class BrowserE2eWalletManager {
   }
 
   public async getAvailableWallets(): Promise<WalletAdapter[]> {
-    return BROWSER_E2E_WALLETS.map(({ id, name }) => ({
-      id,
-      name,
-      isAvailable: async () => true,
-    }))
+    return [...this.walletAdapters]
   }
 
   public async connect(walletId: string, options?: { network?: string }): Promise<AccountInfo> {
@@ -121,7 +126,20 @@ class BrowserE2eWalletManager {
     const signer = BROWSER_E2E_SIGNERS.get(this.currentAccount.address)
     if (signer === undefined) throw new Error('BROWSER_E2E_SIGNER_UNKNOWN')
     const signed = signer.sign(transaction)
-    return { tx_blob: signed.tx_blob, hash: signed.hash }
+    if (this.currentAccount.address === BROWSER_E2E_SUBJECT_ACCOUNT) {
+      const txJson = decode(signed.tx_blob)
+      return {
+        hash: signed.hash,
+        tx_json: txJson as Transaction,
+        signature: String(txJson.TxnSignature),
+        signerAddress: this.currentAccount.address,
+      }
+    }
+    return {
+      tx_blob: signed.tx_blob,
+      hash: signed.hash,
+      signerAddress: this.currentAccount.address,
+    }
   }
 
   private emit(event: string, payload?: unknown): void {
