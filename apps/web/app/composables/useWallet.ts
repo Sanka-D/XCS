@@ -33,6 +33,12 @@ import { assertCredentialGenerationCurrent } from '~/utils/credentialReview'
 import { assertPublicRpcUrl } from '~/utils/publicRpcUrl'
 import { assertTransactionSigner } from '~/utils/transactions'
 import {
+  assertWalletSupportsXcsTransaction,
+  normalizeWalletTransactionError,
+  walletCredentialSupport,
+  type WalletCredentialSupport,
+} from '~/utils/walletCompatibility'
+import {
   assertValidatedTesSuccess,
   createWalletSigner,
   validateStoredRecoveryMaterial,
@@ -57,6 +63,7 @@ export interface WalletChoice {
   readonly id: string
   readonly name: string
   readonly available: boolean
+  readonly credentialSupport: WalletCredentialSupport
   readonly url?: string | undefined
 }
 
@@ -270,6 +277,7 @@ export function useWallet() {
         id: wallet.id,
         name: wallet.name,
         available: availableIds.has(wallet.id),
+        credentialSupport: walletCredentialSupport(wallet.id),
         ...(url ? { url } : {}),
       }
     })
@@ -305,6 +313,7 @@ export function useWallet() {
     if (!account.value) throw new Error('WALLET_NOT_CONNECTED')
     assertWalletTestnet(account.value)
     assertTransactionSigner(transaction, account.value.address)
+    assertWalletSupportsXcsTransaction($walletManager.wallet, transaction.TransactionType)
     const preparingSession = walletSession
     const preparingAddress = account.value.address
 
@@ -344,6 +353,7 @@ export function useWallet() {
     if (preparedWalletSessions.get(transaction) !== walletSession) {
       throw new Error('WALLET_CHANGED_AFTER_PREVIEW')
     }
+    assertWalletSupportsXcsTransaction($walletManager.wallet, transaction.TransactionType)
     const signingSession = walletSession
     const signingAddress = account.value.address
     const normalizedBusiness = business ? validateOperationBusinessContext(business) : undefined
@@ -391,7 +401,15 @@ export function useWallet() {
           await refreshConnectedWallet()
           assertWalletContext(transaction, signingAddress, signingSession)
           assertCurrent?.()
-          return walletSigner.sign(preparedTransaction)
+          try {
+            return await walletSigner.sign(preparedTransaction)
+          } catch (error) {
+            throw normalizeWalletTransactionError(
+              error,
+              $walletManager.wallet,
+              preparedTransaction.TransactionType,
+            )
+          }
         },
       }
 

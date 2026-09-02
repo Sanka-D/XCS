@@ -267,7 +267,7 @@ useSeoMeta({
 
 <template>
   <section class="section-wrap prose-page developers-page">
-    <p class="eyebrow">Developers</p>
+    <p class="eyebrow">{{ $t('nav.docs') }}</p>
     <h1>{{ $t('developers.title') }}</h1>
     <p class="lead">{{ $t('developers.description') }}</p>
 

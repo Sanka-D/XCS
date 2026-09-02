@@ -1,5 +1,6 @@
 import {
   decodeUtf8Hex,
+  inspectPayloadUri,
   parseCredentialPayload,
   rippleTimeToIso8601,
   type CredentialPayload,
@@ -10,6 +11,7 @@ import {
   inspectPilotHttpsPayloadHost,
   readCanonicalHttpsPayload,
   type HttpsPayloadRead,
+  type ReadPayloadOptions,
 } from './payloadPublication'
 
 const SCHEMA_UID = /^[0-9a-f]{64}$/
@@ -97,6 +99,7 @@ interface LoadCredentialReviewOptions {
   /** Payload bytes are fetched only after the subject has explicitly consented. */
   readonly fetchPayload?: boolean | undefined
   readonly fetchImpl?: typeof fetch
+  readonly payloadReader?: (options: ReadPayloadOptions) => Promise<HttpsPayloadRead>
   readonly timeoutMs?: number
   readonly now?: () => Date
 }
@@ -256,7 +259,7 @@ export async function loadCredentialReview(
       ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.now ? { now: options.now } : {}),
     }
-    payloadRead = await readCanonicalHttpsPayload(readOptions)
+    payloadRead = await (options.payloadReader ?? readCanonicalHttpsPayload)(readOptions)
     payload = parseCredentialPayload(payloadRead.content, {
       issuer: credential.issuer,
       subject: credential.subject,
@@ -291,10 +294,14 @@ export function createPayloadFetchConsentToken(
   review: Pick<CredentialReview, 'generationId' | 'uri'>,
 ): PayloadFetchConsentToken {
   if (review.uri === null) throw new Error('CREDENTIAL_URI_REQUIRED')
+  const parsedUri = inspectPayloadUri(review.uri)
   return {
     generationId: review.generationId.toLowerCase(),
     credentialUri: review.uri,
-    hostname: inspectPilotHttpsPayloadHost(review.uri),
+    hostname:
+      parsedUri.kind === 'https'
+        ? inspectPilotHttpsPayloadHost(review.uri)
+        : `ipfs:${parsedUri.cid}`,
   }
 }
 
@@ -415,7 +422,11 @@ export function assertPayloadFetchConsentCurrent(
   if (review.uri === null) throw new Error('CREDENTIAL_PAYLOAD_CONSENT_STALE')
   let hostname: string
   try {
-    hostname = inspectPilotHttpsPayloadHost(review.uri)
+    const parsedUri = inspectPayloadUri(review.uri)
+    hostname =
+      parsedUri.kind === 'https'
+        ? inspectPilotHttpsPayloadHost(review.uri)
+        : `ipfs:${parsedUri.cid}`
   } catch {
     throw new Error('CREDENTIAL_PAYLOAD_CONSENT_STALE')
   }

@@ -25,7 +25,7 @@ export interface PayloadPublicationProof {
   readonly credentialUri: string
 }
 
-interface ReadHttpsPayloadOptions {
+export interface ReadPayloadOptions {
   readonly credentialUri: string
   readonly fetchImpl?: typeof fetch
   readonly timeoutMs?: number
@@ -33,7 +33,7 @@ interface ReadHttpsPayloadOptions {
   readonly now?: () => Date
 }
 
-interface VerifyHttpsPublicationOptions extends ReadHttpsPayloadOptions {
+interface VerifyHttpsPublicationOptions extends ReadPayloadOptions {
   readonly canonicalPayload: string
 }
 
@@ -123,7 +123,7 @@ async function readResponseBytes(response: Response, maxBytes: number): Promise<
  * credential transaction can be signed.
  */
 export async function readCanonicalHttpsPayload(
-  options: ReadHttpsPayloadOptions,
+  options: ReadPayloadOptions,
 ): Promise<HttpsPayloadRead> {
   const parsedUri = inspectPayloadUri(options.credentialUri)
   if (parsedUri.kind !== 'https') throw new Error('PILOT_HTTPS_PAYLOAD_REQUIRED')

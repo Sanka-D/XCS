@@ -20,12 +20,13 @@ the exact profile/checkpoint context in a signed `xcs:prepared` Memo before rela
 cryptographically verified XRPL single-signatures only in this alpha; see the offline-signing
 runbook for the complete readiness and expiry sequence.
 
-The public product takes UX inspiration from EAS and EASScan, not protocol semantics. One site
-presents Explorer, Studio and Developers surfaces while retaining native XRPL Credentials. Public
-discovery is hybrid: schemas and aggregate statistics are discoverable, while Credentials remain
-exact lookups by shared generation, transaction or tuple; there is no subject feed or account-wide
-enumeration. Commons assigns no issuer badge or universal trust decision. These accepted product
-boundaries are recorded in [`ADR 0002`](./docs/adr/0002-public-product-and-discovery.md).
+The public product takes UX inspiration from EAS and EASScan, not protocol semantics. One site uses
+four simple entries—Explorer, Create, Verify and Docs—while retaining native XRPL Credentials.
+Public discovery is hybrid: schemas and aggregate statistics are discoverable, while Credentials
+remain exact lookups by shared generation, transaction or tuple; there is no subject feed or
+account-wide enumeration. Commons assigns no issuer badge or universal trust decision. These
+accepted product boundaries are recorded in
+[`ADR 0002`](./docs/adr/0002-public-product-and-discovery.md).
 
 ## Repository map
 
@@ -62,6 +63,11 @@ profile, PostgreSQL 18, and two independently operated, complete-history `ripple
 must be configured before the services can run. The API defaults to `http://localhost:3001` and the
 Nuxt application to `http://localhost:3000`. The full Compose startup and optional demo-pinning
 procedure is in [`docs/runbooks/deployment.md`](./docs/runbooks/deployment.md).
+
+For manual Testnet issuance without setting up an HTTPS payload host, the development-only browser
+store can be enabled with `XCS_LOCAL_PAYLOAD_STORE=1`; see
+[`apps/web/README.md`](./apps/web/README.md#local-browser-payload-store). It is local to one browser,
+expires after 24 hours and is not Commons-hosted or publicly verifiable.
 
 The reference deployment uses `xcs_admin` only for migrations and idempotent role provisioning,
 `xcs_indexer` for bounded projection DML, `xcs_api` for projection reads plus optional pinning CRUD,

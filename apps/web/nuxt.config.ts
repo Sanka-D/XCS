@@ -6,6 +6,18 @@ if (browserE2eInput === '1' && process.env.NODE_ENV === 'production') {
   throw new Error('XCS_BROWSER_E2E cannot be enabled in production.')
 }
 const browserE2eMode = browserE2eInput === '1' ? 'enabled' : 'disabled'
+const localPayloadStoreInput = process.env.XCS_LOCAL_PAYLOAD_STORE
+if (
+  localPayloadStoreInput !== undefined &&
+  localPayloadStoreInput !== '0' &&
+  localPayloadStoreInput !== '1'
+) {
+  throw new Error('XCS_LOCAL_PAYLOAD_STORE must be exactly "0" or "1".')
+}
+if (localPayloadStoreInput === '1' && process.env.NODE_ENV === 'production') {
+  throw new Error('XCS_LOCAL_PAYLOAD_STORE cannot be enabled in production.')
+}
+const localPayloadStoreMode = localPayloadStoreInput === '1' ? 'enabled' : 'disabled'
 const apiInternalToken =
   process.env.NUXT_API_INTERNAL_TOKEN ??
   (process.env.NODE_ENV === 'production' ? '' : 'xcs-development-internal-token-0001')
@@ -31,6 +43,7 @@ export default defineNuxtConfig({
     apiInternalToken,
     trustedProxyCidrs: process.env.NUXT_TRUSTED_PROXY_CIDRS ?? '',
     browserE2eMode,
+    localPayloadStoreMode,
     public: {
       apiBaseUrl: 'http://localhost:3001',
       profileId: '',
@@ -38,6 +51,7 @@ export default defineNuxtConfig({
       xamanApiKey: '',
       walletConnectProjectId: '',
       browserE2eMode,
+      localPayloadStoreMode,
     },
   },
   security: {

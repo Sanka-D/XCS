@@ -38,9 +38,9 @@ const resolved: ResolvedSchema = {
     xcsVersion: '0.1',
     name: 'Completion',
     description: 'Course completion',
-    fields: { programId: { type: 'string' } },
+    fields: { name: { type: 'string' }, prenom: { type: 'string', optional: true } },
   },
-  fields: { programId: { type: 'string' } },
+  fields: { name: { type: 'string' }, prenom: { type: 'string', optional: true } },
   lineage: [],
 }
 const SCHEMA_LEDGER_HASH = 'e'.repeat(64)
@@ -353,7 +353,7 @@ function validPayloadBase64(): string {
     issuer: ISSUER,
     subject: SUBJECT,
     schema: UID,
-    claims: { programId: 'xrpl-101' },
+    claims: { name: 'XRPL 101' },
   }
   return Buffer.from(canonicalize(payload as JsonValue)).toString('base64')
 }
@@ -420,6 +420,37 @@ describe('demo pinning', () => {
     expect(fixture.repository.pin?.status).toBe('pinned')
     expect(fixture.apiRepository.snapshotCalls).toBe(1)
     expect(Date.parse(result.expiresAt) - NOW.getTime()).toBe(90 * 24 * 60 * 60 * 1_000)
+  })
+
+  it('rejects person-shaped fields before reserving or publicly storing a pin', async () => {
+    const fixture = service()
+    const challenge = await fixture.service.createChallenge({
+      network: 'testnet',
+      wallet: ISSUER,
+      ipAddress: '203.0.113.42',
+    })
+    const content = canonicalize({
+      xcsVersion: '0.1',
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schema: UID,
+      claims: { name: 'XRPL 101', prenom: 'Personne Test' },
+    } as JsonValue)
+
+    await expect(
+      fixture.service.pin({
+        network: 'testnet',
+        wallet: ISSUER,
+        challengeId: challenge.challengeId,
+        publicKey: PUBLIC_KEY,
+        signature: SIGNATURE,
+        payloadBase64: Buffer.from(content).toString('base64'),
+        ipAddress: '203.0.113.42',
+      }),
+    ).rejects.toMatchObject({ code: 'DEMO_PIN_PII_FIELD_FORBIDDEN', statusCode: 400 })
+    expect(fixture.repository.attempts).toBe(0)
+    expect(fixture.repository.challenge?.usedAt).toBeNull()
+    expect(fixture.store.cid).toBeUndefined()
   })
 
   it.each([

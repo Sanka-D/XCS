@@ -1,9 +1,9 @@
 # XCS Testnet web app
 
-The Nuxt application is the accountless, non-custodial Testnet site for XCS. It combines schema
-exploration, Studio issuance/lifecycle workflows and developer education in one deployment. EAS and
-EASScan are interaction-design references only; the site constructs native XRPL transactions under
-the frozen XCS v0.1 protocol.
+The Nuxt application is the accountless, non-custodial Testnet site for XCS. Its public navigation
+keeps four entries—Explorer, Create, Verify and Docs—while preserving the schema, issuance,
+lifecycle and developer workflows in one deployment. EAS and EASScan are interaction-design
+references only; the site constructs native XRPL transactions under the frozen XCS v0.1 protocol.
 
 For every write, the application constructs and autofills an XRPL transaction, shows those exact
 final fields to the user, then asks an external wallet to sign without submitting. The private key
@@ -30,15 +30,19 @@ statistics contain only ledger-derived metadata. See
 
 The current application organizes the existing workflows as follows:
 
-- **Explorer:** `/` for aggregate checkpoint statistics and exact search, `/schemas` and
-  `/schemas/:uid` for paginated schema discovery, `/activity` for schema registrations only,
-  `/credentials/:generationId` and `/transactions/:hash` for exact evidence, and `/status` for the
-  indexer/network view;
-- **Studio:** `/studio` links the existing register, issue, accept, revoke, verify and local
-  operation-recovery flows. Schema registration has a guided scalar-field editor, course-completion
-  and diploma templates, plus the advanced JSON editor. Issuance can derive a guided claims form
-  from a compatible resolved schema and retains the advanced JSON path;
-- **Developers:** `/developers` loads the active runtime profile, executes the privacy-explicit
+- **Landing and Explorer:** `/` presents the editorial Testnet landing page, aggregate checkpoint
+  statistics and exact search. `/schemas` and `/schemas/:uid` provide paginated schema discovery,
+  `/activity` shows schema registrations only, `/credentials/:generationId` and
+  `/transactions/:hash` expose exact evidence, and `/status` shows the indexer/network view;
+- **Create:** `/studio` is the single creation hub. It emphasizes schema registration and
+  single-credential issuance, then links acceptance, revocation and local operation recovery.
+  Schema registration has a guided scalar-field editor, course-completion and diploma templates,
+  plus the advanced JSON editor. Issuance can derive a guided claims form from a compatible
+  resolved schema and retains the advanced JSON path;
+- **Verify:** `/verify` accepts a shared generation ID and opens its exact permalink, or exposes the
+  complete issuer/subject/schema tuple as an advanced lookup. The permalink reports ledger state,
+  schema validity, payload integrity and issuer trust separately;
+- **Docs:** `/developers` loads the active runtime profile, executes the privacy-explicit
   exact-generation verification flow, derives REST/cURL, TypeScript and monorepo CLI examples from
   that evidence, documents the wallet `Signer` boundary and catalogs aggregate versus exact API
   routes; `/learn` remains the protocol walkthrough.
@@ -65,6 +69,16 @@ reviewed transaction field changed. Only then does it persist the signed blob an
 the configured public RPC itself. A missing, malformed or contradictory wallet artifact is rejected
 before persistence or relay.
 
+Wallet capability is transaction-specific. GemWallet 3.8.x embeds an XRPL validator from before
+native XLS-70 Credentials: it can sign the `Payment` used for schema registration but rejects
+`CredentialCreate`, `CredentialAccept` and `CredentialDelete` before signing. XCS therefore keeps
+GemWallet available for schemas while blocking those three transactions early with
+`WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED`. Xaman has native Credential handling in its current
+source and is the preferred candidate when its public application identifier is configured, but it
+still requires the real-wallet Testnet gate below. Unknown adapters remain visible as unvalidated;
+if one emits the exact legacy `Invalid field TransactionType` error, XCS converts it to the same
+actionable diagnostic without masking unrelated wallet failures.
+
 This adapter list does not promise compatibility with every wallet. WalletConnect broadens the
 discovery surface, but each candidate wallet must support the XRPL Testnet namespace and native
 `Credential*` transaction types. Real extension, hardware-device, popup and QR/deep-link tests for
@@ -88,7 +102,10 @@ prevents retransmission while preserving the blob for a later retry. A corrupted
 also rejected before status reconciliation, readiness or submission without deleting its blob. The
 suite also exercises the Developers quickstart against the deterministic exact-generation API,
 checks that local-payload verification never sets `resolvePayload`, and proves that a replaced
-generation fails before a payload can be submitted.
+generation fails before a payload can be submitted. Its loopback-only storage case creates an
+IPFS-addressed payload in one browser, fails closed when those bytes disappear, completes issuer
+creation and subject acceptance, then verifies the same digest from that browser. A separate case
+proves that an external IPFS CID absent from local storage is never described as browser-local.
 
 ```bash
 pnpm --filter @xcs-protocol/web exec playwright install chromium
@@ -135,6 +152,30 @@ This harness is not a wallet compatibility test and must never be used for a dep
 Private and public runtime switches must match exactly, and both the Nitro startup guard and client
 plugin reject the mode outside a development bundle. `nuxt.config.ts` also rejects
 `XCS_BROWSER_E2E=1` when `NODE_ENV=production`.
+
+## Local browser payload store
+
+For manual Testnet flows without an issuer-controlled HTTPS host, start the development site with:
+
+```bash
+XCS_LOCAL_PAYLOAD_STORE=1 pnpm --filter @xcs-protocol/web dev
+```
+
+On a loopback origin only, the issuance page then offers **Local test storage (this browser)**. It
+stores the exact canonical payload in same-origin `localStorage`, derives the normative raw
+SHA-256 `ipfs://` CID, reads the bytes back before the wallet opens, and lets acceptance or
+verification pages in that same browser resolve the payload after explicit consent. The active API
+profile still has to be XRPL Testnet.
+
+This is a local demonstration aid, not hosting. Entries expire after 24 hours and are limited to 64
+KiB and 20 active payloads. The issuer must acknowledge that the payload contains no personal,
+secret or production data before person-shaped field identifiers such as `prenom` are accepted; the
+acknowledgement is persisted with that local record so later same-browser reads remain possible.
+This is not value classification and does not make real personal data safe. A purge button deletes
+every local demo entry, but it cannot delete the corresponding Testnet Credential from XRPL.
+Another browser, device, CLI or public verifier cannot resolve these locally stored bytes. The
+feature is disabled by default, rejects non-loopback browser origins, and makes Nuxt fail startup
+when enabled in a production build.
 
 ## Browser response security
 
@@ -203,9 +244,12 @@ other six adapters from loading. Do not put a Xaman secret, WalletConnect relay 
 other credential in either value. In Compose, set the corresponding operator variables
 `XCS_PUBLIC_XAMAN_API_KEY` and `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`.
 
-When the configured API profile selector ends in `-controlled-pilot`, the site renders a persistent
-Commons controlled-pilot warning. The suffix is the only UI signal: there is no separate browser
-feature flag, and profile/API mismatches still fail through the normal active-profile checks.
+`XCS_LOCAL_PAYLOAD_STORE` is a source-time development gate rather than a deployment setting. Do
+not pass it through Compose or expose it as a general Commons storage option.
+
+When the configured API profile selector ends in `-controlled-pilot`, the network status page labels
+its registry as controlled. The primary navigation no longer carries persistent environment banners;
+profile/API mismatches still fail through the normal active-profile checks.
 
 `NUXT_PUBLIC_RPC_URL` is serialized into browser-visible runtime configuration. A Nitro startup
 guard and every wallet submission boundary reject embedded username/password values and require
@@ -215,8 +259,9 @@ public endpoint rather than either private indexer source.
 
 ## Pilot payload publication
 
-The Commons beta issuance and acceptance flows support issuer-hosted public HTTPS payloads only.
-Commons does not store, cache or search credential claims. The issuer payload host must
+The deployed Commons beta issuance and acceptance flows support issuer-hosted public HTTPS payloads
+only; the loopback development aid documented above is intentionally not deployable. Commons does
+not store, cache or search credential claims. The issuer payload host must
 allow the web origin through CORS and return `application/json` (or a `+json` media type). Acceptance
 first displays only indexed metadata, the URI and its host. The subject must explicitly consent
 before the browser contacts that host. Consent stays in memory and is bound to the displayed
@@ -243,12 +288,13 @@ resolve the URI, so its remote resolver may remain disabled. There is intentiona
 fetch proxy, avoiding an SSRF trust boundary. IPFS remains part of the protocol and CLI, but is
 outside the Commons-hosted browser beta.
 
-The standalone `/verify` flow follows the same boundary. It first reads and displays indexed
-credential metadata without contacting the issuer. Only after the verifier consents to the exact
-displayed host does the browser fetch the payload with credentials omitted, CORS enabled and
-redirects disabled, then POST the parsed object to the API. Verification never requests API-side URI
-resolution. A link generation constraint is checked before the host fetch and again before the
-result is accepted.
+The standalone `/verify` page opens `/credentials/:generationId` directly when the verifier has a
+shared generation ID. Its advanced tuple flow follows the same privacy boundary: it first reads and
+displays indexed credential metadata without contacting the issuer. Only after the verifier consents
+to the exact displayed host does the browser fetch the payload with credentials omitted, CORS
+enabled and redirects disabled, then POST the parsed object to the API. Verification never requests
+API-side URI resolution. A link generation constraint is checked before the host fetch and again
+before the result is accepted.
 
 The exact `/credentials/:generationId` permalink applies the same boundary while also showing the
 schema and bounded lifecycle timeline. Its server-rendered response loads only indexed generation,
