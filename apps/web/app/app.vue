@@ -1,8 +1,6 @@
 <script setup lang="ts">
 const { locale, locales, setLocale } = useI18n()
-const config = useRuntimeConfig()
 const clientReady = ref(false)
-const controlledPilot = computed(() => hasControlledPilotProfileId(config.public.profileId))
 
 const availableLocales = computed(() =>
   locales.value.map((item) => (typeof item === 'string' ? { code: item, name: item } : item)),
@@ -15,16 +13,18 @@ onMounted(() => {
 
 <template>
   <div class="app-shell" :data-client-ready="clientReady ? 'true' : 'false'">
+    <a class="skip-link" href="#main-content">{{ $t('nav.skip') }}</a>
     <header class="site-header">
       <NuxtLinkLocale class="brand" to="/" aria-label="XCS home">
-        <span class="brand-mark">X</span>
-        <span>XCS <small>Testnet alpha</small></span>
+        <span class="brand-symbol" aria-hidden="true" />
+        <span>XCS</span>
       </NuxtLinkLocale>
 
       <nav class="primary-nav" :aria-label="$t('nav.main')">
-        <NuxtLinkLocale to="/">{{ $t('nav.explorer') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/studio">{{ $t('nav.studio') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/developers">{{ $t('nav.developers') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/schemas">{{ $t('nav.explorer') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/studio">{{ $t('nav.create') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/verify">{{ $t('nav.verify') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/developers">{{ $t('nav.docs') }}</NuxtLinkLocale>
       </nav>
 
       <div class="header-actions">
@@ -44,19 +44,7 @@ onMounted(() => {
       </div>
     </header>
 
-    <div class="testnet-banner" role="status">{{ $t('common.testnetWarning') }}</div>
-    <div
-      v-if="controlledPilot"
-      class="controlled-pilot-banner"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      data-testid="controlled-pilot-banner"
-    >
-      {{ $t('common.controlledPilotWarning') }}
-    </div>
-
-    <main>
+    <main id="main-content" tabindex="-1">
       <NuxtPage />
     </main>
 
@@ -64,9 +52,10 @@ onMounted(() => {
       <p>{{ $t('footer.summary') }}</p>
       <nav :aria-label="$t('footer.navigation')">
         <NuxtLinkLocale to="/schemas">{{ $t('nav.schemas') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/studio">{{ $t('nav.create') }}</NuxtLinkLocale>
+        <NuxtLinkLocale to="/developers">{{ $t('nav.docs') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/activity">{{ $t('nav.activity') }}</NuxtLinkLocale>
         <NuxtLinkLocale to="/status">{{ $t('nav.status') }}</NuxtLinkLocale>
-        <NuxtLinkLocale to="/verify">{{ $t('nav.verify') }}</NuxtLinkLocale>
         <a href="https://github.com/XRPLF/XRPL-Standards" rel="noreferrer">XRPL Standards</a>
       </nav>
     </footer>

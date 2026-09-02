@@ -15,8 +15,10 @@ import {
   assertLinkProfile,
   singleRouteQueryValue,
 } from '~/utils/operationLinks'
+import { parseWalletCredentialTransactionError } from '~/utils/walletCompatibility'
 
 const route = useRoute()
+const { t } = useI18n()
 const { account, busy: walletBusy, prepare, signAndSubmit } = useWallet()
 const { getActiveNetworkProfile, getCredential, verify } = useXcsApi()
 const subject = ref(singleRouteQueryValue(route.query.subject))
@@ -30,6 +32,18 @@ const reviewBusy = ref(false)
 const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
+const messageDisplay = computed(() => {
+  const walletTransactionError = parseWalletCredentialTransactionError(message.value)
+  return walletTransactionError
+    ? t('wallet.errors.credentialUnsupported', {
+        wallet: walletTransactionError.walletName,
+        transactionType: walletTransactionError.transactionType,
+      })
+    : message.value
+})
+const messageIsLocalized = computed(
+  () => message.value.length > 0 && messageDisplay.value !== message.value,
+)
 const decodedUri = computed(() => {
   if (!credential.value?.uriHex) return null
   try {
@@ -54,7 +68,10 @@ function invalidatePreview() {
 }
 
 watch([subject, schemaUid, linkedProfileId, linkedGenerationId], invalidatePreview)
-watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
+watch(
+  [() => account.value?.address ?? '', () => account.value?.network.id ?? ''],
+  invalidatePreview,
+)
 watch(
   () => [route.query.subject, route.query.schema, route.query.profile, route.query.generation],
   ([nextSubject, nextSchema, nextProfile, nextGeneration]) => {
@@ -231,7 +248,12 @@ async function submit() {
       </button>
     </div>
 
-    <div v-if="message" class="error-box">{{ message }}</div>
+    <div v-if="message" class="error-box" role="alert" data-testid="revoke-error">
+      <strong>{{ messageDisplay }}</strong>
+      <p v-if="messageIsLocalized">
+        <code>{{ message }}</code>
+      </p>
+    </div>
     <article v-if="credential && report" class="form-card">
       <h2>{{ $t('revoke.exactCredential') }}</h2>
       <dl class="metadata-list">

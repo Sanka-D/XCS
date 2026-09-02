@@ -23,12 +23,14 @@ import {
   assertLinkProfile,
   singleRouteQueryValue,
 } from '~/utils/operationLinks'
-import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
+import { LOCAL_PAYLOAD_LOCATION } from '~/utils/localPayloadStore'
+import { parseWalletCredentialTransactionError } from '~/utils/walletCompatibility'
 
 const route = useRoute()
 const { t } = useI18n()
 const { account, busy: walletBusy, prepare, signAndSubmit } = useWallet()
 const { getActiveNetworkProfile, getCredential, getSchema, verify } = useXcsApi()
+const localPayloadStore = useLocalPayloadStore()
 const issuer = ref(singleRouteQueryValue(route.query.issuer))
 const schemaUid = ref(singleRouteQueryValue(route.query.schema))
 const linkedProfileId = ref(singleRouteQueryValue(route.query.profile))
@@ -61,6 +63,18 @@ const reviewBusy = ref(false)
 const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
+const messageDisplay = computed(() => {
+  const walletTransactionError = parseWalletCredentialTransactionError(message.value)
+  return walletTransactionError
+    ? t('wallet.errors.credentialUnsupported', {
+        wallet: walletTransactionError.walletName,
+        transactionType: walletTransactionError.transactionType,
+      })
+    : message.value
+})
+const messageIsLocalized = computed(
+  () => message.value.length > 0 && messageDisplay.value !== message.value,
+)
 const blockReason = computed(() => {
   if (!review.value) return undefined
   if (action.value === 'accept' && acceptanceReview.value?.claims === undefined) {
@@ -88,20 +102,26 @@ const blockReasonMessage = computed(() => {
 const payloadHost = computed(() => {
   if (!review.value?.uri) return null
   try {
-    return new URL(review.value.uri).hostname
+    return localPayloadStore.inspectPayloadLocation(review.value.uri)
   } catch {
     return null
   }
 })
+const payloadUsesLocalStore = computed(() => payloadHost.value === LOCAL_PAYLOAD_LOCATION)
 const payloadHostBlockReason = computed(() => {
   if (!review.value?.uri) return 'CREDENTIAL_URI_REQUIRED'
   try {
-    inspectPilotHttpsPayloadHost(review.value.uri)
+    localPayloadStore.inspectPayloadLocation(review.value.uri)
     return undefined
   } catch (error) {
     return error instanceof Error ? error.message : String(error)
   }
 })
+const payloadHostBlockMessage = computed(() =>
+  payloadHostBlockReason.value === 'LOCAL_PAYLOAD_NOT_AVAILABLE_IN_BROWSER'
+    ? t('accept.localPayloadUnavailable')
+    : payloadHostBlockReason.value,
+)
 let previewRevision = 0
 
 function invalidatePreview() {
@@ -120,7 +140,10 @@ watch(
   [issuer, schemaUid, action, linkedProfileId, linkedGenerationId, linkedAction],
   invalidatePreview,
 )
-watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
+watch(
+  [() => account.value?.address ?? '', () => account.value?.network.id ?? ''],
+  invalidatePreview,
+)
 watch(
   () => [
     route.query.issuer,
@@ -255,6 +278,7 @@ async function fetchExactReview(input: {
     subject: input.subject,
     schemaUid: input.schemaUid,
     ...(schema ? { schema: schema.resolved } : {}),
+    payloadReader: localPayloadStore.readPayload,
   }
   const metadataReview = await loadCredentialReview(reviewOptions)
   assertLinkGeneration(input.expectedGenerationId, metadataReview.generationId)
@@ -620,7 +644,12 @@ async function submit() {
       </button>
     </div>
 
-    <div v-if="message" class="error-box">{{ message }}</div>
+    <div v-if="message" class="error-box" role="alert" data-testid="accept-error">
+      <strong>{{ messageDisplay }}</strong>
+      <p v-if="messageIsLocalized">
+        <code>{{ message }}</code>
+      </p>
+    </div>
     <article v-if="review" class="form-card">
       <h2>{{ $t('accept.exactCredential') }}</h2>
       <dl class="metadata-list">
@@ -675,16 +704,26 @@ async function submit() {
       </div>
 
       <div v-if="action === 'accept' && !acceptanceReview?.claims" class="warning-box">
-        <p>{{ $t('accept.payloadConsentIntro', { host: payloadHost ?? '—' }) }}</p>
-        <div v-if="payloadHostBlockReason" class="error-box">{{ payloadHostBlockReason }}</div>
+        <p>
+          {{
+            $t(
+              payloadUsesLocalStore
+                ? 'accept.localPayloadConsentIntro'
+                : 'accept.payloadConsentIntro',
+              { host: payloadHost ?? '—' },
+            )
+          }}
+        </p>
+        <div v-if="payloadHostBlockReason" class="error-box">{{ payloadHostBlockMessage }}</div>
         <label v-else>
           <input
+            data-testid="payload-consent"
             type="checkbox"
             :checked="payloadConsent"
             :disabled="busy"
             @change="setPayloadConsent(($event.target as HTMLInputElement).checked)"
           />
-          {{ $t('accept.payloadConsent') }}
+          {{ $t(payloadUsesLocalStore ? 'accept.localPayloadConsent' : 'accept.payloadConsent') }}
         </label>
       </div>
       <div

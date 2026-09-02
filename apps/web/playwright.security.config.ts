@@ -33,6 +33,7 @@ export default defineConfig({
       NUXT_PUBLIC_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_PROFILE_ID: 'commons-testnet-xcs-v0.1-controlled-pilot',
       XCS_BROWSER_E2E: '0',
+      XCS_LOCAL_PAYLOAD_STORE: '0',
     },
   },
   projects: [{ name: 'chromium-security-production', use: { ...devices['Desktop Chrome'] } }],

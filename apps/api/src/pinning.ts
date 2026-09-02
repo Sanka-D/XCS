@@ -13,6 +13,7 @@ import { deriveAddress, verifyKeypairSignature } from 'xrpl'
 
 import { assertAuthoritativeLedgerEvidence } from './indexer-status.js'
 import { DEFAULT_LEDGER_MAX_AGE_SECONDS } from './ledger-freshness.js'
+import { hasPiiShapedFieldName } from './pii-field-filter.js'
 import { authoritativeResolvedSchema, schemaProjectionEvidenceUids } from './schema-projection.js'
 import type { ApiRepository, ContentPinStore, PinningRepository } from './types.js'
 
@@ -20,18 +21,6 @@ const MAX_DEMO_PIN_BYTES = 64 * 1024
 const CHALLENGE_TTL_MS = 5 * 60 * 1_000
 const PIN_TTL_MS = 90 * 24 * 60 * 60 * 1_000
 const DAILY_LIMIT = 10
-const PII_FIELD_NAMES = new Set([
-  'birthdate',
-  'dateofbirth',
-  'dob',
-  'email',
-  'firstname',
-  'fullname',
-  'lastname',
-  'name',
-  'phone',
-  'postaladdress',
-])
 
 export class PinningError extends Error {
   constructor(
@@ -76,15 +65,6 @@ function decodeBase64(value: string): Uint8Array {
     throw new PinningError('PAYLOAD_SIZE_INVALID', 413)
   }
   return content
-}
-
-function hasPiiFieldName(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(hasPiiFieldName)
-  if (typeof value !== 'object' || value === null) return false
-  return Object.entries(value).some(
-    ([key, child]) =>
-      PII_FIELD_NAMES.has(key.replaceAll(/[_-]/g, '').toLowerCase()) || hasPiiFieldName(child),
-  )
 }
 
 export interface DemoPinningServiceOptions {
@@ -266,7 +246,7 @@ export class DemoPinningService {
       if (error instanceof PinningError) throw error
       throw new PinningError('PAYLOAD_INVALID', 400, { cause: error })
     }
-    if (hasPiiFieldName(payload.claims)) {
+    if (hasPiiShapedFieldName(payload.claims)) {
       throw new PinningError('DEMO_PIN_PII_FIELD_FORBIDDEN', 400)
     }
 

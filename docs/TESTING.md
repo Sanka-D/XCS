@@ -94,6 +94,12 @@ pnpm --filter @xcs-protocol/web exec playwright install chromium
 pnpm test:e2e
 ```
 
+The browser gate also exercises the loopback-only local payload store: it rejects issuance without
+the explicit no-PII acknowledgement, permits a `prenom` field containing a deterministic fictitious
+value only after that acknowledgement, proves fail-closed behavior after the local bytes disappear,
+then issues, accepts and verifies the same canonical IPFS-addressed payload from that browser. It
+also proves that an external IPFS CID absent from the store is not presented as browser-local.
+
 CLI unit integration covers the equivalent headless boundary without a live server. It proves the
 profile-bound transaction semantics, mandatory catalog download for every `Credential*` operation,
 pre-autofill `xcs:prepared` context commitment, deterministic single-signature verification, final
@@ -106,6 +112,14 @@ Xaman and WalletConnect public identifiers are present. They also normalize sign
 signed `tx_json` responses and reject mismatched artifacts, hashes, signatures, signer addresses or
 reviewed fields before persistence/submission. These tests never call `signAndSubmit` and do not
 replace real wallet compatibility evidence.
+
+The wallet compatibility unit gate also covers all three native Credential transaction types. It
+keeps GemWallet available for schema-registration `Payment`, rejects its known pre-XLS-70
+`Credential*` path, and maps only the exact nested legacy codec error to the stable
+`WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED` diagnostic. Playwright exercises that early rejection
+with a GemWallet-identified adapter and proves that no transaction preview, wallet signature or
+ledger submission occurs. This regression test explains a known incompatibility; it does not claim
+that another wallet has passed the manual Testnet matrix.
 
 ## Integration tiers
 

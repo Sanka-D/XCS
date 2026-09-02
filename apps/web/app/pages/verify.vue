@@ -13,15 +13,21 @@ import {
   assertLinkProfile,
   singleRouteQueryValue,
 } from '~/utils/operationLinks'
-import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
+import { LOCAL_PAYLOAD_LOCATION } from '~/utils/localPayloadStore'
+import { normalizedHex256 } from '~/utils/explorer'
 
 const route = useRoute()
+const localePath = useLocalePath()
+const { t } = useI18n()
 const { getActiveNetworkProfile, getCredential, getSchema, verify } = useXcsApi()
+const localPayloadStore = useLocalPayloadStore()
 const issuer = ref(singleRouteQueryValue(route.query.issuer))
 const subject = ref(singleRouteQueryValue(route.query.subject))
 const schemaUid = ref(singleRouteQueryValue(route.query.schema))
 const linkedProfileId = ref(singleRouteQueryValue(route.query.profile))
 const linkedGenerationId = ref(singleRouteQueryValue(route.query.generation))
+const generationLookup = ref(singleRouteQueryValue(route.query.generation))
+const generationLookupError = ref('')
 const busy = ref(false)
 const error = ref('')
 const review = shallowRef<CredentialReview | null>(null)
@@ -33,11 +39,26 @@ let reviewRevision = 0
 const payloadHost = computed(() => {
   if (!review.value?.uri) return null
   try {
-    return inspectPilotHttpsPayloadHost(review.value.uri)
+    return localPayloadStore.inspectPayloadLocation(review.value.uri)
   } catch {
     return null
   }
 })
+const payloadUsesLocalStore = computed(() => payloadHost.value === LOCAL_PAYLOAD_LOCATION)
+const payloadHostError = computed(() => {
+  if (!review.value?.uri) return 'CREDENTIAL_URI_REQUIRED'
+  try {
+    localPayloadStore.inspectPayloadLocation(review.value.uri)
+    return ''
+  } catch (caught) {
+    return caught instanceof Error ? caught.message : String(caught)
+  }
+})
+const payloadHostErrorMessage = computed(() =>
+  payloadHostError.value === 'LOCAL_PAYLOAD_NOT_AVAILABLE_IN_BROWSER'
+    ? t('verify.localPayloadUnavailable')
+    : payloadHostError.value,
+)
 
 function invalidateReview() {
   reviewRevision += 1
@@ -62,8 +83,19 @@ watch(
     schemaUid.value = singleRouteQueryValue(nextSchema)
     linkedProfileId.value = singleRouteQueryValue(nextProfile)
     linkedGenerationId.value = singleRouteQueryValue(nextGeneration)
+    generationLookup.value = singleRouteQueryValue(nextGeneration)
   },
 )
+
+async function openGeneration(): Promise<void> {
+  generationLookupError.value = ''
+  const normalized = normalizedHex256(generationLookup.value)
+  if (normalized === undefined) {
+    generationLookupError.value = t('verify.generationError')
+    return
+  }
+  await navigateTo(localePath(`/credentials/${normalized}`))
+}
 
 async function loadExactMetadata(input: {
   issuer: string
@@ -187,6 +219,7 @@ async function verifyPayload() {
       ...expected,
       schema: loaded.schema.resolved,
       consent,
+      payloadReader: localPayloadStore.readPayload,
     })
     if (revision !== reviewRevision) throw new Error('CREDENTIAL_REVIEW_CHANGED_DURING_FETCH')
     if (!localReview.payload) throw new Error('CREDENTIAL_PAYLOAD_REVIEW_FAILED')
@@ -225,29 +258,68 @@ async function verifyPayload() {
     busy.value = false
   }
 }
+
+useSeoMeta({
+  title: () => `${t('verify.title')} — XCS`,
+  description: () => t('verify.description'),
+  robots: 'index,follow',
+})
 </script>
 
 <template>
-  <section class="section-wrap form-page">
-    <p class="eyebrow">Verifier</p>
+  <section class="section-wrap form-page verify-page">
+    <p class="eyebrow">{{ $t('nav.verify') }}</p>
     <h1>{{ $t('verify.title') }}</h1>
     <p class="lead">{{ $t('verify.description') }}</p>
-    <div class="form-card form-grid">
-      <label for="verify-issuer">Issuer</label>
-      <input id="verify-issuer" v-model.trim="issuer" placeholder="r…" :disabled="busy" />
-      <label for="verify-subject">Subject</label>
-      <input id="verify-subject" v-model.trim="subject" placeholder="r…" :disabled="busy" />
-      <label for="verify-schema">Schema UID</label>
-      <input
-        id="verify-schema"
-        v-model.trim="schemaUid"
-        pattern="[0-9a-fA-F]{64}"
-        :disabled="busy"
-      />
-      <button class="button" type="button" :disabled="busy" @click="loadMetadata">
-        {{ busy ? $t('common.working') : $t('verify.loadMetadata') }}
-      </button>
-    </div>
+
+    <form class="verification-lookup-card" novalidate @submit.prevent="openGeneration">
+      <label for="verify-generation">{{ $t('verify.generationLabel') }}</label>
+      <div class="verification-lookup-control">
+        <input
+          id="verify-generation"
+          v-model.trim="generationLookup"
+          name="generation"
+          inputmode="text"
+          autocomplete="off"
+          pattern="[0-9a-fA-F]{64}"
+          :placeholder="$t('verify.generationPlaceholder')"
+          :aria-describedby="generationLookupError ? 'verify-generation-error' : undefined"
+        />
+        <button class="button" type="submit">{{ $t('verify.openGeneration') }}</button>
+      </div>
+      <p class="form-hint">{{ $t('verify.generationHint') }}</p>
+      <p
+        v-if="generationLookupError"
+        id="verify-generation-error"
+        class="inline-form-error"
+        role="alert"
+      >
+        {{ generationLookupError }}
+      </p>
+    </form>
+
+    <details class="advanced-verification" :open="Boolean(issuer || subject || schemaUid)">
+      <summary>
+        <span>{{ $t('verify.advancedTitle') }}</span>
+        <small>{{ $t('verify.advancedDescription') }}</small>
+      </summary>
+      <div class="form-card form-grid">
+        <label for="verify-issuer">Issuer</label>
+        <input id="verify-issuer" v-model.trim="issuer" placeholder="r…" :disabled="busy" />
+        <label for="verify-subject">Subject</label>
+        <input id="verify-subject" v-model.trim="subject" placeholder="r…" :disabled="busy" />
+        <label for="verify-schema">Schema UID</label>
+        <input
+          id="verify-schema"
+          v-model.trim="schemaUid"
+          pattern="[0-9a-fA-F]{64}"
+          :disabled="busy"
+        />
+        <button class="button" type="button" :disabled="busy" @click="loadMetadata">
+          {{ busy ? $t('common.working') : $t('verify.loadMetadata') }}
+        </button>
+      </div>
+    </details>
     <div v-if="error" class="error-box">{{ error }}</div>
 
     <article v-if="review" class="form-card">
@@ -297,23 +369,35 @@ async function verifyPayload() {
       </div>
 
       <div v-if="!review.payload" class="warning-box">
-        <p>{{ $t('verify.payloadConsentIntro', { host: payloadHost ?? '—' }) }}</p>
-        <label v-if="payloadHost">
+        <p>
+          {{
+            $t(
+              payloadUsesLocalStore
+                ? 'verify.localPayloadConsentIntro'
+                : 'verify.payloadConsentIntro',
+              { host: payloadHost ?? '—' },
+            )
+          }}
+        </p>
+        <div v-if="payloadHostError" class="error-box">{{ payloadHostErrorMessage }}</div>
+        <label v-else-if="payloadHost">
           <input
+            data-testid="payload-consent"
             type="checkbox"
             :checked="payloadConsent"
             :disabled="busy"
             @change="setPayloadConsent(($event.target as HTMLInputElement).checked)"
           />
-          {{ $t('verify.payloadConsent') }}
+          {{ $t(payloadUsesLocalStore ? 'verify.localPayloadConsent' : 'verify.payloadConsent') }}
         </label>
         <button
+          data-testid="payload-fetch"
           class="button secondary"
           type="button"
           :disabled="busy || !payloadConsent"
           @click="verifyPayload"
         >
-          {{ $t('verify.fetch') }}
+          {{ $t(payloadUsesLocalStore ? 'verify.localFetch' : 'verify.fetch') }}
         </button>
       </div>
       <div v-else class="success-box">

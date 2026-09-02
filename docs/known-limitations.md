@@ -128,6 +128,16 @@ integrators.
   but each one still needs the XRPL Testnet namespace and native `CredentialCreate`,
   `CredentialAccept` and `CredentialDelete` support. Real browser extensions, Xaman popup,
   WalletConnect QR/deep links and Ledger hardware access remain an adapter-by-adapter manual gate.
+- GemWallet 3.8.x is a known transaction-specific exception: its embedded XRPL validator predates
+  XLS-70 and rejects every native `Credential*` type before signing. XCS leaves GemWallet enabled for
+  schema-registration `Payment` transactions, labels its Credential limitation in the chooser and
+  rejects Credential preparation before a wallet popup or operation journal entry. Removing this
+  guard requires a newly released GemWallet version plus real Testnet evidence for create, accept
+  and delete; updating only `xrpl-connect` in XCS cannot replace the extension's embedded codec.
+- Xaman's current source includes native Credential handling, so XCS labels it as supported when the
+  public application identifier enables the adapter. This label is a capability indication, not
+  release qualification: the popup flow and all returned signed artifacts still need the manual
+  Testnet matrix gate.
 - The release candidate declares the peer range `xrpl ^3 || ^4`, while XCS uses `xrpl` 5. This
   combination passes only repository-side compatibility checks until upstream declares or a stable
   release proves support; it remains a release risk. The RC also adds a substantial browser
@@ -158,9 +168,19 @@ evidence. The optional server resolver classifies the observed, integrity-bound 
 `Content-Type` is absent or different and does not trust `Content-Length` to prove the 1 MiB limit.
 
 The optional pinning API is disabled by default, limited to configured Testnet profiles, and not a
-private storage service or part of the Commons-hosted beta product. Its PII field-name filter is only
-a guardrail, not a classifier. There is no promise that public IPFS content disappears after the
+private storage service or part of the Commons-hosted beta product. Its person-specific field-name
+filter is only a guardrail, not a classifier; context-neutral labels such as `name` remain valid.
+There is no promise that public IPFS content disappears after the
 local 90-day pin expires.
+
+The separate `XCS_LOCAL_PAYLOAD_STORE=1` development aid keeps at most 20 canonical payloads for 24
+hours in one loopback browser and anchors their normative raw IPFS CIDs. It is deliberately
+unavailable in production and does not publish or pin those bytes to IPFS. Credentials issued with
+this mode are therefore resolvable only by the same browser while its entry remains present; the
+on-ledger Testnet object outlives local expiry or purge. Person-shaped field identifiers require the
+issuer's explicit confirmation that their test values are fictitious; that confirmation is persisted
+with the local record so the same browser can later review it. This remains only a guardrail and does
+not make personal data safe. Browser storage remains exposed to the same-origin/XSS boundary.
 
 The browser acceptance pilot reads issuer-hosted HTTPS payloads directly only after consent. This
 reveals IP address and timing to that host; local/IP-literal hostnames are rejected, but DNS rebinding

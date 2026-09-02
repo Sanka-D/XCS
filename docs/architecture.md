@@ -61,11 +61,12 @@ fresh database. No pilot registry, profile or projection is renamed or promoted.
 
 ## Product surface and discovery
 
-The accountless Nuxt application is one site with three navigation surfaces: Explorer for public
-schemas, aggregate statistics and exact Credential evidence; Studio for wallet-based schema and
-unit-issuance workflows; and Developers for REST, SDK and CLI integration material. EAS and EASScan
-inform interaction design only. XCS continues to use native XRPL Credentials and the frozen v0.1
-protocol described in `spec/XCS-0001.md`.
+The accountless Nuxt application exposes four primary entries: Explorer for public schemas and
+aggregate statistics, Create for wallet-based schema and unit-issuance workflows, Verify for exact
+Credential evidence, and Docs for REST, SDK and CLI integration material. The Create and Docs
+entries continue to use the `/studio` and `/developers` implementation routes respectively. EAS and
+EASScan inform interaction design only. XCS continues to use native XRPL Credentials and the frozen
+v0.1 protocol described in `spec/XCS-0001.md`.
 
 Discovery is hybrid. Every valid permissionless schema is public and discoverable, but Credentials
 are resolved only from exact shared coordinates: generation ID, transaction hash or the complete

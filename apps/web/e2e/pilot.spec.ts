@@ -3,6 +3,7 @@ import {
   canonicalize,
   computeSchemaUid,
   createHttpsPayloadUri,
+  createIpfsRawPayloadUri,
   encodeUtf8,
   encodeUtf8Hex,
   sha256Hex,
@@ -19,6 +20,7 @@ const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 const SUBJECT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
 const ISSUER_WALLET_ID = 'xcs-browser-e2e'
 const SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
+const GEMWALLET_ID = 'gemwallet'
 const LEDGER_HASH = 'cd'.repeat(32)
 const SCHEMA: SchemaDefinition = {
   xcsVersion: '0.1',
@@ -29,6 +31,7 @@ const SCHEMA: SchemaDefinition = {
     programName: { type: 'string' },
     awardedAt: { type: 'string' },
     diplomaId: { type: 'string' },
+    prenom: { type: 'string' },
     honors: { type: 'string', optional: true },
   },
 }
@@ -45,6 +48,7 @@ const CLAIMS = {
   programName: 'Protocol Engineering',
   awardedAt: '2026-08-25T10:00:00Z',
   diplomaId: 'DIP-2026-0042',
+  prenom: 'Personne Test',
   honors: 'with distinction',
 }
 const PAYLOAD_URL = 'https://issuer.xcs.invalid/diploma.json'
@@ -91,6 +95,7 @@ interface ApiMockOptions {
   readonly credentialEvidence?: () => 'confirmed' | 'mismatch'
   readonly credentialLifecycle?: BrowserCredentialLifecycle
   readonly credentialUri?: string
+  readonly networksUnavailable?: boolean
   readonly pendingCredentialRejection?: boolean
   readonly signingReadiness?: () => 'ready' | 'unavailable' | 'malformed'
 }
@@ -120,6 +125,19 @@ test.beforeEach(({ page }) => {
 test.afterEach(({ page }) => {
   expect(browserErrors.get(page) ?? []).toEqual([])
 })
+
+function consumeExpectedHttpFailure(page: Page, status: string): void {
+  const errors = browserErrors.get(page) ?? []
+  expect(errors.length).toBeGreaterThan(0)
+  expect(
+    errors.every(
+      (entry) =>
+        entry ===
+        `console:Failed to load resource: the server responded with a status of ${status}`,
+    ),
+  ).toBe(true)
+  errors.length = 0
+}
 
 async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise<void> {
   await page.route(`**${API_PREFIX}/v1/**`, async (route) => {
@@ -162,6 +180,13 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
       return
     }
     if (path === '/v1/networks') {
+      if (options.networksUnavailable) {
+        await route.fulfill({
+          status: 503,
+          json: { error: 'INDEXER_STALE', message: 'Synthetic unavailable projection.' },
+        })
+        return
+      }
       await route.fulfill({ json: { items: [PROFILE] } })
       return
     }
@@ -461,15 +486,45 @@ async function installApiMock(page: Page, options: ApiMockOptions = {}): Promise
 
 async function connectSyntheticWallet(
   page: Page,
-  actor: 'issuer' | 'subject' = 'issuer',
+  actor: 'issuer' | 'subject' | 'gemwallet' = 'issuer',
 ): Promise<void> {
-  const walletId = actor === 'issuer' ? ISSUER_WALLET_ID : SUBJECT_WALLET_ID
-  const account = actor === 'issuer' ? ISSUER : SUBJECT
+  const walletId =
+    actor === 'subject'
+      ? SUBJECT_WALLET_ID
+      : actor === 'gemwallet'
+        ? GEMWALLET_ID
+        : ISSUER_WALLET_ID
+  const account = actor === 'subject' ? SUBJECT : ISSUER
   await page.locator('[data-client-ready="true"]').waitFor()
-  await page.getByTestId('wallet-toggle').click()
+  const trigger = page.getByTestId('wallet-toggle')
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
   await page.locator(`[data-wallet-id="${walletId}"]`).click()
   await expect(page.getByTestId('wallet-toggle')).toContainText(account.slice(0, 6))
 }
+
+test('explains GemWallet Credential incompatibility before preview or wallet interaction', async ({
+  page,
+}) => {
+  await installApiMock(page)
+  await page.goto('/issue')
+  await connectSyntheticWallet(page, 'gemwallet')
+  await page.locator('#schema-uid').fill(SCHEMA_UID)
+  await page.locator('#subject').fill(SUBJECT)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
+  await page.locator('#claims').fill(JSON.stringify(CLAIMS, null, 2))
+  await page.locator('#https-url').fill(PAYLOAD_URL)
+
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+
+  const issueError = page.getByTestId('issue-error')
+  await expect(issueError).toContainText('GemWallet ne peut pas signer CredentialCreate')
+  await expect(issueError).toContainText(
+    'WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED:gemwallet:CredentialCreate',
+  )
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+})
 
 async function downloadText(download: Download): Promise<string> {
   const stream = await download.createReadStream()
@@ -640,6 +695,135 @@ test('discovers a schema from aggregate stats and global search', async ({ page 
   await expect(page.getByRole('heading', { level: 1, name: SCHEMA.name })).toBeVisible()
 })
 
+test('exposes the simplified create, verify and docs navigation', async ({ page }) => {
+  await installApiMock(page)
+
+  await page.goto('/')
+  await expect(
+    page.getByRole('heading', {
+      level: 1,
+      name: /L’infrastructure des credentials vérifiables|Credential infrastructure for verifiable data/u,
+    }),
+  ).toBeVisible()
+
+  const navigation = page.locator('.primary-nav')
+  await expect(navigation.getByRole('link', { name: 'Explorer', exact: true })).toHaveAttribute(
+    'href',
+    /^\/(?:en\/)?schemas$/u,
+  )
+  await expect(
+    navigation.getByRole('link', { name: /Créer|Create/u, exact: true }),
+  ).toHaveAttribute('href', /^\/(?:en\/)?studio$/u)
+  await expect(
+    navigation.getByRole('link', { name: /Vérifier|Verify/u, exact: true }),
+  ).toHaveAttribute('href', /^\/(?:en\/)?verify$/u)
+  await expect(navigation.getByRole('link', { name: 'Docs', exact: true })).toHaveAttribute(
+    'href',
+    /^\/(?:en\/)?developers$/u,
+  )
+
+  await page.getByRole('link', { name: /Commencer à créer|Start building/u }).click()
+  await expect(page).toHaveURL(/\/(?:en\/)?studio$/u)
+  await expect(page.locator('.create-primary-card[href$="/schemas/register"]')).toBeVisible()
+  await expect(page.locator('.create-primary-card[href$="/issue"]')).toBeVisible()
+})
+
+test('keeps the complete landing hero inside a desktop viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 893 })
+  await installApiMock(page)
+
+  await page.goto('/')
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await page.locator('.landing-art img').evaluate(async (image) => {
+    await (image as HTMLImageElement).decode()
+  })
+
+  const viewport = page.viewportSize()
+  const hero = await page.locator('.landing-hero').boundingBox()
+  const primaryAction = await page
+    .getByRole('link', { name: /Commencer à créer|Start building/u })
+    .boundingBox()
+  const installCommand = await page.locator('.install-command').boundingBox()
+
+  expect(viewport).not.toBeNull()
+  expect(hero).not.toBeNull()
+  expect(primaryAction).not.toBeNull()
+  expect(installCommand).not.toBeNull()
+  expect(hero!.y + hero!.height).toBeLessThanOrEqual(viewport!.height + 1)
+  expect(primaryAction!.y + primaryAction!.height).toBeLessThanOrEqual(viewport!.height)
+  expect(installCommand!.y + installCommand!.height).toBeLessThanOrEqual(viewport!.height)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    viewport!.width,
+  )
+})
+
+test('opens an exact credential verification from its generation ID', async ({ page }) => {
+  await installApiMock(page, {
+    credentialLifecycle: {
+      generationId: PERMALINK_GENERATION_ID,
+      state: 'active',
+      accepted: true,
+      acceptedTransactionHash: PERMALINK_ACCEPTED_TRANSACTION_HASH,
+    },
+    credentialUri: CREDENTIAL_URI,
+  })
+
+  await page.goto('/verify')
+  await page.locator('[data-client-ready="true"]').waitFor()
+  const generationInput = page.getByLabel(/Identifiant de génération|Credential generation ID/u)
+  const openVerification = page.getByRole('button', {
+    name: /Ouvrir la vérification|Open verification/u,
+  })
+  await generationInput.fill('not-a-generation')
+  await openVerification.click()
+  await expect(page.locator('#verify-generation-error')).toBeVisible()
+  await expect(page).toHaveURL(/\/(?:en\/)?verify$/u)
+
+  await generationInput.fill(PERMALINK_GENERATION_ID)
+  await openVerification.click()
+
+  await expect(page).toHaveURL(new RegExp(`/(?:en/)?credentials/${PERMALINK_GENERATION_ID}$`, 'u'))
+  await expect(page.getByRole('heading', { level: 1, name: SCHEMA.name })).toBeVisible()
+  await expect(page.getByTestId('credential-dimension-on-chain')).toContainText('active')
+})
+
+test('fails closed when an exact credential generation does not exist', async ({ page }) => {
+  await installApiMock(page)
+  const unknownGenerationId = '99'.repeat(32)
+
+  await page.goto('/verify')
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await page
+    .getByLabel(/Identifiant de génération|Credential generation ID/u)
+    .fill(unknownGenerationId)
+  await page.getByRole('button', { name: /Ouvrir la vérification|Open verification/u }).click()
+
+  await expect(page).toHaveURL(new RegExp(`/(?:en/)?credentials/${unknownGenerationId}$`, 'u'))
+  await expect(page.locator('.explorer-error')).toContainText(
+    /ressource XCS est introuvable|XCS resource could not be found/u,
+  )
+  consumeExpectedHttpFailure(page, '404 (Not Found)')
+})
+
+test('fails closed when the exact credential projection is unavailable', async ({ page }) => {
+  await installApiMock(page, { networksUnavailable: true })
+  const generationId = '98'.repeat(32)
+
+  await page.goto('/verify')
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await page.getByLabel(/Identifiant de génération|Credential generation ID/u).fill(generationId)
+  await page.getByRole('button', { name: /Ouvrir la vérification|Open verification/u }).click()
+
+  await expect(page).toHaveURL(new RegExp(`/(?:en/)?credentials/${generationId}$`, 'u'))
+  await expect(page.locator('.explorer-error')).toContainText(
+    /ne peut pas répondre de façon fiable|cannot answer reliably/u,
+  )
+  await expect(page.locator('.explorer-error')).toContainText(
+    /échoue volontairement en mode fermé|deliberately fails closed/u,
+  )
+  consumeExpectedHttpFailure(page, '503 (Service Unavailable)')
+})
+
 test('registers a schema through XRPL validation and exact indexed XCS finality', async ({
   page,
 }) => {
@@ -798,6 +982,210 @@ test('rejects inconsistent signed recovery metadata without losing the blob', as
     txHash: RECOVERY_TX_HASH,
     lastLedgerSequence: 1,
   })
+})
+
+test('blocks issuance before the wallet when the published payload cannot be fetched', async ({
+  page,
+}) => {
+  await installApiMock(page)
+  await page.goto('/issue')
+  await expect(page.locator('#https-url')).toHaveValue('')
+  await connectSyntheticWallet(page)
+  await page.locator('#schema-uid').fill(SCHEMA_UID)
+  await page.locator('#subject').fill(SUBJECT)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
+  await page.locator('#claims').fill(JSON.stringify(CLAIMS, null, 2))
+
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('issue-error')).toContainText(
+    'Indiquez d’abord l’URL HTTPS publique définitive',
+  )
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+
+  await page.locator('#https-url').fill('https://issuer.example/credentials/replace-me.json')
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('issue-error')).toContainText(
+    'issuer.example est un exemple, pas un hébergement',
+  )
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+
+  await page.locator('#https-url').fill(PAYLOAD_URL)
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('transaction-preview')).toContainText('CredentialCreate')
+
+  await page.evaluate((payloadUrl) => {
+    const browserFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const requestUrl =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (requestUrl === payloadUrl) throw new TypeError('Failed to fetch')
+      return browserFetch(input, init)
+    }
+  }, PAYLOAD_URL)
+
+  await page.getByTestId('transaction-sign').click()
+
+  const issueError = page.getByTestId('issue-error')
+  await expect(issueError).toContainText('Le navigateur n’a pas pu relire le payload')
+  await expect(issueError).toContainText('PAYLOAD_FETCH_FAILED')
+  await expect(page.getByTestId('transaction-preview')).toBeVisible()
+  await expect(page.getByTestId('transaction-sign')).toBeEnabled()
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+})
+
+test('stores, issues and reviews an IPFS-addressed payload in the local test browser', async ({
+  page,
+}) => {
+  const canonicalPayload = canonicalize({
+    xcsVersion: '0.1',
+    issuer: ISSUER,
+    subject: SUBJECT,
+    schema: SCHEMA_UID,
+    claims: CLAIMS,
+  } as JsonValue)
+  const credentialUri = createIpfsRawPayloadUri(canonicalPayload)
+  const credentialLifecycle: BrowserCredentialLifecycle = {
+    generationId: null,
+    state: 'pending',
+    accepted: false,
+    acceptedTransactionHash: null,
+  }
+  await installApiMock(page, {
+    credentialEvidence: () => 'confirmed',
+    credentialLifecycle,
+    credentialUri,
+  })
+
+  await page.goto('/issue')
+  await connectSyntheticWallet(page)
+  await page.locator('#schema-uid').fill(SCHEMA_UID)
+  await page.locator('#subject').fill(SUBJECT)
+  await page.getByRole('button', { name: 'Mode JSON' }).click()
+  await page.locator('#claims').fill(JSON.stringify(CLAIMS, null, 2))
+  await page.locator('#payload-storage-mode').selectOption('local-test')
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('issue-error')).toContainText(
+    'Confirmez l’avertissement du stockage local',
+  )
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+  await page
+    .getByLabel(/Je confirme que ce payload de test ne contient aucune donnée personnelle/u)
+    .check()
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+
+  await expect(page.getByTestId('local-payload-stored')).toBeVisible()
+  await expect(page.getByText(credentialUri, { exact: true })).toBeVisible()
+  await expect(page.getByTestId('transaction-preview')).toContainText('CredentialCreate')
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((key) => key.startsWith('xcs:local-test-payload:v1:'))
+          .length,
+    ),
+  ).toBe(1)
+
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('xcs:local-test-payload:v1:')) localStorage.removeItem(key)
+    }
+  })
+  await page.getByTestId('transaction-sign').click()
+  await expect(page.getByTestId('issue-error')).toContainText(
+    'Ce payload local est absent ou expiré',
+  )
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+
+  await page.getByRole('button', { name: 'Valider et préparer' }).click()
+  await expect(page.getByTestId('local-payload-stored')).toBeVisible()
+  await page.getByTestId('transaction-sign').click()
+  await expect(page.getByTestId('xrpl-finality')).toContainText('tesSUCCESS')
+  await expect(page.getByTestId('xcs-confirmed')).toBeVisible()
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 1, ledgerSubmissions: 1 })
+
+  const acceptHref = await page
+    .getByRole('link', { name: /acceptation du sujet|subject acceptance/iu })
+    .getAttribute('href')
+  expect(acceptHref).not.toBeNull()
+  await page.getByTestId('wallet-toggle').click()
+  await page.goto(acceptHref!)
+  await connectSyntheticWallet(page, 'subject')
+  await page
+    .getByRole('button', { name: /Charger, relire et préparer|Load, review and prepare/u })
+    .click()
+  await expect(page.getByText(/conservé dans ce navigateur/u)).toBeVisible()
+  await page.getByTestId('payload-consent').check()
+  await page.getByTestId('issuer-trust-acknowledgement').getByRole('checkbox').check()
+  await page
+    .getByRole('button', { name: /Charger le payload et préparer|Fetch payload and prepare/u })
+    .click()
+  await expect(page.getByTestId('transaction-preview')).toContainText('CredentialAccept')
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
+
+  await page.getByTestId('transaction-sign').click()
+  await expect(page.getByTestId('xrpl-finality')).toContainText('tesSUCCESS')
+  await expect(page.getByTestId('xcs-confirmed')).toBeVisible()
+  expect(credentialLifecycle.state).toBe('active')
+  expect(credentialLifecycle.accepted).toBe(true)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 1, ledgerSubmissions: 1 })
+
+  const generationId = credentialLifecycle.generationId
+  if (!generationId) throw new Error('BROWSER_E2E_GENERATION_ID_MISSING')
+  const verifyQuery = new URLSearchParams({
+    profile: PROFILE_ID,
+    issuer: ISSUER,
+    subject: SUBJECT,
+    schema: SCHEMA_UID,
+    generation: generationId,
+  })
+  await page.goto(`/verify?${verifyQuery.toString()}`)
+  await page.locator('[data-client-ready="true"]').waitFor()
+  await page
+    .getByRole('button', { name: /Charger les métadonnées indexées|Load indexed metadata/u })
+    .click()
+  await expect(page.getByText(/stockage de démonstration de ce navigateur/u)).toBeVisible()
+  await page.getByTestId('payload-consent').check()
+  await page.getByTestId('payload-fetch').click()
+  await expect(page.locator('.verification-grid')).toContainText('valid')
+  await expect(page.locator('.success-box')).toContainText(sha256Hex(encodeUtf8(canonicalPayload)))
+})
+
+test('does not mislabel an unavailable external IPFS CID as browser-local', async ({ page }) => {
+  const canonicalPayload = canonicalize({
+    xcsVersion: '0.1',
+    issuer: ISSUER,
+    subject: SUBJECT,
+    schema: SCHEMA_UID,
+    claims: CLAIMS,
+  } as JsonValue)
+  const credentialLifecycle: BrowserCredentialLifecycle = {
+    generationId: PERMALINK_GENERATION_ID,
+    state: 'pending',
+    accepted: false,
+    acceptedTransactionHash: null,
+  }
+  await installApiMock(page, {
+    credentialLifecycle,
+    credentialUri: createIpfsRawPayloadUri(canonicalPayload),
+  })
+
+  await page.goto(
+    `/accept?profile=${PROFILE_ID}&issuer=${ISSUER}&schema=${SCHEMA_UID}&generation=${PERMALINK_GENERATION_ID}`,
+  )
+  await connectSyntheticWallet(page, 'subject')
+  await page
+    .getByRole('button', { name: /Charger, relire et préparer|Load, review and prepare/u })
+    .click()
+
+  await expect(
+    page.getByText(/Ce CID IPFS n’est pas disponible|This IPFS CID is unavailable/u),
+  ).toBeVisible()
+  await expect(page.getByText(/conservé dans ce navigateur|stored in this browser/u)).toHaveCount(0)
+  await expect(page.getByTestId('payload-consent')).toHaveCount(0)
+  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
+  expect(await browserE2eEffects(page)).toEqual({ walletSignatures: 0, ledgerSubmissions: 0 })
 })
 
 test('issues, reconfirms, then accepts a credential with exact indexed evidence', async ({
@@ -1193,6 +1581,7 @@ test('reveals an exact diploma permalink only after bound payload consent', asyn
     ['programName', 'string', CLAIMS.programName],
     ['awardedAt', 'string', CLAIMS.awardedAt],
     ['diplomaId', 'string', CLAIMS.diplomaId],
+    ['prenom', 'string', CLAIMS.prenom],
     ['honors', 'string', CLAIMS.honors],
   ] as const) {
     const row = page.getByTestId(`credential-claim-${name}`)
