@@ -62,6 +62,14 @@ Xaman is added only when `NUXT_PUBLIC_XAMAN_API_KEY` is set, and WalletConnect o
 `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` is set. Both values identify a public application to its
 wallet provider; they are browser-visible identifiers, not secrets.
 
+Public deployment is additionally blocked on third-party license review. The RC bundle contains
+WalletConnect code under the WalletConnect Community License, and its GemWallet dependency requires
+GemWallet's permission for public or beta use. Commons must record those approvals and ship the
+required notices before enabling a public build. Returning to `0.8.2` or deleting the declared
+dependencies would only hide the same bundled code from the license scanner; it is not a compliant
+workaround. The upstream adapter packages are not yet published separately, so there is currently no
+npm-supported way to retain all eight adapters while excluding only those two integrations.
+
 XCS filters this surface to adapters that expose `sign()` and never calls `signAndSubmit`. A wallet
 may return a `tx_blob` or signed `tx_json`; the application normalizes the artifact, derives and
 checks its hash, verifies the XRPL signature and optional `signerAddress`, and proves that no

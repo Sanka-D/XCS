@@ -120,6 +120,13 @@ integrators.
   `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`. Their Compose inputs are
   `XCS_PUBLIC_XAMAN_API_KEY` and `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`. These identifiers are not
   secrets, and their absence removes the corresponding adapter.
+- The public deployment and dependency-policy gates must remain closed until Commons records
+  permission from GemWallet for public/beta use and explicitly reviews the WalletConnect Community
+  License, including its attribution, network and usage-threshold conditions. The RC bundles both
+  integrations; downgrading to `0.8.2`, removing only their lockfile entries or reclassifying their
+  licenses as MIT would conceal rather than remove them. The upstream per-adapter packages are not
+  currently published on npm, so retaining all eight adapters without these approvals has no
+  compliant package-level workaround.
 - XCS invokes only adapter `sign()`. It normalizes a returned `tx_blob` or signed `tx_json`, checks
   the derived hash, XRPL signature, optional `signerAddress` and exact equality with the reviewed
   transaction, then persists and submits the blob itself. Calling or falling back to
