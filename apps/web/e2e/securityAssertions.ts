@@ -119,7 +119,7 @@ export function expectHtmlDefensiveHeaders(response: APIResponse): void {
   expect(headers['origin-agent-cluster']).toBe('?1')
   expect(headers['x-dns-prefetch-control']).toBe('off')
   expect(headers['permissions-policy']).toBe(
-    'camera=(), display-capture=(), fullscreen=(), geolocation=(), microphone=(), payment=(), usb=()',
+    'camera=(), display-capture=(), fullscreen=(), geolocation=(), microphone=(), hid=(self), payment=(), usb=(self)',
   )
 }
 

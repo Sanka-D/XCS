@@ -145,4 +145,18 @@ describe('browser HTTPS payload publication proof', () => {
       readCanonicalHttpsPayload({ credentialUri: uri, fetchImpl: fetchMock, timeoutMs: 1 }),
     ).rejects.toThrow('PAYLOAD_FETCH_TIMEOUT')
   })
+
+  it('reports a browser network or CORS rejection before publication can be trusted', async () => {
+    const cause = new TypeError('Failed to fetch')
+
+    await expect(
+      verifyHttpsPayloadPublication({
+        canonicalPayload: canonical,
+        credentialUri: uri,
+        fetchImpl: async () => {
+          throw cause
+        },
+      }),
+    ).rejects.toMatchObject({ message: 'PAYLOAD_FETCH_FAILED', cause })
+  })
 })

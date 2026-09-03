@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { hasControlledPilotProfileId } from '~/utils/controlledPilotProfile'
 import { displayDate, displayXrplTime } from '~/utils/explorer'
 
 const { locale, t } = useI18n()
@@ -14,6 +15,11 @@ const { data, pending, error, refresh } = await useAsyncData('network-overview',
 const updatedAt = computed(() => displayDate(data.value?.status.updatedAt, locale.value))
 const checkpointCloseTime = computed(() =>
   displayXrplTime(data.value?.stats.checkpoint.closeTime, locale.value),
+)
+const registryLabel = computed(() =>
+  hasControlledPilotProfileId(data.value?.profile.profileId)
+    ? t('networkStatus.controlledRegistry')
+    : t('networkStatus.registry'),
 )
 
 useSeoMeta({
@@ -44,7 +50,7 @@ useSeoMeta({
         </dd>
         <dt>{{ $t('networkStatus.networkId') }}</dt>
         <dd>{{ data.profile.networkId }}</dd>
-        <dt>{{ $t('networkStatus.registry') }}</dt>
+        <dt>{{ registryLabel }}</dt>
         <dd>
           <code>{{ data.profile.registryAddress }}</code>
         </dd>

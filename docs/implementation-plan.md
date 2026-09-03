@@ -33,8 +33,9 @@ same validated ledgers must reach the same protocol result as the shared service
   or claims search. A future browsable Credential catalog needs a separately designed opt-in signal.
 - Commons presents addresses and four-dimensional verification without issuer badges, ranking or a
   universal trust decision.
-- The beta uses issuer-hosted HTTPS payloads, unit issuance through Crossmark or GemWallet, and no
-  XCS account or multi-tenant backend.
+- The beta uses issuer-hosted HTTPS payloads, unit issuance through the pinned XRPL Connect
+  sign-only boundary, and no XCS account or multi-tenant backend. Its eight-adapter factory is not a
+  claim that every WalletConnect-discovered wallet supports XRPL Testnet or native Credentials.
 - One site contains Explorer, Studio and Developers surfaces. Its public integration contract is
   REST-first; GraphQL is deferred until real usage demonstrates a need.
 - The initial pilot covers course participation/completion and diploma-style credentials.
@@ -56,13 +57,18 @@ transaction-root checkpoints, fail-closed repeatable-read API guards, quorum-ver
 empty-database replay, least-privilege database roles, and a timestamp-free projection digest. The
 browser submission RPC is configured separately from the two private indexer sources.
 Every new browser signature is gated by a profile-bound authoritative readiness snapshot immediately
-before wallet invocation and again before a returned blob can be retained or submitted.
+before wallet invocation and again before a returned artifact can be retained or submitted. The web
+pins `xrpl-connect@1.0.0-rc.0`, registers Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra,
+Otsu and MetaMask Snap when their required public configuration is available, and invokes only
+`sign()`. It normalizes `tx_blob` or signed `tx_json`, checks hash, signature, signer address and
+reviewed-field equality, then persists and submits itself; `signAndSubmit` is outside the accepted
+boundary.
 Recovery first binds the decoded blob to its stored hash, expiry, account, transaction type and any
 explicit network ID. It then reconciles that hash, requires another readiness snapshot and reasserts
 the local business lock immediately before any signed-blob retransmission; a failed gate retains the
 blob for a later retry without reopening the wallet.
 Unit/conformance suites cover the deterministic protocol, source normalization, worker, API, CLI
-and browser flow; CI contains a PostgreSQL 18 job for fifteen database-migration, role-permission,
+and browser flow; CI contains a PostgreSQL 18 job for sixteen database-migration, role-permission,
 fencing, replay, and operational-snapshot scenarios. The complete-replay case captures one integrity-bound synthetic
 ledger bundle, validates it twice, runs both copies through the normal worker into empty projections,
 and requires the same fixed full-projection digest and all six deletion causes.
@@ -147,8 +153,10 @@ unchanged; `0003_projection_integrity.sql` adds the projection-boundary checks w
 historical rows.
 
 This does **not** close milestones 0–2: PR review/merge, a real blackholed Testnet profile, proof that
-the two providers are independent, live PostgreSQL execution, real Crossmark/GemWallet transactions,
-captured ledger fixtures, and two-entity pilot evidence remain external gates.
+the two providers are independent, live PostgreSQL execution, real adapter-by-adapter XRPL Connect
+transactions, captured ledger fixtures, and two-entity pilot evidence remain external gates. The RC
+peer range (`xrpl ^3 || ^4`) does not yet declare XCS's `xrpl` 5 combination; its bundle cost,
+WalletConnect CSP assets and the temporary Otsu availability workaround also remain release risks.
 
 The controlled-pilot deployment configuration is now explicit: it is guarded by an exact policy
 and acknowledgement, uses a Commons-operated primary, Ripple's public Testnet secondary and XRPL
@@ -269,8 +277,11 @@ profile is replaced by a new profile ID and activation boundary, never edited in
 
 Work:
 
-- execute a wallet matrix for Crossmark and GemWallet covering schema registration,
-  `CredentialCreate`, `CredentialAccept`, and both issuer- and subject-initiated deletion;
+- execute a wallet matrix for each configured Xaman, Crossmark, GemWallet, WalletConnect, Ledger,
+  Xyra, Otsu and MetaMask Snap adapter covering schema registration, `CredentialCreate`,
+  `CredentialAccept`, and both issuer- and subject-initiated deletion;
+- for every WalletConnect candidate, prove the XRPL Testnet namespace and native Credential support;
+  QR/deep-link pairing alone is not a passing result;
 - cover rejection, wallet cancellation, account or network changes, lost submission acknowledgements,
   expiry, restart recovery, and duplicate submission attempts;
 - verify that every UI preview exactly matches the signed blob and that every success shown to the
@@ -279,8 +290,8 @@ Work:
   tests, review the bundle for on-ledger identifiers, and bind it to a published manifest digest;
 - add PostgreSQL integration tests that apply the migration to an empty database, ingest fixtures,
   restart at checkpoints, and rebuild projections;
-- add browser tests with a deterministic mock signer, while retaining the manual extension-wallet
-  matrix as a release gate;
+- add browser tests with a deterministic mock signer, while retaining the manual real-wallet matrix
+  as a release gate;
 - publish issuer, subject, and verifier walkthroughs using disposable Testnet accounts only.
 
 Exit criteria:
@@ -288,8 +299,8 @@ Exit criteria:
 - two independent account pairs complete register → issue → accept → verify → delete;
 - the TypeScript and Go verifiers agree on every captured payload and schema;
 - recovery after browser, API, indexer, and database restarts is demonstrated;
-- all automated checks run in CI and the manual wallet evidence records adapter and extension
-  versions.
+- all automated checks run in CI and the manual wallet evidence records adapter, wallet application
+  or extension, browser and hardware-device versions as applicable.
 
 ## Milestone 3 — prove frozen v0.1 interoperability
 
@@ -343,11 +354,12 @@ Work:
 - make Nitro the source of truth for browser security headers; deploy one CSP in report-only mode,
   require the edge to overwrite rather than append policy values, and keep HSTS scoped to the
   current host without `includeSubDomains` or `preload`;
-- validate the report-only policy with `curl`, browser DevTools and real Crossmark/GemWallet
-  transaction matrices, then promote the same single policy to enforcement only after all
-  application-owned violations and wallet regressions are resolved; retain `connect-src https:` for
-  permissionless issuer payload hosts and do not add a CSP report collector without a separate
-  privacy review;
+- validate the report-only policy with `curl`, browser DevTools and real transaction matrices for
+  every enabled XRPL Connect adapter, including WalletConnect modal styles/images, then promote the
+  same single policy to enforcement only after all application-owned violations and wallet
+  regressions are resolved; retain `connect-src https:` for permissionless issuer payload hosts,
+  retain same-origin-only `hid`/`usb` for Ledger, and do not add a CSP report collector without a
+  separate privacy review;
 - perform an internal threat-model and defensive design review, and close release-blocking findings
   before exposing the pilot; this review does not replace the final post-freeze audit in milestone 6;
 - document data retention, public-payload constraints, abuse handling, and incident contacts.
@@ -371,7 +383,7 @@ Exit criteria:
 - stale, discontinuous, or inconsistent ledger data never produces an authoritative active/valid
   response;
 - the public web origin exposes one enforced CSP and one host-scoped HSTS value, with recorded curl,
-  DevTools and real Crossmark/GemWallet evidence from the promoted policy;
+  DevTools and real enabled-wallet evidence from the promoted policy;
 - the threat model, audit report, operational dashboards, alerts, and incident procedures are
   reviewed and linked from the release record;
 - production services hold no XRPL signing secret.
@@ -391,8 +403,9 @@ Work:
   integration path;
 - retain the schema-authoring workflow that validates locally, previews canonical bytes and memo
   size, and records the resulting registration operation;
-- build the controlled pilot on the SDK `Signer` boundary using the explicitly tested Crossmark and
-  GemWallet browser adapters for low-volume, unit issuance;
+- build the controlled pilot on the SDK `Signer` boundary using the pinned XRPL Connect
+  sign-only factory for low-volume, unit issuance; Xaman and WalletConnect require their public
+  application identifiers, and only adapters certified by the real Testnet matrix may be promoted;
 - retain deterministic payload generation, issuer-hosted HTTPS publication and the mandatory proof
   that published bytes match the URI before issuance;
 - support idempotent resumption and sanitized local receipts for each unit operation;
@@ -418,6 +431,10 @@ Exit criteria:
   result as final;
 - signing keys remain within the issuer- or subject-controlled wallet;
 - pilot feedback is resolved or explicitly deferred before a stable release.
+
+Wallet integration rollback removes the optional public Xaman/WalletConnect identifiers or
+restricts the reviewed factory to the passing adapters. It requires no protocol, network-profile or
+database-schema rollback and must never replace `sign()` with `signAndSubmit`.
 
 ## Milestone 6 — final audit and Mainnet go/no-go
 

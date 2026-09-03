@@ -46,7 +46,9 @@ const schemaRow: SchemaRow = {
 
 describe('PostgresApiRepository authority reads', () => {
   it('runs callbacks in a read-only repeatable-read transaction and uses database time', async () => {
-    const execute = vi.fn(async () => [{ now: NOW }])
+    // postgres.js exposes raw CURRENT_TIMESTAMP values as strings through
+    // Drizzle's execute() path, so the repository requests a numeric epoch.
+    const execute = vi.fn(async (_statement: SQL) => [{ nowMilliseconds: NOW.getTime() }])
     const transactionDatabase = { execute } as unknown as XcsDatabase
     const transaction = vi.fn(
       async <T>(
@@ -67,6 +69,11 @@ describe('PostgresApiRepository authority reads', () => {
       accessMode: 'read only',
     })
     expect(execute).toHaveBeenCalledOnce()
+    const statement = execute.mock.calls[0]?.[0]
+    expect(statement).toBeDefined()
+    expect(new PgDialect().sqlToQuery(statement!).sql).toContain(
+      'EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)',
+    )
   })
 
   it('looks up schema registration evidence by its unique profile and transaction key', async () => {

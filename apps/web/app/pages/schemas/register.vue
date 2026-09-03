@@ -39,7 +39,10 @@ function invalidatePreview() {
 }
 
 watch(schemaText, invalidatePreview)
-watch(() => [account.value?.address ?? '', account.value?.network.id ?? ''], invalidatePreview)
+watch(
+  [() => account.value?.address ?? '', () => account.value?.network.id ?? ''],
+  invalidatePreview,
+)
 watch(
   guidedDraft,
   (draft) => {

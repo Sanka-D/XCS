@@ -18,6 +18,7 @@ if (report === null || Array.isArray(report) || typeof report !== 'object') {
 }
 
 const allowedLicenses = new Set([
+  '0BSD',
   'Apache-2.0',
   'BSD-2-Clause',
   'BSD-3-Clause',

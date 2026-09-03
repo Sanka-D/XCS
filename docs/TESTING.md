@@ -94,12 +94,32 @@ pnpm --filter @xcs-protocol/web exec playwright install chromium
 pnpm test:e2e
 ```
 
+The browser gate also exercises the loopback-only local payload store: it rejects issuance without
+the explicit no-PII acknowledgement, permits a `prenom` field containing a deterministic fictitious
+value only after that acknowledgement, proves fail-closed behavior after the local bytes disappear,
+then issues, accepts and verifies the same canonical IPFS-addressed payload from that browser. It
+also proves that an external IPFS CID absent from the store is not presented as browser-local.
+
 CLI unit integration covers the equivalent headless boundary without a live server. It proves the
 profile-bound transaction semantics, mandatory catalog download for every `Credential*` operation,
 pre-autofill `xcs:prepared` context commitment, deterministic single-signature verification, final
 readiness-before-`ledger_current` order, WSS policy and strict UTF-8/BOM handling. A wallet mutation,
 unsigned or invalid signature, invalid current-ledger response or regressed checkpoint is rejected
 before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
+
+Web unit tests compose the six self-configuring XRPL Connect adapters and all eight when the optional
+Xaman and WalletConnect public identifiers are present. They also normalize sign-only `tx_blob` and
+signed `tx_json` responses and reject mismatched artifacts, hashes, signatures, signer addresses or
+reviewed fields before persistence/submission. These tests never call `signAndSubmit` and do not
+replace real wallet compatibility evidence.
+
+The wallet compatibility unit gate also covers all three native Credential transaction types. It
+keeps GemWallet available for schema-registration `Payment`, rejects its known pre-XLS-70
+`Credential*` path, and maps only the exact nested legacy codec error to the stable
+`WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED` diagnostic. Playwright exercises that early rejection
+with a GemWallet-identified adapter and proves that no transaction preview, wallet signature or
+ledger submission occurs. This regression test explains a known incompatibility; it does not claim
+that another wallet has passed the manual Testnet matrix.
 
 ## Integration tiers
 
@@ -117,7 +137,9 @@ before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
    wallet signature, preserves recovery material when blocked and removes it after terminal XRPL
    validation. A corrupted stored expiry is rejected before reconciliation and leaves the exact blob
    untouched;
-   real Crossmark/GemWallet XLS-70 signing remains a separate manual Testnet gate.
+   real Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap signing
+   remains a separate manual Testnet gate. WalletConnect candidates must additionally prove the XRPL
+   Testnet namespace and native `Credential*` support; QR/deep-link discovery alone is insufficient.
 
 Never use a production seed in tests. A Testnet reset invalidates the activation profile and
 requires a new fixture/profile rather than editing historical expected UIDs.
@@ -170,13 +192,14 @@ creations, acceptance and all six deletion causes. Both empty projections must m
 complete digest and exact rows. This exercises the real bundle pipeline locally; a reviewed capture
 from public Testnet remains separate release evidence.
 
-Three API cases apply all migrations to another empty database. They execute the operational
-metrics SQL and runtime type normalization, including `schemaVersion: 2` halt history; serialize
-concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock without advisory
-locks; and execute the recursive schema-catalog CTE against a real 256/257-node DAG, shared ancestor
-and corrupted cycle, proving deduplication, termination and explicit overflow rather than
-truncation. Normal `pnpm test` skips these fifteen PostgreSQL cases when the admin URL is absent; CI
-runs them as a required separate job.
+Four API cases apply all migrations to another empty database. They prove that authoritative
+read-only snapshots decode database time through the real driver and least-privilege role; execute
+the operational metrics SQL and runtime type normalization, including `schemaVersion: 2` halt
+history; serialize concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock
+without advisory locks; and execute the recursive schema-catalog CTE against a real 256/257-node
+DAG, shared ancestor and corrupted cycle, proving deduplication, termination and explicit overflow
+rather than truncation. Normal `pnpm test` skips these sixteen PostgreSQL cases when the admin URL is
+absent; CI runs them as a required separate job.
 
 The database unit suite exercises the shared `SERIALIZABLE` helper independently: it retries the
 complete unit for SQLSTATE `40001` and `40P01` with bounded full-jitter delay, does not retry an

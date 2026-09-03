@@ -1,4 +1,4 @@
-import { hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
+import { decode, hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
 import type {
   AccountInfo,
   SignedTransaction,
@@ -11,10 +11,15 @@ export const BROWSER_E2E_WALLET_ID = 'xcs-browser-e2e'
 export const BROWSER_E2E_ACCOUNT = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
 export const BROWSER_E2E_SUBJECT_WALLET_ID = 'xcs-browser-e2e-subject'
 export const BROWSER_E2E_SUBJECT_ACCOUNT = 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59'
+export const BROWSER_E2E_GEMWALLET_ID = 'gemwallet'
 
 interface BrowserE2eEffects {
   walletSignatures: number
   ledgerSubmissions: number
+}
+
+interface BrowserE2eControls {
+  __xcsBrowserE2eWalletDiscoveryDelayMs?: number
 }
 
 function browserE2eEffects(): BrowserE2eEffects {
@@ -63,11 +68,23 @@ const BROWSER_E2E_WALLETS = [
     name: 'XCS deterministic E2E subject wallet',
     address: BROWSER_E2E_SUBJECT_ACCOUNT,
   },
+  {
+    id: BROWSER_E2E_GEMWALLET_ID,
+    name: 'GemWallet',
+    address: BROWSER_E2E_ACCOUNT,
+  },
 ] as const
 
 class BrowserE2eWalletManager {
   private readonly listeners = new Map<string, Set<WalletListener>>()
+  private readonly walletAdapters = BROWSER_E2E_WALLETS.map(({ id, name }) => ({
+    id,
+    name,
+    isAvailable: async () => true,
+    fetchAccount: async () => this.cloneCurrentAccount(),
+  })) as unknown as WalletAdapter[]
   private currentAccount: AccountInfo | null = null
+  private currentWalletId: string | null = null
 
   public get account(): AccountInfo | null {
     return this.currentAccount
@@ -75,6 +92,14 @@ class BrowserE2eWalletManager {
 
   public get connected(): boolean {
     return this.currentAccount !== null
+  }
+
+  public get wallet(): WalletAdapter | null {
+    return this.walletAdapters.find((wallet) => wallet.id === this.currentWalletId) ?? null
+  }
+
+  public get wallets(): WalletAdapter[] {
+    return [...this.walletAdapters]
   }
 
   public on(event: string, listener: WalletListener): this {
@@ -85,11 +110,12 @@ class BrowserE2eWalletManager {
   }
 
   public async getAvailableWallets(): Promise<WalletAdapter[]> {
-    return BROWSER_E2E_WALLETS.map(({ id, name }) => ({
-      id,
-      name,
-      isAvailable: async () => true,
-    }))
+    const delay = (globalThis as typeof globalThis & BrowserE2eControls)
+      .__xcsBrowserE2eWalletDiscoveryDelayMs
+    if (typeof delay === 'number' && delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+    return [...this.walletAdapters]
   }
 
   public async connect(walletId: string, options?: { network?: string }): Promise<AccountInfo> {
@@ -106,13 +132,19 @@ class BrowserE2eWalletManager {
         wss: 'ws://127.0.0.1:1',
       },
     }
+    this.currentWalletId = walletId
     this.emit('connect', this.currentAccount)
     return this.currentAccount
   }
 
   public async disconnect(): Promise<void> {
     this.currentAccount = null
+    this.currentWalletId = null
     this.emit('disconnect')
+  }
+
+  public async fetchAccount(): Promise<AccountInfo | null> {
+    return this.cloneCurrentAccount()
   }
 
   public async sign(transaction: Transaction): Promise<SignedTransaction> {
@@ -121,11 +153,34 @@ class BrowserE2eWalletManager {
     const signer = BROWSER_E2E_SIGNERS.get(this.currentAccount.address)
     if (signer === undefined) throw new Error('BROWSER_E2E_SIGNER_UNKNOWN')
     const signed = signer.sign(transaction)
-    return { tx_blob: signed.tx_blob, hash: signed.hash }
+    if (this.currentAccount.address === BROWSER_E2E_SUBJECT_ACCOUNT) {
+      const txJson = decode(signed.tx_blob)
+      return {
+        hash: signed.hash,
+        tx_json: txJson as Transaction,
+        signature: String(txJson.TxnSignature),
+        signerAddress: this.currentAccount.address,
+      }
+    }
+    return {
+      tx_blob: signed.tx_blob,
+      hash: signed.hash,
+      signerAddress: this.currentAccount.address,
+    }
   }
 
   private emit(event: string, payload?: unknown): void {
     for (const listener of this.listeners.get(event) ?? []) listener(payload)
+  }
+
+  private cloneCurrentAccount(): AccountInfo | null {
+    if (this.currentAccount === null) return null
+    // Real fetch-capable adapters commonly return a fresh object even when the
+    // account and network are unchanged. Keep E2E coverage faithful to that.
+    return {
+      ...this.currentAccount,
+      network: { ...this.currentAccount.network },
+    }
   }
 }
 

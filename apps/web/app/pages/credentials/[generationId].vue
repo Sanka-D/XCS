@@ -15,7 +15,7 @@ import {
 } from '~/utils/credentialReview'
 import { decodeUtf8HexForDisplay, displayXrplTime } from '~/utils/explorer'
 import { buildCredentialAcceptLink, credentialPermalinkSubjectAction } from '~/utils/operationLinks'
-import { inspectPilotHttpsPayloadHost } from '~/utils/payloadPublication'
+import { LOCAL_PAYLOAD_LOCATION } from '~/utils/localPayloadStore'
 
 interface ExactCredentialEvidence {
   readonly profileId: string
@@ -32,6 +32,7 @@ const generationId = computed(() => String(route.params.generationId).toLowerCas
 const { locale, t } = useI18n()
 const { getActiveNetworkProfile, getCredential, getCredentialGeneration, getSchema, verify } =
   useXcsApi()
+const localPayloadStore = useLocalPayloadStore()
 const payloadConsentToken = shallowRef<PayloadFetchConsentToken | null>(null)
 const verifiedReview = shallowRef<CredentialReview | null>(null)
 const verificationBusy = ref(false)
@@ -144,21 +145,27 @@ const payloadHost = computed(() => {
   const uri = data.value?.payloadUri
   if (!uri) return null
   try {
-    return inspectPilotHttpsPayloadHost(uri)
+    return localPayloadStore.inspectPayloadLocation(uri)
   } catch {
     return null
   }
 })
+const payloadUsesLocalStore = computed(() => payloadHost.value === LOCAL_PAYLOAD_LOCATION)
 const payloadHostError = computed(() => {
   const uri = data.value?.payloadUri
   if (!uri) return 'CREDENTIAL_URI_REQUIRED'
   try {
-    inspectPilotHttpsPayloadHost(uri)
+    localPayloadStore.inspectPayloadLocation(uri)
     return ''
   } catch (caught) {
     return caught instanceof Error ? caught.message : String(caught)
   }
 })
+const payloadHostErrorMessage = computed(() =>
+  payloadHostError.value === 'LOCAL_PAYLOAD_NOT_AVAILABLE_IN_BROWSER'
+    ? t('credential.localPayloadUnavailable')
+    : payloadHostError.value,
+)
 const claimRows = computed(() => {
   const claims = verifiedReview.value?.claims
   const schema = data.value?.schema.resolved
@@ -275,6 +282,7 @@ async function verifyPayload(): Promise<void> {
       schemaUid: latest.review.schemaUid,
       schema: latest.schema.resolved,
       consent,
+      payloadReader: localPayloadStore.readPayload,
     })
     assertVerificationFlowCurrent({
       revision,
@@ -480,25 +488,50 @@ useSeoMeta({
           class="credential-consent"
           data-testid="credential-consent"
         >
-          <div v-if="payloadHostError" class="error-box">{{ payloadHostError }}</div>
+          <div v-if="payloadHostError" class="error-box">{{ payloadHostErrorMessage }}</div>
           <template v-else>
-            <p>{{ $t('credential.payloadConsentIntro', { host: payloadHost }) }}</p>
+            <p>
+              {{
+                $t(
+                  payloadUsesLocalStore
+                    ? 'credential.localPayloadConsentIntro'
+                    : 'credential.payloadConsentIntro',
+                  { host: payloadHost },
+                )
+              }}
+            </p>
             <label>
               <input
+                data-testid="payload-consent"
                 type="checkbox"
                 :checked="payloadConsentToken !== null"
                 :disabled="verificationBusy"
                 @change="setPayloadConsent(($event.target as HTMLInputElement).checked)"
               />
-              {{ $t('credential.payloadConsent') }}
+              {{
+                $t(
+                  payloadUsesLocalStore
+                    ? 'credential.localPayloadConsent'
+                    : 'credential.payloadConsent',
+                )
+              }}
             </label>
             <button
+              data-testid="payload-fetch"
               class="button secondary"
               type="button"
               :disabled="verificationBusy || payloadConsentToken === null"
               @click="verifyPayload"
             >
-              {{ verificationBusy ? $t('common.working') : $t('credential.fetchAndVerifyPayload') }}
+              {{
+                verificationBusy
+                  ? $t('common.working')
+                  : $t(
+                      payloadUsesLocalStore
+                        ? 'credential.localFetchAndVerifyPayload'
+                        : 'credential.fetchAndVerifyPayload',
+                    )
+              }}
             </button>
           </template>
         </div>

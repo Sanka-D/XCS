@@ -23,6 +23,7 @@ const SCHEMA: SchemaDefinition = {
     programName: { type: 'string' },
     awardedAt: { type: 'string' },
     diplomaId: { type: 'string' },
+    prenom: { type: 'string' },
     honors: { type: 'string', optional: true },
   },
 }
@@ -44,6 +45,7 @@ const PAYLOAD = canonicalize({
     programName: 'Protocol Engineering',
     awardedAt: '2026-08-25T10:00:00Z',
     diplomaId: 'DIP-2026-0042',
+    prenom: 'Personne Test',
     honors: 'with distinction',
   },
 } as JsonValue)

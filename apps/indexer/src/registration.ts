@@ -17,6 +17,19 @@ import type {
 
 const PARTIAL_PAYMENT_FLAG = 0x0002_0000
 
+function hasExactRegistrationAmount(
+  transaction: Record<string, unknown>,
+  expectedAmount: string,
+): boolean {
+  // rippled serializes the same Payment field as Amount in API v1 and
+  // DeliverMax in API v2. Accept either representation, but fail closed if a
+  // source ever returns both aliases with conflicting values.
+  const aliases = [transaction.Amount, transaction.DeliverMax].filter(
+    (value) => value !== undefined,
+  )
+  return aliases.length > 0 && aliases.every((value) => value === expectedAmount)
+}
+
 interface RegistrationEnvelope {
   publisher: string
   jsonText: string
@@ -74,7 +87,7 @@ export function extractRegistrationEnvelope(
     tx.TransactionType === 'Payment' &&
     meta.TransactionResult === 'tesSUCCESS' &&
     tx.Destination === profile.registryAddress &&
-    tx.Amount === profile.registrationAmountDrops &&
+    hasExactRegistrationAmount(tx, profile.registrationAmountDrops) &&
     tx.Paths === undefined &&
     tx.SendMax === undefined &&
     tx.DeliverMin === undefined &&

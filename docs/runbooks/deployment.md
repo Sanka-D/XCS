@@ -43,6 +43,18 @@ XCS_DATABASE_CLUSTER_SCOPE=dedicated
 XCS_PUBLIC_RPC_URL=wss://testnet.xrpl-labs.com/
 ```
 
+To enable the two adapters that require public application registration, optionally add:
+
+```dotenv
+XCS_PUBLIC_XAMAN_API_KEY=public-xaman-application-id
+XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID=public-reown-project-id
+```
+
+Compose exposes these as `NUXT_PUBLIC_XAMAN_API_KEY` and
+`NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`. They are intentionally visible in browser JavaScript and
+must contain public identifiers only, never signing keys, relay secrets or private RPC credentials.
+Omitting them leaves the other six XRPL Connect adapters registered.
+
 Put the Commons primary WSS URL in the ignored file selected by `XCS_RPC_URL_PRIMARY_FILE`, supplying
 it out of band without logging or embedding its credentials. Put
 `wss://s.altnet.rippletest.net:51233` in `XCS_RPC_URL_SECONDARY_FILE`. Direct
@@ -394,7 +406,12 @@ removing an applied `0003`.
    separate, non-authoritative browser setting. The web server rejects userinfo and non-TLS public
    endpoints at startup (`ws://` is loopback-only), but it cannot determine whether an opaque path or
    query parameter is a provider secret.
-8. Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes and at least three times the
+8. Optionally set `XCS_PUBLIC_XAMAN_API_KEY` and
+   `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID` to the public application identifiers provisioned by
+   Xaman and Reown/WalletConnect. Compose maps them to the corresponding `NUXT_PUBLIC_*` runtime
+   values. They are public client configuration, not secret files. Leave either value empty to
+   remove that adapter while retaining the six self-configuring XRPL Connect adapters.
+9. Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes and at least three times the
    polling interval. Run `pnpm --filter @xcs-protocol/indexer preflight` before enabling the service.
 
 For both the private controlled pilot and the Commons-hosted Testnet beta, also enforce the product
@@ -494,9 +511,14 @@ stored evidence was partial, malformed, or outside the supported bounds.
 
 Nitro is the source of truth for the web application's browser security headers. The initial
 deployment emits the CSP as `Content-Security-Policy-Report-Only`; it must not emit an enforced
-`Content-Security-Policy` until the released Crossmark and GemWallet versions have passed the real
-browser matrix below. Report-only violations are diagnostic and do not block script execution,
-wallet communication or payload requests.
+`Content-Security-Policy` until every enabled XRPL Connect adapter has passed the real browser
+matrix below. Report-only violations are diagnostic and do not block script execution, wallet
+communication or payload requests. WalletConnect modal styles and images are part of that
+qualification and must not be allowlisted speculatively.
+
+The `Permissions-Policy` must retain `hid=(self)` and `usb=(self)` for the user-initiated Ledger
+path while denying those capabilities to cross-origin documents. Removing either directive can
+break hardware-wallet access; broadening it beyond `self` expands the device trust boundary.
 
 The TLS response also emits `Strict-Transport-Security` for the current host without
 `includeSubDomains` or `preload`. Do not add either directive until every affected organizational
@@ -541,22 +563,32 @@ Chromium profile with DevTools open:
 
 1. Load Explorer, Studio, Developers and an exact Credential permalink; record every CSP violation
    from the Console and the document's response headers from the Network panel.
-2. With the released Crossmark version, exercise connect, cancellation, schema registration,
-   `CredentialCreate`, `CredentialAccept` and `CredentialDelete` without relaxing the policy.
-3. Repeat the same matrix with the released GemWallet version.
+2. For each configured adapter—Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and
+   MetaMask Snap—exercise connect, cancellation, schema registration, `CredentialCreate`,
+   `CredentialAccept` and `CredentialDelete` without relaxing the policy. Record unavailable
+   adapters as untested rather than successful.
+3. For WalletConnect, record the candidate wallet and prove that its session advertises the XRPL
+   Testnet namespace and supports the native `Credential*` payloads; a successful QR/deep-link
+   pairing alone is not compatibility evidence. Exercise Ledger on the intended physical device and
+   browser rather than treating the Permissions Policy header as device evidence.
 4. After explicit payload-host consent, load an issuer-hosted HTTPS payload with CORS and confirm
    that its integrity verification succeeds. Confirm that no payload request occurs before consent.
 
-Classify and fix every application-owned violation. Record the browser, extension, adapter, web
-image and policy versions with the evidence. Extension-origin messages that cannot be attributed or
-reproduced are not a reason to add a broad source expression.
+Classify and fix every application-owned violation. Record the browser, adapter, wallet
+application/extension or hardware device, web image and policy versions with the evidence.
+Wallet-origin messages that cannot be attributed or reproduced are not a reason to add a broad
+source expression.
 
-Only after both real-wallet matrices pass may the reviewed deployment replace the single
-`Content-Security-Policy-Report-Only` field with the same policy under
-`Content-Security-Policy`. Re-run both `curl` checks and the DevTools matrix against the enforced
-candidate before promotion. Roll back to the prior image, which restores report-only mode, if a
-wallet or consented payload flow regresses; do not work around an incident by appending a second or
-weaker policy at the edge.
+Only after every enabled real-wallet matrix passes may the reviewed deployment replace the single
+`Content-Security-Policy-Report-Only` field with the same policy under `Content-Security-Policy`.
+Re-run both `curl` checks and the DevTools matrix against the enforced candidate before promotion.
+Roll back to the prior image, which restores report-only mode, if a wallet or consented payload flow
+regresses; do not work around an incident by appending a second or weaker policy at the edge.
+
+If one adapter regresses before promotion, remove its public identifier where applicable or
+restrict the XRPL Connect factory in a reviewed web rollback. This changes no XCS protocol rule or
+PostgreSQL schema and requires no database rollback. Never route around an adapter failure by
+calling `signAndSubmit`: XCS must retain normalization, persistence and sole submission control.
 
 ## Optional Testnet demo pinning
 

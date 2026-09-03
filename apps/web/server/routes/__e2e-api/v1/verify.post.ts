@@ -36,6 +36,7 @@ export default defineEventHandler(async (event) => {
       programName: 'Protocol Engineering',
       awardedAt: '2026-08-25T10:00:00Z',
       diplomaId: 'DIP-2026-0042',
+      prenom: 'Personne Test',
       honors: 'with distinction',
     },
   }

@@ -27,10 +27,10 @@ Wallet/HSM ──signs──> SDK / CLI / Nuxt site
 - `indexer` is the only writer of schema and lifecycle projections. A PostgreSQL lease epoch fences
   stale replicas, and authoritative reads require the live writer's exact agreed checkpoint.
 - `api` is read-only except for the optional, isolated Testnet pinning surface.
-- `web` connects wallets in the browser and submits through the explicitly public
-  `XCS_PUBLIC_RPC_URL`; `XCS_RPC_URL_PRIMARY` and `XCS_RPC_URL_SECONDARY` remain server-only and are
-  never forwarded automatically into browser configuration. The public submission RPC is not a
-  source of authoritative verification.
+- `web` connects wallets through the client-only XRPL Connect adapter factory and submits through
+  the explicitly public `XCS_PUBLIC_RPC_URL`; `XCS_RPC_URL_PRIMARY` and
+  `XCS_RPC_URL_SECONDARY` remain server-only and are never forwarded automatically into browser
+  configuration. The public submission RPC is not a source of authoritative verification.
 - `verifier-go` is intentionally independent and consumes the same language-neutral vectors.
 
 The shared public service is convenient, not authoritative. XRPL Commons operates the reference
@@ -61,11 +61,12 @@ fresh database. No pilot registry, profile or projection is renamed or promoted.
 
 ## Product surface and discovery
 
-The accountless Nuxt application is one site with three navigation surfaces: Explorer for public
-schemas, aggregate statistics and exact Credential evidence; Studio for wallet-based schema and
-unit-issuance workflows; and Developers for REST, SDK and CLI integration material. EAS and EASScan
-inform interaction design only. XCS continues to use native XRPL Credentials and the frozen v0.1
-protocol described in `spec/XCS-0001.md`.
+The accountless Nuxt application exposes four primary entries: Explorer for public schemas and
+aggregate statistics, Create for wallet-based schema and unit-issuance workflows, Verify for exact
+Credential evidence, and Docs for REST, SDK and CLI integration material. The Create and Docs
+entries continue to use the `/studio` and `/developers` implementation routes respectively. EAS and
+EASScan inform interaction design only. XCS continues to use native XRPL Credentials and the frozen
+v0.1 protocol described in `spec/XCS-0001.md`.
 
 Discovery is hybrid. Every valid permissionless schema is public and discoverable, but Credentials
 are resolved only from exact shared coordinates: generation ID, transaction hash or the complete
@@ -191,7 +192,12 @@ ledger history instead of racing a moving network tip.
 
 ## Submission
 
-Transaction builders return unsigned semantic JSON. The application autofills fees, sequence and `LastLedgerSequence`, previews the complete transaction, asks an external wallet to sign, persists the resulting hash/blob, submits it, and waits for a validated result. A provisional submission response is never treated as success.
+Transaction builders return unsigned semantic JSON. The application autofills fees, sequence and
+`LastLedgerSequence`, previews the complete transaction, and asks an external wallet to sign. XCS
+calls XRPL Connect `sign()` only, normalizes a returned `tx_blob` or signed `tx_json`, verifies its
+derived hash, signature, optional signer address and exact transaction-field equality, persists the
+resulting hash/blob, submits it itself, and waits for a validated result. It never delegates
+submission through `signAndSubmit`; a provisional submission response is never treated as success.
 
 The hosted site requires `GET /v1/networks/:profile/readiness` immediately before invoking the
 wallet and again after the wallet returns but before persisting or submitting the blob. That route
@@ -222,8 +228,12 @@ API JSON use strict UTF-8/JSON parsing that does not silently discard a BOM. The
 public review material rather than a key; the signed blob remains an executable authorization and is
 never written to the sanitized operation journal.
 
-The Testnet beta performs one wallet operation at a time through Crossmark or GemWallet. It has no
-XCS account, server session, batch issuer, team or multi-tenant authorization layer. Recovery state
-and sanitized receipts stay in the browser's IndexedDB; clearing site data removes that local
-history. Credential payloads are published by the issuer over HTTPS and verified immediately before
-issuance. Commons never receives a signing seed or private key.
+The Testnet beta performs one wallet operation at a time through the pinned
+`xrpl-connect@1.0.0-rc.0` boundary. Its factory covers Xaman, Crossmark, GemWallet, WalletConnect,
+Ledger, Xyra, Otsu and MetaMask Snap; Xaman and WalletConnect are omitted when their optional public
+application identifiers are unset. This is an adapter surface, not a promise that every discovered
+wallet supports XRPL Testnet and native Credential transactions. The beta has no XCS account,
+server session, batch issuer, team or multi-tenant authorization layer. Recovery state and sanitized
+receipts stay in the browser's IndexedDB; clearing site data removes that local history. Credential
+payloads are published by the issuer over HTTPS and verified immediately before issuance. Commons
+never receives a signing seed or private key.

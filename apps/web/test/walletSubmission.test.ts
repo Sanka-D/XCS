@@ -9,6 +9,7 @@ import {
   type SubmissionJournalEntry,
 } from '@xcs-protocol/sdk'
 import {
+  decode,
   encode,
   hashes,
   Wallet,
@@ -97,6 +98,91 @@ describe('wallet sign-only normalization', () => {
     expect(() => normalizeWalletSignature({ hash: '' })).toThrow('WALLET_SIGNED_BLOB_MISSING')
   })
 
+  it('encodes a WalletConnect-style signed transaction JSON', () => {
+    const { signed } = signedPayment()
+    const txJson = { ...decode(signed.tx_blob), hash: signed.hash }
+    const normalized = normalizeWalletSignature({
+      hash: '',
+      tx_json: txJson as unknown as SubmittableTransaction,
+    })
+
+    expect(normalized.hash).toBe(signed.hash.toUpperCase())
+    expect(normalized.txBlob).toBe(signed.tx_blob)
+  })
+
+  it('accepts matching signed blob and signed transaction JSON artifacts', () => {
+    const { signed } = signedPayment()
+    const decoded = decode(signed.tx_blob)
+    const normalized = normalizeWalletSignature({
+      hash: signed.hash,
+      tx_blob: signed.tx_blob,
+      tx_json: decoded,
+      signature: String(decoded.TxnSignature),
+      signerAddress: String(decoded.Account),
+    })
+
+    expect(normalized.txBlob).toBe(signed.tx_blob)
+  })
+
+  it('rejects conflicting signed blob and transaction JSON artifacts', () => {
+    const { signed } = signedPayment()
+    const changedJson = { ...decode(signed.tx_blob), Amount: '2' }
+
+    expect(() =>
+      normalizeWalletSignature({
+        hash: signed.hash,
+        tx_blob: signed.tx_blob,
+        tx_json: changedJson,
+      }),
+    ).toThrow('WALLET_SIGNED_ARTIFACT_MISMATCH')
+  })
+
+  it('rejects a transaction JSON hash that differs from the encoded transaction', () => {
+    const { signed } = signedPayment()
+    const txJson = { ...decode(signed.tx_blob), hash: '0'.repeat(64) }
+
+    expect(() =>
+      normalizeWalletSignature({
+        hash: '',
+        tx_json: txJson as unknown as SubmittableTransaction,
+      }),
+    ).toThrow('WALLET_SIGNED_HASH_MISMATCH')
+  })
+
+  it('rejects signature and signer assertions that differ from the signed transaction', () => {
+    const { signed } = signedPayment()
+
+    expect(() =>
+      normalizeWalletSignature({
+        hash: signed.hash,
+        tx_blob: signed.tx_blob,
+        signature: '00',
+      }),
+    ).toThrow('WALLET_SIGNED_SIGNATURE_MISMATCH')
+    expect(() =>
+      normalizeWalletSignature({
+        hash: signed.hash,
+        tx_blob: signed.tx_blob,
+        signerAddress: Wallet.generate().address,
+      }),
+    ).toThrow('WALLET_SIGNER_ADDRESS_MISMATCH')
+  })
+
+  it('rejects malformed signed transaction JSON', () => {
+    expect(() =>
+      normalizeWalletSignature({
+        hash: '',
+        tx_json: [] as unknown as SubmittableTransaction,
+      }),
+    ).toThrow('WALLET_SIGNED_JSON_INVALID')
+    expect(() =>
+      normalizeWalletSignature({
+        hash: '',
+        tx_json: { unsupportedField: true } as unknown as SubmittableTransaction,
+      }),
+    ).toThrow('WALLET_SIGNED_JSON_INVALID')
+  })
+
   it('normalizes real xrpl.js blobs for every native XCS credential transaction', () => {
     const issuer = Wallet.generate()
     const subject = Wallet.generate()
@@ -182,6 +268,31 @@ describe('wallet sign-only normalization', () => {
     expect(entries.map((entry) => entry.stage)).toEqual(['prepared', 'failed'])
     expect(failed.txBlob).toBeUndefined()
     expect(canRetryOperation(failed)).toBe(false)
+  })
+
+  it('never persists or submits a signed JSON transaction that differs from the review', async () => {
+    const { transaction } = signedPayment()
+    const attacker = Wallet.generate()
+    const changed = attacker.sign({ ...transaction, Account: attacker.address })
+    const persist = vi.fn()
+    const submit = vi.fn()
+    const client = { isConnected: () => true, submit } as unknown as Client
+
+    await expect(
+      signPreparedAndSubmit(
+        client,
+        transaction,
+        createWalletSigner({
+          sign: async () => ({ hash: '', tx_json: decode(changed.tx_blob) }),
+        }),
+        {
+          journal: { append: async () => undefined },
+          onValidatedSignature: persist,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNER_RESULT' })
+    expect(persist).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
   })
 
   it('persists the blob before the SDK makes its first submit call', async () => {

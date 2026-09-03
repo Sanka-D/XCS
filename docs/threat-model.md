@@ -29,6 +29,7 @@ compromise does not cross that administrative boundary by itself.
 | Stale/concurrent indexer writer        | Lease epoch plus `FOR UPDATE` fencing row before projection/checkpoint/status in one transaction        |
 | Mixed or stale API read                | Read-only repeatable-read snapshot; DB-time lease check; exact status/checkpoint/root/freshness guard   |
 | Wallet signing against stale state     | Non-cacheable profile readiness before wallet invocation and again before blob persistence/submission   |
+| Malformed or mutated wallet result     | Sign-only adapter call; blob/JSON normalization; hash, signature, signer and reviewed-field equality    |
 | Duplicate/replayed ingestion           | Unique event keys and transactional, idempotent projections; deterministic replay digest                |
 | Operational metrics disclosure/abuse   | Disabled by default; dedicated constant-time bearer; no-store; monitoring-ingress restriction           |
 | Moving-tip replay divergence           | Mandatory index/hash target, quorum verification and a fixed inclusive worker bound                     |
@@ -42,15 +43,17 @@ compromise does not cross that administrative boundary by itself.
 Nitro owns the canonical browser security headers, while the ingress may only pass them through or
 overwrite an inherited value with the same reviewed value. It must never append an additional CSP:
 browsers apply every received policy, so duplicates can combine into behavior that was not tested
-with the wallet extensions. HSTS is limited to the current host and deliberately excludes
+with the wallet integrations. HSTS is limited to the current host and deliberately excludes
 `includeSubDomains` and `preload` until the organization audits every affected subdomain.
 
 The first CSP is `Content-Security-Policy-Report-Only`. This is an observation stage, not an
 implemented mitigation: violations remain allowed and an injected same-origin script could still
 read or relay a recoverable signed transaction blob. The policy can move to enforcement only after
-real Crossmark and GemWallet matrices cover every supported Credential transaction and the
-consented issuer-payload flow. Curl evidence must show one policy header, and browser DevTools must
-show no unresolved application-owned violations, before and after promotion.
+real matrices for every enabled XRPL Connect adapter cover every supported Credential transaction,
+the WalletConnect modal's styles/images and the consented issuer-payload flow. Curl evidence must
+show one policy header, and browser DevTools must show no unresolved application-owned violations,
+before and after promotion. The enforced Permissions Policy permits `hid` and `usb` to `self` only
+for the user-initiated Ledger path; cross-origin documents do not inherit those capabilities.
 
 `connect-src https:` remains necessary because the permissionless model lets each issuer select its
 public HTTPS payload host. A fixed Commons host allowlist would introduce a publication gate. The
@@ -65,7 +68,13 @@ a separate data-flow, retention and access review.
 
 ## Residual risks
 
-- Wallet applications may not yet understand every Credential transaction type; only verified adapters are exposed.
+- The XRPL Connect factory can expose eight adapters, but WalletConnect discovery does not prove
+  that a wallet supports the XRPL Testnet namespace or every native Credential transaction. Real
+  extension, popup, QR/deep-link and hardware-device matrices remain mandatory.
+- `xrpl-connect@1.0.0-rc.0` declares `xrpl ^3 || ^4` while XCS uses `xrpl` 5, adds a substantial
+  browser dependency tree, and still needs CSP qualification for WalletConnect assets. The local
+  Otsu availability override is a temporary compatibility control until an upstream release carries
+  the provider-marker fix.
 - A valid domain proof or allowlist entry does not prove individual claims.
 - Demo pinning blocks common PII-shaped field names but cannot recognize sensitive values under arbitrary schema fields.
 - Public IPFS content cannot be reliably deleted after another node retrieves it.
