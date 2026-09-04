@@ -24,12 +24,7 @@ export {
   type JsonPrimitive,
   type JsonValue,
 } from './json.js'
-export {
-  isoTimeToRippleTime,
-  parseNetworkProfile,
-  rippleTimeToIso,
-  type NetworkProfile,
-} from './network.js'
+export { parseNetworkProfile, rippleTimeToIso, type NetworkProfile } from './network.js'
 export {
   createHttpsPayloadUri,
   createIpfsPayloadUri,

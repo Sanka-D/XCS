@@ -47,3 +47,4 @@ An unavailable payload is distinct from a tampered payload. A cryptographically 
 The indexer is the only normal writer to protocol projections. Checkpoint, events, and status move atomically under a fenced writer lease. The API reads a consistent snapshot and returns `503` when the writer lease, source agreement, checkpoint, transaction-root evidence, or freshness requirements fail.
 
 The controlled Testnet pilot is disposable. It must not be promoted to Mainnet or presented as a neutral permanent registry. See [ADR 0003](./adr/0003-disposable-controlled-testnet-registry.md).
+An unavailable payload is distinct from a tampered payload. A cryptographically valid Credential does not prove that the issuer is trustworthy.
