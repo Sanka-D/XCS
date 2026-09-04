@@ -1,4 +1,11 @@
-import { decode, hashes, verifySignature, type Client, type SubmittableTransaction } from 'xrpl'
+import {
+  decode,
+  encode,
+  hashes,
+  verifySignature,
+  type Client,
+  type SubmittableTransaction,
+} from 'xrpl'
 
 import { XcsSdkError } from './errors.js'
 
@@ -50,7 +57,7 @@ export interface PreparedTransaction<T extends SubmittableTransaction = Submitta
 export interface ValidatedSignature {
   /** Host-generated identifier shared with the operation journal. */
   readonly operationId: string
-  /** The exact prepared transaction whose fields were compared with the signed blob. */
+  /** The exact unsigned fields recovered from the validated signed blob. */
   readonly transaction: Readonly<SubmittableTransaction>
   readonly txBlob: string
   readonly txHash: string
@@ -63,6 +70,11 @@ export interface ReliableSubmissionOptions {
   readonly failHard?: boolean | undefined
   readonly pollIntervalMs?: number | undefined
   readonly timeoutMs?: number | undefined
+  /**
+   * Permit the wallet to refresh only LastLedgerSequence before signing.
+   * All other non-signature fields remain byte-for-byte bound to the review.
+   */
+  readonly allowSignerLastLedgerSequenceRefresh?: boolean | undefined
   /**
    * Runs after the signer hash/blob and exact transaction fields have been
    * validated, but before the first submission side effect. Hosts can use this
@@ -184,6 +196,8 @@ export async function signPreparedAndSubmit<T extends SubmittableTransaction>(
 
   let signed: SignerResult
   let derivedHash: string
+  let signedTransaction: SubmittableTransaction
+  let signedLastLedgerSequence = lastLedgerSequence
   try {
     signed = await signer.sign(transaction)
     assertSignerResult(signed)
@@ -194,19 +208,22 @@ export async function signPreparedAndSubmit<T extends SubmittableTransaction>(
         'Signer transaction hash does not match the signed transaction blob.',
       )
     }
-    assertSignedTransactionMatches(transaction, signed.txBlob)
+    signedTransaction = assertSignedTransactionMatches(transaction, signed.txBlob, {
+      allowLastLedgerSequenceRefresh: options.allowSignerLastLedgerSequenceRefresh,
+    })
+    signedLastLedgerSequence = signedTransaction.LastLedgerSequence as number
     await options.onValidatedSignature?.({
       operationId,
-      transaction,
+      transaction: signedTransaction,
       txBlob: signed.txBlob,
       txHash: derivedHash,
-      lastLedgerSequence,
+      lastLedgerSequence: signedLastLedgerSequence,
     })
   } catch (error) {
     await append(options.journal, {
       operationId,
       stage: 'failed',
-      lastLedgerSequence,
+      lastLedgerSequence: signedLastLedgerSequence,
       message: 'Wallet signing or pre-submission validation failed.',
     })
     throw error
@@ -275,10 +292,10 @@ export async function submitSignedTransaction(
     } catch (error) {
       await append(options.journal, {
         operationId,
-        stage: 'failed',
+        stage: 'signed',
         txHash,
         lastLedgerSequence,
-        message: 'Final pre-submission validation failed.',
+        message: 'Final pre-submission validation failed; signed transaction retained for retry.',
       })
       throw error
     }
@@ -479,12 +496,14 @@ function assertSignerResult(result: SignerResult): void {
 
 /**
  * Decode a signed blob and prove that the signer changed no reviewed field.
- * XRPL signature fields are the only permitted additions.
+ * XRPL signature fields are always permitted additions. Callers may explicitly
+ * allow a wallet to refresh LastLedgerSequence while every other field remains bound.
  */
 export function assertSignedTransactionMatches(
   prepared: Readonly<SubmittableTransaction>,
   txBlob: string,
-): void {
+  options: { readonly allowLastLedgerSequenceRefresh?: boolean | undefined } = {},
+): SubmittableTransaction {
   let signed: Record<string, unknown>
   try {
     signed = decode(txBlob)
@@ -494,12 +513,26 @@ export function assertSignedTransactionMatches(
   assertValidSingleSignature(signed, txBlob)
   const preparedFields = withoutSignatureFields(prepared as unknown as Record<string, unknown>)
   const signedFields = withoutSignatureFields(signed)
-  if (stableJson(preparedFields) !== stableJson(signedFields)) {
+  if (options.allowLastLedgerSequenceRefresh === true) {
+    if (asPositiveInteger(signedFields.LastLedgerSequence) === undefined) {
+      throw new XcsSdkError(
+        'XCS_SDK_INVALID_SIGNED_BLOB',
+        'Wallet-refreshed LastLedgerSequence must be a positive integer.',
+      )
+    }
+    delete preparedFields.LastLedgerSequence
+    delete signedFields.LastLedgerSequence
+  }
+  if (
+    encode(preparedFields as SubmittableTransaction) !==
+    encode(signedFields as SubmittableTransaction)
+  ) {
     throw new XcsSdkError(
       'XCS_SDK_INVALID_SIGNER_RESULT',
-      'Signer changed transaction fields other than the XRPL signature fields.',
+      'Signer changed transaction fields that were not explicitly allowed.',
     )
   }
+  return withoutSignatureFields(signed) as unknown as SubmittableTransaction
 }
 
 function assertValidSingleSignature(signed: Record<string, unknown>, txBlob: string): void {
@@ -556,19 +589,6 @@ function withoutSignatureFields(input: Readonly<Record<string, unknown>>): Recor
   delete result.SigningPubKey
   delete result.TxnSignature
   return result
-}
-
-function stableJson(input: unknown): string {
-  if (Array.isArray(input)) return `[${input.map(stableJson).join(',')}]`
-  if (typeof input === 'object' && input !== null) {
-    const record = input as Record<string, unknown>
-    return `{${Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(input) ?? 'null'
 }
 
 function asPositiveInteger(value: unknown): number | undefined {

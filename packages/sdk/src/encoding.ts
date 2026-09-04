@@ -1,4 +1,5 @@
-import { decodeUtf8Hex, encodeUtf8Hex, inspectPayloadUri } from '@xcs-protocol/core'
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
+import { parsePayloadUri } from '@xcs-protocol/core'
 import { encode, type Memo, type Payment } from 'xrpl'
 
 import { XcsSdkError } from './errors.js'
@@ -16,6 +17,20 @@ const XRPL_MEMOS_FIELD_ENVELOPE_BYTES = 2
 const SCHEMA_UID_PATTERN = /^[0-9a-f]{64}$/u
 const CREDENTIAL_TYPE_PATTERN = /^[0-9a-fA-F]{64}$/u
 const HEX_PATTERN = /^(?:[0-9a-fA-F]{2})+$/u
+
+export function encodeMemoField(value: string): string {
+  return bytesToHex(new TextEncoder().encode(value)).toUpperCase()
+}
+
+export function decodeMemoField(value: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(hexToBytes(value))
+  } catch (cause) {
+    throw new XcsSdkError('XCS_SDK_INVALID_URI', 'Value is not valid UTF-8 hexadecimal.', {
+      cause: cause instanceof Error ? cause.message : String(cause),
+    })
+  }
+}
 
 export function schemaUidToCredentialType(schemaUid: string): string {
   if (!SCHEMA_UID_PATTERN.test(schemaUid)) {
@@ -51,9 +66,9 @@ export function uriToCredentialHex(uri: string): string {
     )
   }
 
-  inspectPayloadUri(uri)
+  parsePayloadUri(uri)
 
-  return encodeUtf8Hex(uri)
+  return encodeMemoField(uri)
 }
 
 export function credentialHexToUri(uriHex: string): string {
@@ -61,7 +76,7 @@ export function credentialHexToUri(uriHex: string): string {
     throw new XcsSdkError('XCS_SDK_INVALID_URI', 'Credential URI is not valid hexadecimal.')
   }
 
-  const uri = decodeUtf8Hex(uriHex)
+  const uri = decodeMemoField(uriHex)
   uriToCredentialHex(uri)
   return uri
 }
@@ -70,9 +85,9 @@ export function measureSchemaRegistrationMemoBytes(canonicalSchema: string): num
   return measureTransactionMemoBytes([
     {
       Memo: {
-        MemoType: encodeUtf8Hex(XCS_SCHEMA_MEMO_TYPE),
-        MemoFormat: encodeUtf8Hex(XCS_SCHEMA_MEMO_FORMAT),
-        MemoData: encodeUtf8Hex(canonicalSchema),
+        MemoType: encodeMemoField(XCS_SCHEMA_MEMO_TYPE),
+        MemoFormat: encodeMemoField(XCS_SCHEMA_MEMO_FORMAT),
+        MemoData: encodeMemoField(canonicalSchema),
       },
     },
   ])
@@ -91,9 +106,7 @@ export function measureTransactionMemoBytes(memos: readonly Memo[]): number {
   }
   const withMemo: Payment = {
     ...base,
-    // Strict JSON parsing intentionally creates null-prototype objects. The
-    // XRPL codec stringifies invalid-field diagnostics, so materialize plain
-    // objects at this boundary before measuring the exact serialized bytes.
+    // Materialize plain objects at the XRPL codec boundary.
     Memos: memos.map((entry) => ({ Memo: { ...entry.Memo } })),
   }
   const serializedMemosFieldBytes = (encode(withMemo).length - encode(base).length) / 2

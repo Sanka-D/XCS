@@ -1,4 +1,7 @@
-import { validateNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
+import {
+  parseNetworkProfile as parseCoreNetworkProfile,
+  type NetworkProfile,
+} from '@xcs-protocol/core'
 import { isValidClassicAddress, type Client } from 'xrpl'
 
 import { XcsSdkError } from './errors.js'
@@ -14,7 +17,7 @@ export function assertClassicAddress(address: string, field: string): void {
 }
 
 export function parseNetworkProfile(input: unknown): NetworkProfile {
-  const profile = validateNetworkProfile(input)
+  const profile = parseCoreNetworkProfile(input)
   assertClassicAddress(profile.registryAddress, 'registryAddress')
   return profile
 }

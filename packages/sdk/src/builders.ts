@@ -1,10 +1,8 @@
 import {
-  canonicalize,
   computeSchemaUid,
-  encodeUtf8Hex,
-  iso8601ToRippleTime,
-  validateSchema,
-  type JsonValue,
+  encodeSchema,
+  isoTimeToRippleTime,
+  parseSchema,
   type NetworkProfile,
   type SchemaDefinition,
 } from '@xcs-protocol/core'
@@ -12,6 +10,7 @@ import type { CredentialAccept, CredentialCreate, CredentialDelete, Payment } fr
 
 import {
   assertMemoFits,
+  encodeMemoField,
   measureSchemaRegistrationMemoBytes,
   schemaUidToCredentialType,
   uriToCredentialHex,
@@ -74,8 +73,8 @@ export function buildSchemaRegistrationPayment(
 ): BuiltSchemaRegistration {
   const profile = parseNetworkProfile(input.profile)
   assertClassicAddress(input.publisher, 'publisher')
-  const schema = validateSchema(input.schema)
-  const canonicalSchema = canonicalize(schema as unknown as JsonValue)
+  const schema = parseSchema(input.schema)
+  const canonicalSchema = new TextDecoder().decode(encodeSchema(schema))
   assertMemoFits(canonicalSchema)
   const memoByteLength = measureSchemaRegistrationMemoBytes(canonicalSchema)
 
@@ -88,9 +87,9 @@ export function buildSchemaRegistrationPayment(
       Memos: [
         {
           Memo: {
-            MemoType: encodeUtf8Hex(XCS_SCHEMA_MEMO_TYPE),
-            MemoFormat: encodeUtf8Hex(XCS_SCHEMA_MEMO_FORMAT),
-            MemoData: encodeUtf8Hex(canonicalSchema),
+            MemoType: encodeMemoField(XCS_SCHEMA_MEMO_TYPE),
+            MemoFormat: encodeMemoField(XCS_SCHEMA_MEMO_FORMAT),
+            MemoData: encodeMemoField(canonicalSchema),
           },
         },
       ],
@@ -112,7 +111,7 @@ export function deriveSchemaUid(
     )
   }
   assertClassicAddress(context.publisher, 'publisher')
-  const schema = validateSchema(schemaInput)
+  const schema = parseSchema(schemaInput)
 
   return computeSchemaUid({
     schema,
@@ -137,7 +136,7 @@ export function buildCredentialCreate(input: BuildCredentialCreateInput): Creden
   }
 
   if (input.expiration !== undefined) {
-    transaction.Expiration = iso8601ToRippleTime(input.expiration)
+    transaction.Expiration = isoTimeToRippleTime(input.expiration)
   }
 
   return transaction

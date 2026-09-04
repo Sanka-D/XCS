@@ -1,10 +1,5 @@
-import {
-  canonicalize,
-  hexToBytes,
-  parseJsonStrict,
-  validateSchema,
-  type JsonValue,
-} from '@xcs-protocol/core'
+import { hexToBytes } from '@noble/hashes/utils.js'
+import { parseSchemaBytes } from '@xcs-protocol/core'
 import {
   validate,
   type CredentialAccept,
@@ -121,14 +116,9 @@ function validateSchemaRegistration(
   }
 
   let canonicalSchema: string
-  let parsedSchema: JsonValue
   try {
     canonicalSchema = decodeMemoField(memo.MemoData)
-    parsedSchema = parseJsonStrict(canonicalSchema)
-    if (canonicalize(parsedSchema) !== canonicalSchema) {
-      throw invalidTransaction('Schema registration memo JSON must use RFC 8785 canonical form.')
-    }
-    validateSchema(parsedSchema)
+    parseSchemaBytes(hexToBytes(memo.MemoData))
     assertMemoFits(canonicalSchema)
   } catch (cause) {
     if (cause instanceof XcsSdkError) throw cause
@@ -225,7 +215,7 @@ function isUint32(value: number): boolean {
 }
 
 function invalidTransaction(message: string, cause?: unknown): XcsSdkError {
-  return new XcsSdkError('XCS_SDK_PREPARED_INVALID', message, {
+  return new XcsSdkError('XCS_SDK_INVALID_TRANSACTION', message, {
     ...(cause === undefined
       ? {}
       : { cause: cause instanceof Error ? cause.message : String(cause) }),

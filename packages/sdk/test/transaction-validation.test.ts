@@ -1,9 +1,4 @@
-import {
-  canonicalize,
-  createHttpsPayloadUri,
-  encodeUtf8Hex,
-  type JsonValue,
-} from '@xcs-protocol/core'
+import { createHttpsPayloadUri, encodeSchema } from '@xcs-protocol/core'
 import type { CredentialAccept, CredentialCreate, CredentialDelete, Payment } from 'xrpl'
 import { describe, expect, it } from 'vitest'
 
@@ -13,6 +8,7 @@ import {
   buildCredentialCreate,
   buildCredentialDelete,
   buildSchemaRegistrationPayment,
+  encodeMemoField,
 } from '../src/index.js'
 
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
@@ -110,7 +106,7 @@ describe('assertXcsTransactionSemantics', () => {
 
   it('rejects non-canonical schema JSON, a leading BOM, and partial-payment semantics', () => {
     const nonCanonical = JSON.stringify(schema)
-    expect(nonCanonical).not.toBe(canonicalize(schema as unknown as JsonValue))
+    expect(nonCanonical).not.toBe(new TextDecoder().decode(encodeSchema(schema)))
     const withMemoData = (memoData: string): Payment => ({
       ...registration(),
       Memos: [
@@ -124,7 +120,7 @@ describe('assertXcsTransactionSemantics', () => {
     })
 
     expect(() =>
-      assertXcsTransactionSemantics(withMemoData(encodeUtf8Hex(nonCanonical)), profile),
+      assertXcsTransactionSemantics(withMemoData(encodeMemoField(nonCanonical)), profile),
     ).toThrow()
     expect(() =>
       assertXcsTransactionSemantics(
@@ -155,7 +151,7 @@ describe('assertXcsTransactionSemantics', () => {
     ).toThrow()
     expect(() =>
       assertXcsTransactionSemantics(
-        { ...create, URI: encodeUtf8Hex('https://issuer.example/credential.json') },
+        { ...create, URI: encodeMemoField('https://issuer.example/credential.json') },
         profile,
       ),
     ).toThrow()
