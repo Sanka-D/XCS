@@ -1,124 +1,102 @@
-import { isClassicAddress } from './address.js'
-import { fail } from './errors.js'
-import type { FieldDescriptor, JsonObject, JsonValue, ResolvedSchema } from './types.js'
+import { base64urlnopad } from '@scure/base'
+import { isValidClassicAddress } from 'xrpl'
 
-const UINT_MAX = (1n << 256n) - 1n
-const INT_MIN = -(1n << 255n)
-const INT_MAX = (1n << 255n) - 1n
-const DECIMAL_UNSIGNED = /^(?:0|[1-9][0-9]*)$/
-const DECIMAL_SIGNED = /^(?:0|-?[1-9][0-9]*)$/
-const BASE64URL = /^[A-Za-z0-9_-]*$/
-const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+import { fail } from './errors.js'
+import type { JsonObject, JsonValue } from './json.js'
+import type { FieldDescriptor, SchemaFields } from './schema.js'
+
+// Decimal constructors keep the published bundle parseable by ES2019 bundlers while
+// preserving exact 256-bit bounds on runtimes that support BigInt.
+const UINT256_MAX = BigInt(
+  '115792089237316195423570985008687907853269984665640564039457584007913129639935',
+)
+const INT256_MIN = BigInt(
+  '-57896044618658097711785492504343953926634992332820282019728792003956564819968',
+)
+const INT256_MAX = BigInt(
+  '57896044618658097711785492504343953926634992332820282019728792003956564819967',
+)
+const UNSIGNED_INTEGER = /^(?:0|[1-9][0-9]*)$/
+const SIGNED_INTEGER = /^(?:0|-?[1-9][0-9]*)$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isResolvedSchema(
-  value: ResolvedSchema | Record<string, FieldDescriptor>,
-): value is ResolvedSchema {
-  if (!isRecord(value) || !isRecord(value.definition) || !isRecord(value.fields)) return false
-  return (
-    value.definition.xcsVersion === '0.1' &&
-    typeof value.definition.name === 'string' &&
-    typeof value.definition.description === 'string' &&
-    isRecord(value.definition.fields) &&
-    Array.isArray(value.lineage) &&
-    value.lineage.every((uid) => typeof uid === 'string')
-  )
-}
-
 function isCanonicalBase64Url(value: string): boolean {
-  if (!BASE64URL.test(value) || value.length % 4 === 1) return false
-  const remainder = value.length % 4
-  if (remainder === 2) {
-    const last = BASE64URL_ALPHABET.indexOf(value.at(-1) ?? '')
-    return last >= 0 && (last & 0x0f) === 0
+  try {
+    return base64urlnopad.encode(base64urlnopad.decode(value)) === value
+  } catch {
+    return false
   }
-  if (remainder === 3) {
-    const last = BASE64URL_ALPHABET.indexOf(value.at(-1) ?? '')
-    return last >= 0 && (last & 0x03) === 0
-  }
-  return true
 }
 
-function validateValue(value: unknown, descriptor: FieldDescriptor, path: string): JsonValue {
-  if (value === null) return fail('CLAIMS_INVALID', 'null is not allowed in XCS claims', path)
+function parseValue(value: unknown, descriptor: FieldDescriptor, path: string): JsonValue {
+  if (value === null) return fail('INVALID_CLAIMS', 'null is not allowed', path)
 
   switch (descriptor.type) {
     case 'string':
-      if (typeof value !== 'string') return fail('CLAIMS_INVALID', 'Expected string', path)
+      if (typeof value !== 'string') return fail('INVALID_CLAIMS', 'Expected a string', path)
       return value
     case 'bool':
-      if (typeof value !== 'boolean') return fail('CLAIMS_INVALID', 'Expected boolean', path)
+      if (typeof value !== 'boolean') return fail('INVALID_CLAIMS', 'Expected a boolean', path)
       return value
     case 'uint': {
-      if (typeof value !== 'string' || !DECIMAL_UNSIGNED.test(value)) {
-        return fail('CLAIMS_INVALID', 'Expected canonical unsigned decimal string', path)
+      if (typeof value !== 'string' || !UNSIGNED_INTEGER.test(value)) {
+        return fail('INVALID_CLAIMS', 'Expected a canonical unsigned decimal string', path)
       }
-      if (value.length > 78) return fail('CLAIMS_INVALID', 'uint exceeds 256-bit range', path)
-      const parsed = BigInt(value)
-      if (parsed > UINT_MAX) return fail('CLAIMS_INVALID', 'uint exceeds 256-bit range', path)
+      if (value.length > 78 || BigInt(value) > UINT256_MAX) {
+        return fail('INVALID_CLAIMS', 'Unsigned integer exceeds 256 bits', path)
+      }
       return value
     }
     case 'int': {
-      if (typeof value !== 'string' || !DECIMAL_SIGNED.test(value)) {
-        return fail('CLAIMS_INVALID', 'Expected canonical signed decimal string', path)
+      if (typeof value !== 'string' || !SIGNED_INTEGER.test(value)) {
+        return fail('INVALID_CLAIMS', 'Expected a canonical signed decimal string', path)
       }
-      if (value.length > 79) {
-        return fail('CLAIMS_INVALID', 'int exceeds signed 256-bit range', path)
-      }
-      const parsed = BigInt(value)
-      if (parsed < INT_MIN || parsed > INT_MAX) {
-        return fail('CLAIMS_INVALID', 'int exceeds signed 256-bit range', path)
+      const integer = BigInt(value)
+      if (value.length > 79 || integer < INT256_MIN || integer > INT256_MAX) {
+        return fail('INVALID_CLAIMS', 'Signed integer exceeds 256 bits', path)
       }
       return value
     }
     case 'bytes':
       if (typeof value !== 'string' || !isCanonicalBase64Url(value)) {
-        return fail('CLAIMS_INVALID', 'Expected canonical base64url without padding', path)
+        return fail('INVALID_CLAIMS', 'Expected unpadded canonical base64url', path)
       }
       return value
     case 'address':
-      if (typeof value !== 'string' || !isClassicAddress(value)) {
-        return fail('CLAIMS_INVALID', 'Expected an XRPL classic address', path)
+      if (typeof value !== 'string' || !isValidClassicAddress(value)) {
+        return fail('INVALID_CLAIMS', 'Expected an XRPL classic address', path)
       }
       return value
     case 'array':
-      if (!Array.isArray(value)) return fail('CLAIMS_INVALID', 'Expected array', path)
-      return value.map((item, index) => validateValue(item, descriptor.items, `${path}[${index}]`))
+      if (!Array.isArray(value)) return fail('INVALID_CLAIMS', 'Expected an array', path)
+      return value.map((item, index) => parseValue(item, descriptor.items, `${path}[${index}]`))
     case 'object':
-      return validateObject(value, descriptor.fields, path)
+      return parseObject(value, descriptor.fields, path)
   }
 }
 
-function validateObject(
-  input: unknown,
-  fields: Record<string, FieldDescriptor>,
-  path: string,
-): JsonObject {
-  if (!isRecord(input)) return fail('CLAIMS_INVALID', 'Expected object', path)
-  for (const key of Object.keys(input)) {
-    if (!Object.hasOwn(fields, key)) {
-      return fail('CLAIMS_INVALID', `Unknown claim ${key}`, `${path}.${key}`)
+function parseObject(input: unknown, fields: SchemaFields, path: string): JsonObject {
+  if (!isRecord(input)) return fail('INVALID_CLAIMS', 'Expected an object', path)
+  for (const name of Object.keys(input)) {
+    if (!Object.hasOwn(fields, name)) {
+      return fail('INVALID_CLAIMS', `Unknown claim ${name}`, `${path}.${name}`)
     }
   }
 
-  const result: JsonObject = Object.create(null) as JsonObject
+  const claims = Object.create(null) as JsonObject
   for (const [name, descriptor] of Object.entries(fields)) {
     if (!Object.hasOwn(input, name)) {
       if (descriptor.optional === true) continue
-      return fail('CLAIMS_INVALID', `Missing required claim ${name}`, `${path}.${name}`)
+      return fail('INVALID_CLAIMS', `Missing required claim ${name}`, `${path}.${name}`)
     }
-    result[name] = validateValue(input[name], descriptor, `${path}.${name}`)
+    claims[name] = parseValue(input[name], descriptor, `${path}.${name}`)
   }
-  return result
+  return claims
 }
 
-export function validateClaims(
-  input: unknown,
-  schema: ResolvedSchema | Record<string, FieldDescriptor>,
-): JsonObject {
-  const fields = isResolvedSchema(schema) ? schema.fields : schema
-  return validateObject(input, fields, '$.claims')
+export function parseClaims(input: unknown, fields: SchemaFields): JsonObject {
+  return parseObject(input, fields, '$.claims')
 }

@@ -1,6 +1,17 @@
 # Testing
 
-## Local checks
+Run focused checks while editing:
+
+```bash
+pnpm --filter @xcs-protocol/core test
+pnpm --filter @xcs-protocol/sdk test
+pnpm --filter @xcs-protocol/cli test
+pnpm --filter @xcs-protocol/indexer test
+pnpm --filter @xcs-protocol/api test
+pnpm --filter @xcs-protocol/web test
+```
+
+Every package also provides `typecheck` and `build`. Before merging a cross-package change, run:
 
 ```bash
 pnpm format:check
@@ -8,239 +19,36 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm package:smoke
 ```
 
-`package:smoke` starts from the publishable package manifests rather than workspace links. It builds
-and packs `core`, `sdk`, and `cli`, proves the tarballs are reproducible and contain no `workspace:`
-dependency, then installs them into an isolated offline consumer and exercises their types, ESM
-exports, binary and an offline CLI command. CI runs this in a separate fresh-checkout job so a stale
-local `dist/` cannot hide a missing build step. See
-[`runbooks/npm-packages.md`](./runbooks/npm-packages.md) for retained artifacts and release gates.
-The isolated type/runtime consumer also imports strict verification reports, schema-catalog types
-and the prepared-transaction envelope API so a missing public export fails the release gate.
+## Integration tiers
 
-The independent verifier is checked separately:
+1. Unit tests need no network or database.
+2. PostgreSQL integration tests require an isolated PostgreSQL 18 admin URL in `XCS_TEST_DATABASE_URL`.
+3. Browser tests use Playwright and deterministic fake ledger/wallet boundaries.
+4. Real Testnet acceptance requires externally controlled funded wallets, a published network profile, two complete-history sources, and a running PostgreSQL projection.
+
+Run the PostgreSQL suites with:
 
 ```bash
-cd verifier-go
-go test ./...
-go test -race ./...
-go vet ./...
-go build ./...
+pnpm test:postgres
 ```
 
-Use the repository-pinned Go 1.26 line. XCS v0.1 freezes IDNA to Unicode 15.0.0; the verifier checks
-the selected `x/net/idna` table version and fails closed if a newer toolchain selects different
-tables.
-
-The TypeScript generative suite is deterministic. Its JSON/JCS and UID properties run 512 generated
-cases with seed `0x58435301` by default. Schema resolution exhausts all supported inheritance depths
-from 1 through 16 and the 256/257 resolved-descriptor boundary with deterministic fixtures. Failures
-print the property, seed, case index and generated input context. Reproduce or widen the configurable
-properties without changing committed fixtures:
-
-```bash
-XCS_GENERATIVE_SEED=0x58435301 XCS_GENERATIVE_RUNS=512 \
-  pnpm --filter @xcs-protocol/core exec vitest run test/generative-conformance.test.ts
-```
-
-`XCS_GENERATIVE_SEED` must be a non-zero unsigned 32-bit integer and
-`XCS_GENERATIVE_RUNS` must be between 1 and 10,000. Turbo includes both variables in its test cache
-key. SDK and indexer mutation matrices use their own fixed seed and do not read these overrides.
-
-API tests also exercise the disabled-by-default operational snapshot: bearer authentication occurs
-before database reads, scrapes remain outside public budgets and OpenAPI, PostgreSQL failures do not
-leak details, invalid projection evidence has a distinct stable code, and process counters classify
-only bounded rate-limit and server-resolver outcomes. The JSON contract is `schemaVersion: 2`; the
-Prometheus rendering is derived from the same collection and includes durable fenced halt counts.
-Repository tests reject partial or unsafe durable gauges and inconsistent incident history while
-accepting profiles that have not yet published status/checkpoint rows.
-
-The v0.1 revision 12 manifest is consumed independently by TypeScript and Go. In addition to schema,
-UID, JCS and claim cases, it covers inherited payload resolution, exact 1 MiB payload and 256-byte URI
-boundaries, strict public network profiles and anchor normalization, pinned Unicode 15 UTS #46
-authority normalization, port and IP boundaries, canonical
-path/query retrieval URLs, Ripple/Unix/ISO conversion and lifecycle state precedence. Its shared
-retrieval cases also require identical `valid`, `unavailable`, `tampered`, and `invalid` outcomes,
-including invalid-URI precedence and the 1 MiB plus one byte rejection. Schema-catalog vectors add
-the 256/257 combined relation-closure boundary and shared-ancestor deduplication. Raw JSON-token
-vectors prove that both runners accept semantically integral decimal and exponent spellings,
-normalize accepted `-0` values to positive zero before applying field bounds, and reject non-finite
-`1e400` as `JSON_NON_IJSON_NUMBER`. A runner fails if a declared handler is missing or an undeclared
-vector file is present.
-
-Go's normal test command executes every registered fuzz seed, including those loaded from the
-committed conformance vectors. Run the same bounded campaigns as CI when changing strict JSON,
-canonicalization or UID behavior:
-
-```bash
-cd verifier-go
-go test -run=^$ -fuzz=^FuzzStrictJSONCanonicalRoundTrip$ -fuzztime=10s -parallel=2 ./xcs
-go test -run=^$ -fuzz=^FuzzSchemaUIDDeterminism$ -fuzztime=10s -parallel=2 ./xcs
-```
-
-Fuzz caches are local build artifacts and must not be committed. Reduce and review every real
-counterexample in both implementations. If it only exposes a missing example of frozen v0.1
-semantics, add a language-neutral v0.1 vector and increment the manifest revision. If fixing it
-would change historical validity, a stable error code or derived bytes, create a new protocol
-version and activation profile instead. Existing vector IDs and expected results are immutable.
-
-The deterministic browser gate requires Chromium once, then runs without Testnet, PostgreSQL or
-wallet keys:
+Install Chromium once and run browser flows with:
 
 ```bash
 pnpm --filter @xcs-protocol/web exec playwright install chromium
 pnpm test:e2e
 ```
 
-The browser gate also exercises the loopback-only local payload store: it rejects issuance without
-the explicit no-PII acknowledgement, permits a `prenom` field containing a deterministic fictitious
-value only after that acknowledgement, proves fail-closed behavior after the local bytes disappear,
-then issues, accepts and verifies the same canonical IPFS-addressed payload from that browser. It
-also proves that an external IPFS CID absent from the store is not presented as browser-local.
+Unit and browser mocks prove application transitions; they do not prove a specific wallet version supports XRPL Credentials. Record real wallet compatibility separately against Testnet.
 
-CLI unit integration covers the equivalent headless boundary without a live server. It proves the
-profile-bound transaction semantics, mandatory catalog download for every `Credential*` operation,
-pre-autofill `xcs:prepared` context commitment, deterministic single-signature verification, final
-readiness-before-`ledger_current` order, WSS policy and strict UTF-8/BOM handling. A wallet mutation,
-unsigned or invalid signature, invalid current-ledger response or regressed checkpoint is rejected
-before relay. Live wallet/HSM and public Testnet evidence remain separate gates.
+## What tests must assert
 
-Web unit tests compose the six self-configuring XRPL Connect adapters and all eight when the optional
-Xaman and WalletConnect public identifiers are present. They also normalize sign-only `tx_blob` and
-signed `tx_json` responses and reject mismatched artifacts, hashes, signatures, signer addresses or
-reviewed fields before persistence/submission. These tests never call `signAndSubmit` and do not
-replace real wallet compatibility evidence.
+- Core tests cover accepted values and rejection boundaries, not private helper implementations.
+- SDK tests inspect the exact unsigned XRPL transaction and signed-blob submission checks.
+- Indexer tests prove source agreement, ordering, idempotency, and fail-closed projection behavior.
+- API tests prove snapshot consistency, bounded external fetches, and separate unavailable/tampered/invalid results.
+- Web tests prove user-visible workflow transitions and that signing remains in the wallet.
 
-The wallet compatibility unit gate also covers all three native Credential transaction types. It
-keeps GemWallet available for schema-registration `Payment`, rejects its known pre-XLS-70
-`Credential*` path, and maps only the exact nested legacy codec error to the stable
-`WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED` diagnostic. Playwright exercises that early rejection
-with a GemWallet-identified adapter and proves that no transaction preview, wallet signature or
-ledger submission occurs. This regression test explains a known incompatibility; it does not claim
-that another wallet has passed the manual Testnet matrix.
-
-## Integration tiers
-
-1. Pure unit, conformance, generative and fuzz-corpus tests require no network.
-2. Database integration tests require an isolated PostgreSQL 18 server and an admin URL configured
-   with `XCS_TEST_DATABASE_URL`; the suite creates and removes its own random databases.
-3. Indexer fixture tests consume captured public-ledger bundles produced only after exact agreement
-   between both configured `rippled` sources.
-4. Testnet E2E requires a real network profile and externally controlled funded wallets.
-5. The deterministic Playwright browser gate uses explicitly development-only issuer and subject
-   wallets plus a fake XRPL client. It proves exact application transitions and indexed business
-   evidence, including the subject's payload consent, separate trust-neutral acknowledgement, and
-   the two readiness gates around wallet signing and blob persistence/submission. It also reloads a
-   signed IndexedDB operation and proves that retransmission requires fresh readiness, uses no new
-   wallet signature, preserves recovery material when blocked and removes it after terminal XRPL
-   validation. A corrupted stored expiry is rejected before reconciliation and leaves the exact blob
-   untouched;
-   real Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap signing
-   remains a separate manual Testnet gate. WalletConnect candidates must additionally prove the XRPL
-   Testnet namespace and native `Credential*` support; QR/deep-link discovery alone is insufficient.
-
-Never use a production seed in tests. A Testnet reset invalidates the activation profile and
-requires a new fixture/profile rather than editing historical expected UIDs.
-
-The destructive PostgreSQL integration suite receives an **admin database URL**, creates random
-databases named `xcs_it_<uuid>` or `xcs_api_it_<uuid>` and the fixed `xcs_indexer`/`xcs_api` roles,
-plus `xcs_monitor` and the `xcs_provision_control` marker, then removes those exact objects after
-each suite. It refuses to run a provisioning case if any fixed role already exists. Provisioning
-revokes database, function and other shared ACLs cluster-wide, so use only a disposable dedicated
-CI/test cluster with `max_prepared_transactions = 0`; never point this suite at a shared or
-production PostgreSQL instance.
-
-```sh
-XCS_TEST_DATABASE_URL=postgres://postgres:postgres-integration-password-0001@127.0.0.1:5432/postgres pnpm test:postgres
-```
-
-It requires PostgreSQL 18 and proves migrations `0000` through `0004`, including the discovery
-indexes, NULL-safe constraints, all 16 projection-integrity constraints and the durable
-`indexer_incidents` history. Provisioning compares the exact `hash`/`created_at` identity of all five
-journal rows and the canonical PostgreSQL 18 definition of every named projection constraint; count
-or name equality alone is insufficient. It rejects an empty, rewritten or incompletely validated
-database before creating the control marker, then binds a fully migrated database and rejects
-another migrated database in the same cluster. The `0003` case proves that `CHECK NOT VALID`
-installation is followed by post-commit, table-by-table validation; invalid historical projection
-data fails closed while preserving a retry path after rebuild/replay. The `0004` cases prove
-append-only runtime grants, fenced incident identity and atomic rollback when an incident cannot be
-recorded.
-
-The twelve indexer cases also cover `shared` versus `exclusive-profile` database initialization,
-lease takeover/fencing, projection rollback, restart/idempotence, transaction-root persistence, and
-equal timestamp-free digests across two replays. They provision the fixed runtime roles in the
-isolated cluster, prove exact column-level mutations, hostile-schema and cross-database denial,
-finite connection limits, membership options, password rotation/session termination, and confirm
-that caller-forced `password_encryption=md5` cannot prevent all runtime passwords from receiving
-verified SCRAM-SHA-256 verifiers. Ownership drift across databases, Large Objects and collations
-fails closed with runtime roles left `NOLOGIN`. The cases also exercise a delegated `SET ROLE`
-session, recovery from a legacy runtime-held provision lock, removal of every raw runtime
-advisory-lock capability, exhaustive runtime/default ACL removal, hostile
-system-catalog/column/type/trusted-language/FDW/server/Large-Object/parameter/tablespace `PUBLIC`
-ACL normalization, and Large Object function denial. Deliberate `pg_monitor` membership and DML
-drift fails closed before the exact built-in monitoring baseline is granted to `xcs_monitor`.
-Concurrent exclusive-profile
-initialization admits exactly one profile, while the fenced lease cases reject stale writers before
-projection persistence. Two replays with different source tips must stop at the same
-quorum-verified index/hash boundary; the unit suite separately proves that a tip advancing during
-replay cannot move that boundary. The complete-bundle case captures a deterministic four-ledger
-bundle, validates and opens it
-independently twice, and runs the normal worker through schema registration, six Credential
-creations, acceptance and all six deletion causes. Both empty projections must match the pinned
-complete digest and exact rows. This exercises the real bundle pipeline locally; a reviewed capture
-from public Testnet remains separate release evidence.
-
-Four API cases apply all migrations to another empty database. They prove that authoritative
-read-only snapshots decode database time through the real driver and least-privilege role; execute
-the operational metrics SQL and runtime type normalization, including `schemaVersion: 2` halt
-history; serialize concurrent pin-quota reservations through a `SERIALIZABLE` challenge-row lock
-without advisory locks; and execute the recursive schema-catalog CTE against a real 256/257-node
-DAG, shared ancestor and corrupted cycle, proving deduplication, termination and explicit overflow
-rather than truncation. Normal `pnpm test` skips these sixteen PostgreSQL cases when the admin URL is
-absent; CI runs them as a required separate job.
-
-The database unit suite exercises the shared `SERIALIZABLE` helper independently: it retries the
-complete unit for SQLSTATE `40001` and `40P01` with bounded full-jitter delay, does not retry an
-unrelated database error, and stops at the five-attempt default budget.
-
-## Captured ledger bundles
-
-Capture begins at the immutable profile activation ledger and stops at an explicit target. The tool
-stores normalized ledger headers and every public transaction/metadata object in that range, plus
-public operator labels. It omits RPC URLs and local credentials, but the on-ledger evidence can
-contain Memos, URIs, public keys, signatures and personal identifiers. Treat the complete bundle as
-public data, review it before publication, and never put secrets or sensitive claims on XRPL.
-
-```sh
-export XCS_FIXTURE_TARGET_LEDGER_INDEX=123456
-export XCS_FIXTURE_OUTPUT=./fixtures/testnet-pilot
-export XCS_FIXTURE_PRIMARY_OPERATOR='XRPL Commons'
-export XCS_FIXTURE_SECONDARY_OPERATOR='Independent Operator'
-pnpm --filter @xcs-protocol/indexer fixture:capture
-```
-
-Validate a bundle offline against the exact profile file and its byte-level digest:
-
-```sh
-export XCS_FIXTURE_BUNDLE=./fixtures/testnet-pilot
-export XCS_FIXTURE_BUNDLE_SHA256='<bundleDigest printed by fixture:capture>'
-pnpm --filter @xcs-protocol/indexer fixture:validate
-```
-
-The same artifact can drive the normal replay worker and an empty PostgreSQL projection without
-either live RPC URL. Set `XCS_REPLAY_FIXTURE_BUNDLE` and
-`XCS_REPLAY_FIXTURE_BUNDLE_SHA256`, then run the documented `replay` command; its immutable target is
-the last ledger committed by the bundle.
-
-The manifest format is `xcs-ledger-bundle/1`. Each ledger is exact canonical JSON compressed as a
-separate gzip member and protected by compressed and uncompressed SHA-256 digests stored in
-canonical, compressed index chunks. The compact manifest binds the ordered chunks, so capture is not
-limited by one monolithic list. Validation also requires the externally recorded SHA-256 of the
-exact canonical `manifest.json` bytes; this root digest transitively binds the profile, range,
-indexes and every ledger file. The directory inventory is strict, and any extra file, symlink or
-missing ledger is rejected. Manifest, index, compressed-ledger and decompressed-ledger sizes are
-bounded independently to limit hostile artifact memory use. Operator labels are audit metadata, not
-proof of operational independence; release evidence must identify and review both operators
-separately.
+If a required environment is unavailable, report the exact skipped command and do not describe it as passing.

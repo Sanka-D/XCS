@@ -9,12 +9,9 @@ Report a vulnerability privately to the repository maintainers. Include the affe
 ## Security boundaries
 
 - XCS constructs transactions but does not control signing keys.
-- Offline preparation accepts only profile-bound XCS transaction semantics and requires a validated,
-  authoritative schema catalog before preparing a native `Credential*` operation.
-- Before autofill, offline signing commits the exact profile-byte digest and authoritative checkpoint
-  in an `xcs:prepared` Memo. Submission cryptographically verifies the XRPL single-signature, rejects
-  multisign and any non-signature mutation, obtains final readiness, then checks `ledger_current`
-  before relay.
+- SDK submission decodes the signed blob with `xrpl.js`, verifies its XRPL single-signature, rejects
+  multisign and any mutation of reviewed fields, then reconciles submission by transaction hash.
+- Hosts can persist the validated signed blob and repeat readiness checks immediately before relay.
 - Portable schema catalog relation closures are bounded to 256 unique entries at transport, API
   retrieval and independent verification boundaries without changing on-ledger schema validity.
 - Catalog parsing proves internal consistency only; the portable bundle has no XRPL inclusion proof.

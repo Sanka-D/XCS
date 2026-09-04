@@ -29,9 +29,6 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: '1.26.x'
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.0.6
@@ -82,46 +79,12 @@ jobs:
             exit 1
           fi
 
-      - name: Test and build independent verifier archives
+      - name: Prepare release artifact directory
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
           RELEASE_DIRECTORY="$RUNNER_TEMP/xcs-release"
           mkdir -p "$RELEASE_DIRECTORY"
-
-          (
-            cd verifier-go
-            go test ./...
-            go test -race ./...
-            go vet ./...
-          )
-
-          TARGETS=(linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64)
-          for TARGET in "${TARGETS[@]}"; do
-            GOOS_VALUE="${TARGET%/*}"
-            GOARCH_VALUE="${TARGET#*/}"
-            BINARY_NAME=xcs-verify
-            if [[ "$GOOS_VALUE" = windows ]]; then BINARY_NAME=xcs-verify.exe; fi
-
-            STAGING_DIRECTORY="$RUNNER_TEMP/xcs-verify-$GOOS_VALUE-$GOARCH_VALUE"
-            mkdir -p "$STAGING_DIRECTORY"
-            (
-              cd verifier-go
-              CGO_ENABLED=0 GOOS="$GOOS_VALUE" GOARCH="$GOARCH_VALUE" \
-                go build -trimpath -ldflags='-s -w -buildid=' \
-                -o "$STAGING_DIRECTORY/$BINARY_NAME" ./cmd/xcs-verify
-            )
-            cp LICENSE verifier-go/README.md "$STAGING_DIRECTORY/"
-            ARCHIVE="$RELEASE_DIRECTORY/xcs-verify-$VERSION-$GOOS_VALUE-$GOARCH_VALUE"
-            tar --sort=name --mtime='UTC 1980-01-01' --owner=0 --group=0 --numeric-owner \
-              -cf "$ARCHIVE.tar" -C "$STAGING_DIRECTORY" .
-            gzip --no-name "$ARCHIVE.tar"
-          done
-          (
-            cd "$RELEASE_DIRECTORY"
-            sha256sum ./*.tar.gz > SHA256SUMS
-          )
           echo "RELEASE_DIRECTORY=$RELEASE_DIRECTORY" >> "$GITHUB_ENV"
 
       - name: Build release images locally
@@ -286,11 +249,11 @@ jobs:
           subject-digest: ${{ steps.images.outputs.db_digest }}
           push-to-registry: true
 
-      - name: Sign verifier archives and image SBOM files
+      - name: Sign image SBOM files
         shell: bash
         run: |
           set -euo pipefail
-          for ARTIFACT in "$RELEASE_DIRECTORY"/*.tar.gz "$RELEASE_DIRECTORY"/SHA256SUMS "$RELEASE_DIRECTORY"/*.spdx.json; do
+          for ARTIFACT in "$RELEASE_DIRECTORY"/*.spdx.json; do
             cosign sign-blob --yes \
               --bundle "$ARTIFACT.sigstore.json" \
               "$ARTIFACT"

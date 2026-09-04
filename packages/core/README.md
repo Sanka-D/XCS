@@ -1,60 +1,86 @@
 # `@xcs-protocol/core`
 
-Deterministic, browser-safe primitives for XCS v0.1: strict JSON parsing, RFC 8785
-canonicalization, schema validation and resolution, schema UID derivation, payload integrity and
-XRPL time conversions. It also strictly parses portable schema catalogs and four-dimensional
-verification reports received across process boundaries.
+The XCS domain model. This package validates schemas and credential payloads, derives schema UIDs,
+checks payload integrity, and projects the native XRPL Credential lifecycle.
+
+It deliberately contains no database, indexer, HTTP client, wallet integration, transaction
+submission, or deployment configuration. Those belong in adapters around the core.
+
+## Design
+
+Core owns XCS rules only. Standard formats and cryptographic primitives are delegated to maintained
+libraries:
+
+- `@noble/hashes` for SHA-256 and hexadecimal encoding;
+- `xrpl` for classic-address validation and Ripple-time conversion;
+- `canonicalize` for RFC 8785 JSON serialization;
+- `jsonc-parser` for syntax and duplicate-key validation;
+- `multiformats` for CIDv1 and multihash handling;
+- `@scure/base` for canonical base64url claims;
+- `tr46` for the pinned IDNA behavior required by the protocol.
+
+The public API includes the shared JSON, UTF-8, hexadecimal, and SHA-256 adapters used by the other
+workspace packages. This keeps those security-sensitive boundaries in one place. Catalog transport
+and API presentation models remain outside core.
+
+## Schema flow
 
 ```ts
-import { canonicalize, validateSchema, type JsonValue } from '@xcs-protocol/core'
+import { computeSchemaUid, encodeSchema, parseSchema } from '@xcs-protocol/core'
 
-const schema = validateSchema({
+const schema = parseSchema({
   xcsVersion: '0.1',
   name: 'Course completion',
-  description: 'Attests that a subject completed a course',
-  fields: { courseId: { type: 'string' } },
+  description: 'Confirms that a learner completed a course.',
+  fields: {
+    courseId: { type: 'string' },
+    passed: { type: 'bool' },
+  },
 })
 
-const canonical = canonicalize(schema as unknown as JsonValue)
+// These exact bytes go into the schema-registration memo.
+const memoBytes = encodeSchema(schema)
+
+// Compute this only after the registration transaction is in a validated ledger.
+const uid = computeSchemaUid({
+  networkId: 1,
+  ledgerHash: 'ab'.repeat(32),
+  ledgerIndex: 100,
+  transactionIndex: 2,
+  publisher: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+  schema,
+})
 ```
 
-This alpha package contains no wallet or network client. It does not accept XRPL seeds or private
-keys. Protocol semantics are defined by the repository's `spec/XCS-0001.md` and language-neutral
-conformance vectors.
+## Credential flow
 
-Payload claim validation accepts either a complete standalone `SchemaDefinition` or a
-`ResolvedSchema`. A definition containing `extends` must be resolved with `resolveSchema` before it
-is used as payload context; passing an unresolved child fails with `SCHEMA_PARENT_NOT_FOUND`. Raw
-field maps are intentionally not accepted because they cannot prove that inherited required claims
-were included.
+```ts
+import {
+  createHttpsPayloadUri,
+  encodeCredentialPayload,
+  verifyCredentialPayload,
+} from '@xcs-protocol/core'
 
-`parseSchemaCatalogBundle` validates the complete `xcs-schema-catalog/1` transport format, including
-its network profile, authoritative checkpoint, topological order, registration coordinates and
-recomputed UIDs. A target's combined `extends` + `supersedes` closure is limited to 256 unique
-schemas, candidate included; shared ancestors count once. Pass the result to
-`resolveSchemaCatalogBundle` before validating inherited claims.
-Catalog validation proves internal consistency only: the portable bundle contains no ledger header
-chain, transaction metadata or inclusion proof. A caller asserting XRPL registration must trust the
-configured authoritative source/checkpoint or verify that ledger evidence independently.
-`parseVerificationReport` rejects missing, unknown or unsupported fields instead of treating a
-truthy partial API response as protocol evidence.
+const context = {
+  issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+  subject: 'rG1QQv2nh2gr7RCZ1P8YYcBUKCCN633jCn',
+  schemaUid: uid,
+  fields: schema.fields,
+}
 
-`projectCredentialLifecycle` centralizes pending/active/expired/deleted projection. Its expiration
-and validated-ledger close-time inputs are Ripple-epoch uint32 seconds. The exported conversion
-helpers use the same strict whole-second ISO-8601 contract as the shared conformance vectors.
+const encoded = encodeCredentialPayload({ courseId: 'xcs-101', passed: true }, context)
+const uri = createHttpsPayloadUri('https://issuer.example/credentials/42.json', encoded.bytes)
 
-HTTPS payload URI inspection uses the pinned `tr46` 4.1.1 tables for the protocol's Unicode 15.0.0
-non-transitional UTS #46 profile before the platform URL parser. This keeps authority validity stable
-across Node/browser Unicode upgrades and aligned with the independent Go verifier. The inspector
-also enforces the protocol's canonical path/query subset and returns the same normalized retrieval
-URL in both implementations.
+const status = verifyCredentialPayload(
+  { status: 'retrieved', content: encoded.bytes },
+  uri,
+  context,
+)
+// status: valid | unavailable | tampered | invalid
+```
 
-`classifyCredentialPayload` is the network-free end-to-end payload decision. Callers pass either
-retrieved bytes or an explicit unavailable result plus the native URI and resolved payload context;
-the result keeps `valid`, `unavailable`, `tampered`, and `invalid` distinct. It validates the URI
-before accepting unavailability and enforces the exact 1 MiB boundary from observed bytes.
+For inherited schemas, pass `resolveSchema(...).fields` in the credential context. Do not validate
+claims against the child definition alone.
 
-The package has not yet been published. Maintainers can validate the exact local tarballs without
-network access by running `pnpm package:smoke` at the repository root. Passing
-`--output-dir <directory>` preserves the three validated tarballs for a release workflow; the
-default command removes its temporary artifacts.
+The package is alpha and has not been published. Its source of truth remains
+[`spec/XCS-0001.md`](../../spec/XCS-0001.md).

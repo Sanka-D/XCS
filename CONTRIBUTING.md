@@ -1,19 +1,14 @@
 # Contributing
 
-XCS is an interoperability protocol. Changes to canonicalization, schema validation, UID generation, wire encoding or verification results are public-contract changes, even when the code diff is small.
+Keep changes small, testable, and owned by one layer.
 
-## Development workflow
+1. Put deterministic protocol behavior in `packages/core`.
+2. Use `xrpl.js` for XRPL primitives and vetted libraries for cryptography, encoding, canonicalization, and parsing. Do not implement those primitives locally.
+3. Keep signing outside XCS; builders return unsigned transactions and wallets own keys.
+4. Add tests for observable behavior and important rejection paths.
+5. Run the affected package checks, then `pnpm verify` when the whole workspace is stable.
+6. Include rollout and recovery notes for persistent-data changes.
 
-1. Open an issue describing observable behavior and compatibility impact.
-2. For normative changes, add or update an ADR and language-neutral conformance vectors first.
-3. Update both the TypeScript core and independent Go verifier.
-4. Run `pnpm verify` and `go test ./...` from `verifier-go`.
-5. Include migration and recovery notes for persistent-data changes.
+Do not commit secrets, `.env` files, Testnet wallet seeds, database dumps, generated build output, or payloads containing personal data.
 
-Normative identifiers, API fields, error codes and code comments are English. User documentation and the playground are maintained in English and French.
-
-## Compatibility
-
-An existing valid schema is never reinterpreted. A change that affects schema validity, UID bytes or payload interpretation requires a new XCS protocol version and network activation profile.
-
-Do not commit secrets, `.env` files, Testnet wallet seeds, database dumps or payloads containing personal data.
+Changes to schema validity, UID derivation, canonical payload bytes, URI integrity, or lifecycle projection are protocol changes. Document them in an ADR and update the specification before shipping them.

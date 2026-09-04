@@ -16,8 +16,8 @@ compromise does not cross that administrative boundary by itself.
 
 | Threat                                 | Control                                                                                                 |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Ambiguous JSON or hash divergence      | Strict parser, duplicate-key rejection, I-JSON checks, JCS and cross-language vectors                   |
-| Cross-language protocol drift          | Exhaustive manifest; shared schema, payload, Ripple-time and lifecycle vectors; independent Go runner   |
+| Ambiguous JSON or hash divergence      | Strict parsing, duplicate-key rejection, I-JSON checks, and RFC 8785 canonicalization                   |
+| Protocol drift between consumers       | One TypeScript core package owns deterministic protocol behavior                                        |
 | Forged payload content                 | URI-bound SHA-256/CID verification plus envelope linkage                                                |
 | False issuer endorsement               | State, payload and trust reported separately                                                            |
 | Seed/key disclosure                    | No seed API; injected wallet signer; redacted errors and logs                                           |
