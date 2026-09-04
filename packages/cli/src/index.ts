@@ -48,7 +48,6 @@ export async function runCli(
         error.code === 'XCS_SDK_AMENDMENT_UNAVAILABLE' ||
         error.code === 'XCS_SDK_CLIENT_NOT_CONNECTED' ||
         error.code === 'XCS_SDK_NETWORK_MISMATCH' ||
-        error.code === 'XCS_SDK_PREPARED_READINESS_REGRESSION' ||
         error.code === 'XCS_SDK_LEDGER_CURRENT_INVALID'
       ) {
         return 3
