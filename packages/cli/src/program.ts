@@ -1,59 +1,38 @@
 import {
-  canonicalize,
-  computePayloadSha256Hex,
   createHttpsPayloadUri,
-  createIpfsRawPayloadUri,
-  parseSchemaCatalogBundle,
+  createIpfsPayloadUri,
+  encodeCredentialPayload,
+  encodeSchema,
   parseCredentialPayload,
-  parseJsonStrict,
-  parseVerificationReport,
-  resolveSchemaCatalogBundle,
-  sha256Hex,
-  validateCredentialPayload,
-  validateSchema,
+  parseNetworkProfile,
+  parsePayloadUri,
+  parseSchema,
   verifyPayloadIntegrity,
   type JsonValue,
-  type ResolvedSchema,
+  type NetworkProfile,
   type SchemaDefinition,
 } from '@xcs-protocol/core'
 import {
-  assertPreparedEnvelopeMatchesProfile,
-  assertReadinessAdvancesPreparedCheckpoint,
-  assertSignedBlobMatchesPrepared,
-  assertTransactionNotExpired,
-  assertXcsTransactionSemantics,
-  autofillXcsTransaction,
-  bindPreparedTransactionContext,
   buildCredentialAccept,
   buildCredentialCreate,
   buildCredentialDelete,
   buildSchemaRegistrationPayment,
   connectAndValidateNetwork,
-  createPreparedTransactionEnvelope,
   deriveSchemaUid,
   getTransactionStatus,
   MemoryOperationJournal,
-  parseAuthoritativeReadiness,
-  parseNetworkProfile,
   submitSignedTransaction,
-  verifyNetworkProfileActivation,
-  type NetworkProfile,
   type OperationJournal,
-  type PreparedXcsTransactionEnvelope,
 } from '@xcs-protocol/sdk'
 import { Command } from 'commander'
-import { Client, type SubmittableTransaction } from 'xrpl'
+import { Client } from 'xrpl'
 
 import { CliError } from './errors.js'
 import { readJsonFile, writeJson, type CliIo } from './io.js'
 import { CompositeOperationJournal, JsonLinesOperationJournal } from './journal.js'
 
-const API_REQUEST_TIMEOUT_MS = 10_000
+const API_TIMEOUT_MS = 10_000
 const MAX_API_RESPONSE_BYTES = 1024 * 1024
-// A compact bundle at every normative maximum (256 schemas, 256 optional
-// descriptors per schema, maximum strings and relation metadata) stays below
-// 8 MiB. Catalog calls get this separate cap; all other API calls remain 1 MiB.
-const MAX_SCHEMA_CATALOG_RESPONSE_BYTES = 8 * 1024 * 1024
 
 export interface CliDependencies {
   readonly io: CliIo
@@ -61,106 +40,41 @@ export interface CliDependencies {
   readonly fetch: typeof globalThis.fetch
 }
 
-interface CommonProfileOptions {
+interface ProfileOptions {
   readonly profile: string
 }
 
-interface SchemaRegisterOptions extends CommonProfileOptions {
-  readonly account: string
-}
-
-interface SchemaUidOptions extends CommonProfileOptions {
-  readonly publisher: string
-  readonly ledgerHash: string
-  readonly ledgerIndex: string
-  readonly transactionIndex: string
-  readonly validatedLedger: true
-}
-
-interface SchemaCatalogOptions {
-  readonly api: string
-  readonly network: string
-  readonly schema: string
-  readonly output: string
-}
-
-interface CredentialIssueOptions {
-  readonly issuer: string
-  readonly subject: string
-  readonly schema: string
-  readonly uri: string
-  readonly expiration?: string | undefined
-}
-
-interface CredentialAcceptOptions {
-  readonly subject: string
-  readonly issuer: string
-  readonly schema: string
-}
-
-interface CredentialDeleteOptions {
-  readonly account: string
+interface PayloadOptions {
+  readonly schemaFile: string
   readonly issuer: string
   readonly subject: string
   readonly schema: string
 }
 
-interface CredentialVerifyOptions {
-  readonly api: string
-  readonly network: string
-  readonly issuer: string
-  readonly subject: string
-  readonly schema: string
-  readonly payload?: string | undefined
-  readonly resolvePayload?: boolean | undefined
+interface PayloadBuildOptions extends PayloadOptions {
+  readonly httpsUrl?: string
+  readonly ipfs?: boolean
+  readonly output?: string
 }
 
-interface PayloadContextOptions {
-  readonly issuer: string
-  readonly subject: string
-  readonly schema: string
-  readonly schemaFile?: string | undefined
-  readonly catalog?: string | undefined
-}
-
-interface PayloadBuildOptions extends PayloadContextOptions {
-  readonly httpsUrl?: string | undefined
-  readonly ipfs?: boolean | undefined
-  readonly output?: string | undefined
-}
-
-interface PayloadCheckOptions extends PayloadContextOptions {
+interface PayloadCheckOptions extends PayloadOptions {
   readonly uri: string
 }
 
-interface TxSubmitOptions extends CommonProfileOptions {
+interface SubmitOptions extends ProfileOptions {
   readonly server: string
-  readonly api?: string | undefined
-  readonly file?: string | undefined
-  readonly prepared?: string | undefined
-  readonly journal?: string | undefined
+  readonly file?: string
+  readonly journal?: string
   readonly timeout: string
   readonly pollInterval: string
-  readonly failHard?: boolean | undefined
-}
-
-interface TxPrepareOptions extends CommonProfileOptions {
-  readonly server: string
-  readonly api: string
-  readonly output: string
-}
-
-interface TxStatusOptions extends CommonProfileOptions {
-  readonly server: string
-  readonly hash: string
-  readonly lastLedgerSequence?: string | undefined
+  readonly failHard?: boolean
 }
 
 export function createProgram(dependencies: CliDependencies): Command {
   const { io } = dependencies
   const program = new Command()
     .name('xcs')
-    .description('XCS protocol command line interface')
+    .description('Build, inspect, and submit XCS operations')
     .version('0.1.0-alpha.1')
     .exitOverride()
     .showHelpAfterError()
@@ -169,232 +83,200 @@ export function createProgram(dependencies: CliDependencies): Command {
       writeErr: (value) => io.writeStderr(value),
     })
 
-  const schema = program.command('schema').description('Validate and register XCS schemas')
+  registerSchemaCommands(program, dependencies)
+  registerPayloadCommands(program, dependencies)
+  registerCredentialCommands(program, io)
+  registerVerificationCommand(program, dependencies)
+  registerTransactionCommands(program, dependencies)
+  return program
+}
+
+function registerSchemaCommands(program: Command, dependencies: CliDependencies): void {
+  const { io } = dependencies
+  const schema = program.command('schema').description('Validate and register schemas')
+
   schema
     .command('validate')
-    .description('Validate a schema and print its canonical representation')
-    .argument('<schema-file>', 'JSON schema file')
+    .argument('<schema-file>', 'schema JSON file')
     .action(async (schemaFile: string) => {
-      const input = await readJsonFile(io, schemaFile)
-      const validated = validateSchema(input)
-      const canonical = canonicalize(validated as unknown as JsonValue)
+      const parsed = parseSchema(await readJsonFile(io, schemaFile))
+      const bytes = encodeSchema(parsed)
       writeJson(io, {
         valid: true,
-        schema: validated,
-        canonical,
-        byteLength: new TextEncoder().encode(canonical).byteLength,
+        schema: parsed,
+        canonical: new TextDecoder().decode(bytes),
+        byteLength: bytes.length,
       })
     })
 
   schema
     .command('register')
-    .description('Build an unsigned schema registration Payment')
-    .argument('<schema-file>', 'JSON schema file')
-    .requiredOption('--profile <file>', 'XCS network profile JSON')
+    .argument('<schema-file>', 'schema JSON file')
+    .requiredOption('--profile <file>', 'network profile JSON')
     .requiredOption('--account <address>', 'publisher classic address')
-    .action(async (schemaFile: string, options: SchemaRegisterOptions) => {
+    .action(async (schemaFile: string, options: ProfileOptions & { account: string }) => {
       const [schemaInput, profile] = await Promise.all([
         readJsonFile(io, schemaFile),
         readProfile(io, options.profile),
       ])
-      const built = buildSchemaRegistrationPayment({
-        publisher: options.account,
-        profile,
-        schema: schemaInput,
-      })
-      writeJson(io, built)
+      writeJson(
+        io,
+        buildSchemaRegistrationPayment({
+          publisher: options.account,
+          profile,
+          schema: schemaInput,
+        }),
+      )
     })
 
   schema
     .command('uid')
-    .description('Derive a schema UID from an explicitly validated ledger context')
-    .argument('<schema-file>', 'the exact registered JSON schema file')
-    .requiredOption('--profile <file>', 'XCS network profile JSON')
+    .argument('<schema-file>', 'registered schema JSON file')
+    .requiredOption('--profile <file>', 'network profile JSON')
     .requiredOption('--publisher <address>', 'publisher classic address')
     .requiredOption('--ledger-hash <hash>', 'validated ledger hash')
     .requiredOption('--ledger-index <number>', 'validated ledger index')
-    .requiredOption('--transaction-index <number>', 'transaction index from validated metadata')
-    .requiredOption('--validated-ledger', 'assert that the supplied context is validated')
-    .action(async (schemaFile: string, options: SchemaUidOptions) => {
-      const [schemaInput, profile] = await Promise.all([
-        readJsonFile(io, schemaFile),
-        readProfile(io, options.profile),
-      ])
-      const ledgerIndex = parseNonNegativeInteger(options.ledgerIndex, 'ledger-index')
-      if (ledgerIndex < profile.activationLedgerIndex) {
-        throw new CliError(
-          'XCS_CLI_INVALID_LEDGER_CONTEXT',
-          'Registration ledger precedes this XCS network profile activation.',
-          2,
-          { activationLedgerIndex: profile.activationLedgerIndex, ledgerIndex },
-        )
-      }
-      const uid = deriveSchemaUid(schemaInput, {
-        validated: options.validatedLedger,
-        transactionResult: 'tesSUCCESS',
-        networkId: profile.networkId,
-        ledgerHash: options.ledgerHash,
-        ledgerIndex,
-        transactionIndex: parseNonNegativeInteger(options.transactionIndex, 'transaction-index'),
-        publisher: options.publisher,
-      })
-      writeJson(io, { schemaUid: uid })
-    })
+    .requiredOption('--transaction-index <number>', 'validated transaction index')
+    .requiredOption('--validated-ledger', 'confirm that the ledger context is validated')
+    .action(
+      async (
+        schemaFile: string,
+        options: ProfileOptions & {
+          publisher: string
+          ledgerHash: string
+          ledgerIndex: string
+          transactionIndex: string
+          validatedLedger: true
+        },
+      ) => {
+        const [schemaInput, profile] = await Promise.all([
+          readJsonFile(io, schemaFile),
+          readProfile(io, options.profile),
+        ])
+        const ledgerIndex = nonNegativeInteger(options.ledgerIndex, 'ledger-index')
+        if (ledgerIndex < profile.activationLedgerIndex) {
+          throw new CliError(
+            'XCS_CLI_INVALID_LEDGER_CONTEXT',
+            'Registration predates this network profile.',
+            2,
+          )
+        }
+        writeJson(io, {
+          schemaUid: deriveSchemaUid(schemaInput, {
+            validated: options.validatedLedger,
+            transactionResult: 'tesSUCCESS',
+            networkId: profile.networkId,
+            ledgerHash: options.ledgerHash,
+            ledgerIndex,
+            transactionIndex: nonNegativeInteger(options.transactionIndex, 'transaction-index'),
+            publisher: options.publisher,
+          }),
+        })
+      },
+    )
+}
 
-  schema
-    .command('catalog')
-    .description('Download and validate a complete inherited-schema catalog')
-    .requiredOption('--api <url>', 'XCS API base URL')
-    .requiredOption('--network <profile-id>', 'network profile ID')
-    .requiredOption('--schema <uid>', 'target 64-character XCS schema UID')
-    .requiredOption('--output <file>', 'write the validated catalog JSON')
-    .action(async (options: SchemaCatalogOptions) => {
-      const { catalog, resolved } = await requestSchemaCatalog(
-        dependencies,
-        options.api,
-        options.network,
-        options.schema,
-      )
-      await writeExactJsonFile(io, options.output, catalog)
-      writeJson(io, {
-        valid: true,
-        validationScope: 'internal-consistency',
-        xrplRegistrationVerified: false,
-        evidenceSource: 'configured-api',
-        output: options.output,
-        profileId: catalog.profile.profileId,
-        targetUid: catalog.targetUid,
-        checkpoint: catalog.checkpoint,
-        schemaCount: catalog.schemas.length,
-        lineage: resolved.resolvedTarget.lineage,
-      })
-    })
+function registerPayloadCommands(program: Command, dependencies: CliDependencies): void {
+  const { io } = dependencies
+  const payload = program.command('payload').description('Build and verify credential payloads')
 
-  const payload = program
-    .command('payload')
-    .description('Build and verify canonical XCS credential payloads')
   payload
     .command('build')
-    .description('Build canonical payload bytes and their integrity-bound URI')
-    .argument('<claims-file>', 'JSON object containing the public claims')
-    .option('--schema-file <file>', 'standalone registered XCS schema definition JSON')
-    .option('--catalog <file>', 'validated schema catalog for inherited schemas')
+    .argument('<claims-file>', 'claims JSON file')
+    .requiredOption('--schema-file <file>', 'standalone schema JSON file')
     .requiredOption('--issuer <address>', 'issuer classic address')
     .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .option('--https-url <url>', 'public HTTPS URL without an integrity fragment')
-    .option('--ipfs', 'derive a raw CIDv1 IPFS URI instead of an HTTPS URI', false)
-    .option('--output <file>', 'write exact canonical payload bytes without a trailing newline')
+    .requiredOption('--schema <uid>', 'schema UID')
+    .option('--https-url <url>', 'public HTTPS URL without a fragment')
+    .option('--ipfs', 'derive an IPFS URI', false)
+    .option('--output <file>', 'write the exact payload bytes')
     .action(async (claimsFile: string, options: PayloadBuildOptions) => {
-      assertOnePayloadLocation(options)
-      const [claims, schemaDefinition] = await Promise.all([
+      requireOnePayloadLocation(options)
+      const [claims, schema] = await Promise.all([
         readJsonFile(io, claimsFile),
-        readPayloadSchema(io, options),
+        readStandaloneSchema(io, options.schemaFile),
       ])
-      const credentialPayload = validateCredentialPayload(
-        {
-          xcsVersion: '0.1',
-          issuer: options.issuer,
-          subject: options.subject,
-          schema: options.schema.toLowerCase(),
-          claims,
-        },
-        {
-          issuer: options.issuer,
-          subject: options.subject,
-          schemaUid: options.schema.toLowerCase(),
-          schema: schemaDefinition,
-        },
-      )
-      const canonical = canonicalize(credentialPayload as JsonValue)
+      const encoded = encodeCredentialPayload(claims, credentialContext(options, schema))
       const uri =
         options.httpsUrl === undefined
-          ? createIpfsRawPayloadUri(canonical)
-          : createHttpsPayloadUri(options.httpsUrl, canonical)
-      if (options.output !== undefined) {
-        await writeExactPayloadFile(io, options.output, canonical)
-      }
+          ? createIpfsPayloadUri(encoded.bytes)
+          : createHttpsPayloadUri(options.httpsUrl, encoded.bytes)
+      if (options.output !== undefined) await writeFile(io, options.output, encoded.json)
       writeJson(io, {
-        payload: credentialPayload,
-        canonical,
-        byteLength: new TextEncoder().encode(canonical).byteLength,
-        sha256: computePayloadSha256Hex(canonical),
+        payload: encoded.payload,
+        canonical: encoded.json,
+        byteLength: encoded.bytes.length,
+        sha256: parsePayloadUri(uri).digestHex,
         uri,
-        ...(options.output !== undefined ? { output: options.output } : {}),
+        ...(options.output === undefined ? {} : { output: options.output }),
       })
     })
 
   payload
     .command('check')
-    .description('Validate canonical payload bytes and compare them with an integrity-bound URI')
-    .argument('<payload-file>', 'canonical XCS credential payload file')
-    .option('--schema-file <file>', 'standalone registered XCS schema definition JSON')
-    .option('--catalog <file>', 'validated schema catalog for inherited schemas')
+    .argument('<payload-file>', 'canonical payload JSON file')
+    .requiredOption('--schema-file <file>', 'standalone schema JSON file')
     .requiredOption('--issuer <address>', 'issuer classic address')
     .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .requiredOption('--uri <uri>', 'integrity-bound ipfs:// or https:// payload URI')
+    .requiredOption('--schema <uid>', 'schema UID')
+    .requiredOption('--uri <uri>', 'integrity-bound payload URI')
     .action(async (payloadFile: string, options: PayloadCheckOptions) => {
-      const [content, schemaDefinition] = await Promise.all([
-        readTextFile(io, payloadFile),
-        readPayloadSchema(io, options),
+      const [content, schema] = await Promise.all([
+        readFile(io, payloadFile),
+        readStandaloneSchema(io, options.schemaFile),
       ])
-      const parsed = parseCredentialPayload(content, {
-        issuer: options.issuer,
-        subject: options.subject,
-        schemaUid: options.schema.toLowerCase(),
-        schema: schemaDefinition,
-      })
       const integrity = verifyPayloadIntegrity(content, options.uri)
-      if (integrity.status !== 'valid') {
-        throw new CliError(
-          'XCS_CLI_PAYLOAD_INTEGRITY',
-          `Payload integrity check returned ${integrity.status}.`,
-          5,
-          { integrity },
-        )
+      if (!integrity.valid) {
+        throw new CliError('XCS_CLI_PAYLOAD_INTEGRITY', 'Payload digest does not match URI.', 5, {
+          integrity,
+        })
       }
       writeJson(io, {
         valid: true,
-        payload: parsed,
-        byteLength: new TextEncoder().encode(content).byteLength,
-        sha256: computePayloadSha256Hex(content),
+        payload: parseCredentialPayload(content, credentialContext(options, schema)),
+        byteLength: new TextEncoder().encode(content).length,
+        sha256: integrity.actualDigestHex,
         uri: options.uri,
-        integrity,
       })
     })
+}
 
-  const credential = program.command('credential').description('Manage native XRPL Credentials')
+function registerCredentialCommands(program: Command, io: CliIo): void {
+  const credential = program.command('credential').description('Build XRPL Credential transactions')
+
   credential
     .command('issue')
-    .description('Build an unsigned CredentialCreate transaction')
-    .requiredOption('--issuer <address>', 'issuer classic address')
-    .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .requiredOption('--uri <uri>', 'integrity-bound ipfs:// or https:// payload URI')
-    .option(
-      '--expiration <iso8601>',
-      'optional ISO-8601 expiration; omit for a permanent credential',
+    .requiredOption('--issuer <address>')
+    .requiredOption('--subject <address>')
+    .requiredOption('--schema <uid>')
+    .requiredOption('--uri <uri>')
+    .option('--expiration <iso8601>')
+    .action(
+      (options: {
+        issuer: string
+        subject: string
+        schema: string
+        uri: string
+        expiration?: string
+      }) => {
+        writeJson(io, {
+          transaction: buildCredentialCreate({
+            issuer: options.issuer,
+            subject: options.subject,
+            schemaUid: options.schema,
+            uri: options.uri,
+            ...(options.expiration === undefined ? {} : { expiration: options.expiration }),
+          }),
+        })
+      },
     )
-    .action((options: CredentialIssueOptions) => {
-      writeJson(io, {
-        transaction: buildCredentialCreate({
-          issuer: options.issuer,
-          subject: options.subject,
-          schemaUid: options.schema,
-          uri: options.uri,
-          ...(options.expiration === undefined ? {} : { expiration: options.expiration }),
-        }),
-      })
-    })
 
   credential
     .command('accept')
-    .description('Build an unsigned CredentialAccept transaction')
-    .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--issuer <address>', 'issuer classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .action((options: CredentialAcceptOptions) => {
+    .requiredOption('--subject <address>')
+    .requiredOption('--issuer <address>')
+    .requiredOption('--schema <uid>')
+    .action((options: { subject: string; issuer: string; schema: string }) => {
       writeJson(io, {
         transaction: buildCredentialAccept({
           subject: options.subject,
@@ -406,12 +288,11 @@ export function createProgram(dependencies: CliDependencies): Command {
 
   credential
     .command('delete')
-    .description('Build an unsigned CredentialDelete transaction')
-    .requiredOption('--account <address>', 'submitting classic address')
-    .requiredOption('--issuer <address>', 'issuer classic address')
-    .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .action((options: CredentialDeleteOptions) => {
+    .requiredOption('--account <address>')
+    .requiredOption('--issuer <address>')
+    .requiredOption('--subject <address>')
+    .requiredOption('--schema <uid>')
+    .action((options: { account: string; issuer: string; subject: string; schema: string }) => {
       writeJson(io, {
         transaction: buildCredentialDelete({
           account: options.account,
@@ -421,211 +302,101 @@ export function createProgram(dependencies: CliDependencies): Command {
         }),
       })
     })
+}
 
-  credential
+function registerVerificationCommand(program: Command, dependencies: CliDependencies): void {
+  program
     .command('verify')
-    .description('Request an exact credential verification from an XCS API')
-    .requiredOption('--api <url>', 'XCS API base URL')
-    .requiredOption('--network <profile-id>', 'network profile ID')
-    .requiredOption('--issuer <address>', 'issuer classic address')
-    .requiredOption('--subject <address>', 'subject classic address')
-    .requiredOption('--schema <uid>', '64-character XCS schema UID')
-    .option('--payload <file>', 'optional local credential payload JSON')
-    .option('--resolve-payload', 'allow the API to resolve the on-chain URI', false)
-    .action(async (options: CredentialVerifyOptions) => {
-      if (options.payload !== undefined && options.resolvePayload === true) {
-        throw new CliError(
-          'XCS_CLI_VERIFY_INPUT',
-          '--payload and --resolve-payload are mutually exclusive.',
-          2,
-        )
-      }
-      const payload =
-        options.payload === undefined ? undefined : await readJsonFile(io, options.payload)
-      const response = await requestVerification(dependencies, options, payload)
-      writeJson(io, response)
-      if (!isAcceptableVerification(response)) {
-        throw new CliError(
-          'XCS_CLI_VERIFICATION_NOT_VALID',
-          'Credential verification did not produce a fully valid result.',
-          5,
-          { report: response },
-        )
-      }
-    })
-
-  const tx = program.command('tx').description('Submit and reconcile signed XRPL transactions')
-  tx.command('prepare')
-    .description('Autofill and bind an unsigned XCS transaction for offline wallet review')
-    .argument('<transaction-file>', 'unsigned transaction JSON or builder output')
-    .requiredOption('--server <url>', 'history-capable XRPL WebSocket endpoint')
-    .requiredOption('--profile <file>', 'exact XCS network profile JSON')
-    .requiredOption('--api <url>', 'authoritative XCS API base URL')
-    .requiredOption('--output <file>', 'write the prepared transaction envelope')
-    .action(async (transactionFile: string, options: TxPrepareOptions) => {
-      const serverUrl = websocketEndpoint(options.server)
-      apiEndpoint(options.api, '')
-      const [{ profile, sha256 }, transactionInput] = await Promise.all([
-        readProfileWithDigest(io, options.profile),
-        readJsonFile(io, transactionFile),
-      ])
-      const transaction = extractUnsignedTransaction(transactionInput)
-      const semantics = assertXcsTransactionSemantics(transaction, profile)
-      const catalog =
-        'schemaUid' in semantics
-          ? (
-              await requestSchemaCatalog(
-                dependencies,
-                options.api,
-                profile.profileId,
-                semantics.schemaUid,
-              )
-            ).catalog
-          : undefined
-      const readiness = await requestReadiness(dependencies, options.api, profile.profileId)
-      if (readiness.profileId !== profile.profileId) {
-        throw new CliError(
-          'XCS_CLI_API_RESPONSE',
-          'Authoritative readiness belongs to a different network profile.',
-          3,
-        )
-      }
-      if (catalog !== undefined) {
-        if (
-          canonicalize(catalog.profile as unknown as JsonValue) !==
-          canonicalize(profile as unknown as JsonValue)
-        ) {
+    .requiredOption('--api <url>')
+    .requiredOption('--network <profile-id>')
+    .requiredOption('--issuer <address>')
+    .requiredOption('--subject <address>')
+    .requiredOption('--schema <uid>')
+    .option('--payload <file>')
+    .option('--resolve-payload', 'allow the API to retrieve the payload', false)
+    .action(
+      async (options: {
+        api: string
+        network: string
+        issuer: string
+        subject: string
+        schema: string
+        payload?: string
+        resolvePayload?: boolean
+      }) => {
+        if (options.payload !== undefined && options.resolvePayload === true) {
           throw new CliError(
-            'XCS_CLI_API_RESPONSE',
-            'Schema catalog is bound to different network profile fields.',
-            3,
-          )
-        }
-        if (
-          catalog.checkpoint.ledgerIndex > readiness.checkpoint.ledgerIndex ||
-          (catalog.checkpoint.ledgerIndex === readiness.checkpoint.ledgerIndex &&
-            catalog.checkpoint.ledgerHash !== readiness.checkpoint.ledgerHash)
-        ) {
-          throw new CliError(
-            'XCS_CLI_API_RESPONSE',
-            'Authoritative readiness does not cover the schema catalog checkpoint.',
-            3,
-          )
-        }
-      }
-      const contextBoundTransaction = bindPreparedTransactionContext({
-        transaction,
-        profile,
-        profileSha256: sha256,
-        checkpoint: readiness.checkpoint,
-      })
-
-      const client = dependencies.createClient(serverUrl)
-      try {
-        await verifyNetworkProfileActivation(client, profile)
-        const prepared = await autofillXcsTransaction(client, contextBoundTransaction)
-        const envelope = createPreparedTransactionEnvelope({
-          profile,
-          profileSha256: sha256,
-          checkpoint: readiness.checkpoint,
-          transaction: prepared.transaction,
-        })
-        await writeExactJsonFile(io, options.output, envelope)
-        writeJson(io, { preparedTransaction: envelope, output: options.output })
-      } finally {
-        if (client.isConnected()) await client.disconnect()
-      }
-    })
-
-  tx.command('submit')
-    .description('Submit a signed blob read from stdin or an explicit file')
-    .requiredOption('--server <url>', 'XRPL WebSocket endpoint')
-    .requiredOption('--profile <file>', 'XCS network profile JSON')
-    .option('--prepared <file>', 'prepared transaction envelope reviewed before signing')
-    .option('--api <url>', 'authoritative XCS API required with --prepared')
-    .option('--file <path>', 'signed transaction blob file; otherwise read stdin')
-    .option('--journal <path>', 'append a sanitized JSONL operation journal')
-    .option('--timeout <milliseconds>', 'maximum reconciliation time', '60000')
-    .option('--poll-interval <milliseconds>', 'reconciliation polling interval', '1000')
-    .option('--fail-hard', 'ask rippled not to relay a locally failed transaction', false)
-    .action(async (options: TxSubmitOptions) => {
-      const serverUrl = websocketEndpoint(options.server)
-      const timeoutMs = parsePositiveInteger(options.timeout, 'timeout')
-      const pollIntervalMs = parsePositiveInteger(options.pollInterval, 'poll-interval')
-      if ((options.prepared === undefined) !== (options.api === undefined)) {
-        throw new CliError(
-          'XCS_CLI_PREPARED_INPUT',
-          '--prepared and --api must be provided together.',
-          2,
-        )
-      }
-      if (options.api !== undefined) apiEndpoint(options.api, '')
-      const [{ profile, sha256 }, txBlob, envelopeInput] = await Promise.all([
-        readProfileWithDigest(io, options.profile),
-        readSignedBlob(io, options.file),
-        options.prepared === undefined ? undefined : readJsonFile(io, options.prepared),
-      ])
-      let envelope: PreparedXcsTransactionEnvelope | undefined
-      let preparedLastLedgerSequence: number | undefined
-      if (envelopeInput !== undefined) {
-        if (options.api === undefined) {
-          throw new CliError(
-            'XCS_CLI_PREPARED_INPUT',
-            '--api is required with a prepared transaction.',
+            'XCS_CLI_VERIFY_INPUT',
+            'Choose local or remote payload resolution.',
             2,
           )
         }
-        envelope = assertPreparedEnvelopeMatchesProfile(envelopeInput, profile, sha256)
-        preparedLastLedgerSequence = assertSignedBlobMatchesPrepared(
-          envelope,
-          txBlob,
-        ).lastLedgerSequence
-      }
-      const client = dependencies.createClient(serverUrl)
-      const memoryJournal = new MemoryOperationJournal()
+        const localPayload =
+          options.payload === undefined
+            ? undefined
+            : await readJsonFile(dependencies.io, options.payload)
+        const report = await requestJson(dependencies, options.api, 'v1/verify', {
+          network: options.network,
+          issuer: options.issuer,
+          subject: options.subject,
+          schemaUid: options.schema,
+          ...(localPayload === undefined ? {} : { payload: localPayload }),
+          ...(options.resolvePayload === true ? { resolvePayload: true } : {}),
+        })
+        writeJson(dependencies.io, report)
+        if (!isSuccessfulVerification(report)) {
+          throw new CliError(
+            'XCS_CLI_VERIFICATION_NOT_VALID',
+            'Credential is not fully valid.',
+            5,
+            { report: asDetails(report) },
+          )
+        }
+      },
+    )
+}
+
+function registerTransactionCommands(program: Command, dependencies: CliDependencies): void {
+  const { io } = dependencies
+  const transaction = program.command('tx').description('Submit and reconcile transactions')
+
+  transaction
+    .command('submit')
+    .requiredOption('--server <url>')
+    .requiredOption('--profile <file>')
+    .option('--file <path>', 'signed blob file; otherwise read stdin')
+    .option('--journal <path>', 'append a sanitized JSONL journal')
+    .option('--timeout <milliseconds>', 'maximum reconciliation time', '60000')
+    .option('--poll-interval <milliseconds>', 'polling interval', '1000')
+    .option('--fail-hard', 'ask rippled not to relay a locally failed transaction', false)
+    .action(async (options: SubmitOptions) => {
+      const [profile, txBlob] = await Promise.all([
+        readProfile(io, options.profile),
+        readSignedBlob(io, options.file),
+      ])
+      const client = dependencies.createClient(websocketEndpoint(options.server))
+      const memory = new MemoryOperationJournal()
       const journal: OperationJournal =
         options.journal === undefined
-          ? memoryJournal
-          : new CompositeOperationJournal(
-              memoryJournal,
-              new JsonLinesOperationJournal(options.journal),
-            )
+          ? memory
+          : new CompositeOperationJournal(memory, new JsonLinesOperationJournal(options.journal))
       try {
         await connectAndValidateNetwork(client, profile)
         const result = await submitSignedTransaction(client, txBlob, {
           journal,
           failHard: options.failHard,
-          timeoutMs,
-          pollIntervalMs,
-          beforeSubmit:
-            envelope === undefined ||
-            options.api === undefined ||
-            preparedLastLedgerSequence === undefined
-              ? undefined
-              : async () => {
-                  const readiness = await requestReadiness(
-                    dependencies,
-                    options.api as string,
-                    profile.profileId,
-                  )
-                  if (readiness.profileId !== profile.profileId) {
-                    throw new CliError(
-                      'XCS_CLI_API_RESPONSE',
-                      'Authoritative readiness belongs to a different network profile.',
-                      3,
-                    )
-                  }
-                  assertReadinessAdvancesPreparedCheckpoint(envelope, readiness)
-                  await assertTransactionNotExpired(client, preparedLastLedgerSequence)
-                },
+          timeoutMs: positiveInteger(options.timeout, 'timeout'),
+          pollIntervalMs: positiveInteger(options.pollInterval, 'poll-interval'),
         })
-        writeJson(io, { result, journal: memoryJournal.entries })
+        writeJson(io, { result, journal: memory.entries })
         if (result.status !== 'validated' || result.transactionResult !== 'tesSUCCESS') {
           throw new CliError(
             'XCS_CLI_TRANSACTION_NOT_VALIDATED',
-            `Transaction ended with status ${result.status} and result ${result.transactionResult ?? 'unknown'}.`,
+            'Transaction was not validated.',
             4,
-            { result },
+            {
+              result,
+            },
           )
         }
       } finally {
@@ -633,554 +404,243 @@ export function createProgram(dependencies: CliDependencies): Command {
       }
     })
 
-  tx.command('status')
-    .description('Look up a transaction by hash without submitting it')
-    .requiredOption('--server <url>', 'XRPL WebSocket endpoint')
-    .requiredOption('--profile <file>', 'XCS network profile JSON')
-    .requiredOption('--hash <hash>', 'XRPL transaction hash')
-    .option('--last-ledger-sequence <number>', 'detect an expired unvalidated transaction')
-    .action(async (options: TxStatusOptions) => {
-      const serverUrl = websocketEndpoint(options.server)
-      const lastLedgerSequence =
-        options.lastLedgerSequence === undefined
-          ? undefined
-          : parsePositiveInteger(options.lastLedgerSequence, 'last-ledger-sequence')
-      const profile = await readProfile(io, options.profile)
-      const client = dependencies.createClient(serverUrl)
-      try {
-        await connectAndValidateNetwork(client, profile)
-        const status = await getTransactionStatus(client, options.hash, lastLedgerSequence)
-        writeJson(io, status)
-      } finally {
-        if (client.isConnected()) await client.disconnect()
-      }
-    })
-
-  return program
+  transaction
+    .command('status')
+    .requiredOption('--server <url>')
+    .requiredOption('--profile <file>')
+    .requiredOption('--hash <hash>')
+    .option('--last-ledger-sequence <number>')
+    .action(
+      async (
+        options: ProfileOptions & {
+          server: string
+          hash: string
+          lastLedgerSequence?: string
+        },
+      ) => {
+        const profile = await readProfile(io, options.profile)
+        const client = dependencies.createClient(websocketEndpoint(options.server))
+        try {
+          await connectAndValidateNetwork(client, profile)
+          writeJson(
+            io,
+            await getTransactionStatus(
+              client,
+              options.hash,
+              options.lastLedgerSequence === undefined
+                ? undefined
+                : positiveInteger(options.lastLedgerSequence, 'last-ledger-sequence'),
+            ),
+          )
+        } finally {
+          if (client.isConnected()) await client.disconnect()
+        }
+      },
+    )
 }
 
 async function readProfile(io: CliIo, path: string): Promise<NetworkProfile> {
-  return (await readProfileWithDigest(io, path)).profile
+  return parseNetworkProfile(await readJsonFile(io, path))
 }
 
-async function readProfileWithDigest(
-  io: CliIo,
-  path: string,
-): Promise<{ readonly profile: NetworkProfile; readonly sha256: string }> {
-  const contents = await readTextFile(io, path)
-  return {
-    profile: parseNetworkProfile(parseJsonStrict(contents)),
-    sha256: sha256Hex(new TextEncoder().encode(contents)),
-  }
-}
-
-function extractUnsignedTransaction(input: JsonValue): SubmittableTransaction {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    throw new CliError(
-      'XCS_CLI_PREPARED_INPUT',
-      'Transaction input must be a JSON object or builder output containing transaction.',
-      2,
-    )
-  }
-  const wrapper = input as Record<string, JsonValue>
-  const candidate = Object.hasOwn(wrapper, 'transaction') ? wrapper.transaction : wrapper
-  if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
-    throw new CliError(
-      'XCS_CLI_PREPARED_INPUT',
-      'Transaction input does not contain a transaction object.',
-      2,
-    )
-  }
-  const transaction = candidate as Record<string, JsonValue>
-  if (
-    typeof transaction.TransactionType !== 'string' ||
-    !new Set(['Payment', 'CredentialCreate', 'CredentialAccept', 'CredentialDelete']).has(
-      transaction.TransactionType,
-    )
-  ) {
-    throw new CliError(
-      'XCS_CLI_PREPARED_INPUT',
-      'Transaction input is not a supported XCS transaction type.',
-      2,
-    )
-  }
-  if (
-    Object.hasOwn(transaction, 'TxnSignature') ||
-    Object.hasOwn(transaction, 'Signers') ||
-    Object.hasOwn(transaction, 'SigningPubKey')
-  ) {
-    throw new CliError(
-      'XCS_CLI_PREPARED_INPUT',
-      'Transaction preparation accepts unsigned transactions only.',
-      2,
-    )
-  }
-  return transaction as unknown as SubmittableTransaction
-}
-
-async function readSignedBlob(io: CliIo, path?: string): Promise<string> {
-  if (path === undefined && io.stdinIsTerminal) {
-    throw new CliError(
-      'XCS_CLI_SIGNED_BLOB_REQUIRED',
-      'Pipe a signed blob on stdin or provide --file. Inline blob arguments are intentionally unsupported.',
-      2,
-    )
-  }
-  let input: string
-  try {
-    input = path === undefined ? await io.readStdin() : await io.readTextFile(path)
-  } catch (error) {
-    throw new CliError('XCS_CLI_FILE_READ', 'Cannot read the signed blob input.', 2, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
-  }
-  const trimmed = input.trim()
-  if (trimmed.length === 0) {
-    throw new CliError('XCS_CLI_SIGNED_BLOB_REQUIRED', 'Signed blob input is empty.', 2)
-  }
-  return trimmed
-}
-
-async function readTextFile(io: CliIo, path: string): Promise<string> {
-  try {
-    return await io.readTextFile(path)
-  } catch (error) {
-    throw new CliError('XCS_CLI_FILE_READ', `Cannot read ${path}.`, 2, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
-async function writeExactPayloadFile(io: CliIo, path: string, content: string): Promise<void> {
-  try {
-    await io.writeTextFile(path, content)
-  } catch (error) {
-    throw new CliError('XCS_CLI_FILE_WRITE', `Cannot write ${path}.`, 2, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
-async function writeExactJsonFile(io: CliIo, path: string, value: unknown): Promise<void> {
-  try {
-    await io.writeTextFile(path, `${JSON.stringify(value, null, 2)}\n`)
-  } catch (error) {
-    throw new CliError('XCS_CLI_FILE_WRITE', `Cannot write ${path}.`, 2, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
-async function readPayloadSchema(
-  io: CliIo,
-  options: PayloadContextOptions,
-): Promise<SchemaDefinition | ResolvedSchema> {
-  if ((options.schemaFile === undefined) === (options.catalog === undefined)) {
-    throw new CliError(
-      'XCS_CLI_SCHEMA_INPUT',
-      'Choose exactly one schema source: --schema-file or --catalog.',
-      2,
-    )
-  }
-  if (options.catalog !== undefined) {
-    const bundle = parseSchemaCatalogBundle(await readTextFile(io, options.catalog))
-    if (bundle.targetUid !== options.schema.toLowerCase()) {
-      throw new CliError(
-        'XCS_CLI_SCHEMA_CATALOG_REQUIRED',
-        'Schema catalog target does not match --schema.',
-        2,
-        { targetUid: bundle.targetUid, schemaUid: options.schema.toLowerCase() },
-      )
-    }
-    return resolveSchemaCatalogBundle(bundle).resolvedTarget
-  }
-  if (options.schemaFile === undefined) {
-    throw new CliError('XCS_CLI_SCHEMA_INPUT', '--schema-file is required.', 2)
-  }
-  return validateStandalonePayloadSchema(await readJsonFile(io, options.schemaFile))
-}
-
-function validateStandalonePayloadSchema(input: JsonValue) {
-  const schema = validateSchema(input)
+async function readStandaloneSchema(io: CliIo, path: string): Promise<SchemaDefinition> {
+  const schema = parseSchema(await readJsonFile(io, path))
   if (schema.extends !== undefined) {
     throw new CliError(
-      'XCS_CLI_SCHEMA_CATALOG_REQUIRED',
-      'Payload commands require a fully standalone schema; inherited schemas need a resolved catalog.',
+      'XCS_CLI_SCHEMA_INPUT',
+      'Payload commands require resolved fields for inherited schemas.',
       2,
-      { extends: schema.extends },
     )
   }
   return schema
 }
 
-function assertOnePayloadLocation(options: PayloadBuildOptions): void {
-  if ((options.httpsUrl === undefined) === (options.ipfs !== true)) {
-    throw new CliError(
-      'XCS_CLI_PAYLOAD_LOCATION',
-      'Choose exactly one payload location: --https-url or --ipfs.',
-      2,
-    )
+function credentialContext(options: PayloadOptions, schema: SchemaDefinition) {
+  return {
+    issuer: options.issuer,
+    subject: options.subject,
+    schemaUid: options.schema.toLowerCase(),
+    fields: schema.fields,
   }
 }
 
-async function requestVerification(
-  dependencies: CliDependencies,
-  options: CredentialVerifyOptions,
-  payload: JsonValue | undefined,
-): Promise<ReturnType<typeof parseVerificationReport>> {
-  const endpoint = apiEndpoint(options.api, 'v1/verify')
-  const controller = new AbortController()
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, API_REQUEST_TIMEOUT_MS)
-  let response: Response
-  let text: string
+async function readFile(io: CliIo, path: string): Promise<string> {
   try {
-    response = await dependencies.fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      redirect: 'error',
-      signal: controller.signal,
-      body: JSON.stringify({
-        network: options.network,
-        issuer: options.issuer,
-        subject: options.subject,
-        schemaUid: options.schema,
-        ...(payload === undefined ? {} : { payload }),
-        ...(options.resolvePayload === true ? { resolvePayload: true } : {}),
-      }),
-    })
-    text = await readBoundedApiResponse(response)
-  } catch (error) {
-    if (error instanceof CliError) throw error
-    throw new CliError(
-      'XCS_CLI_NETWORK',
-      timedOut
-        ? 'The XCS verification API request timed out.'
-        : 'Cannot reach the XCS verification API.',
-      3,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
-    )
-  } finally {
-    clearTimeout(timeout)
-  }
-
-  let body: unknown
-  try {
-    body = parseJsonStrict(text)
-  } catch {
-    throw new CliError(
-      'XCS_CLI_API_RESPONSE',
-      `XCS API returned non-JSON content with HTTP ${response.status}.`,
-      3,
-    )
-  }
-  if (!response.ok) {
-    const apiErrorCode =
-      typeof body === 'object' &&
-      body !== null &&
-      typeof (body as { error?: unknown }).error === 'string'
-        ? (body as { error: string }).error
-        : undefined
-    const indexerUnavailableCodes = new Set([
-      'INDEXER_STALE',
-      'INDEXER_NOT_INITIALIZED',
-      'INDEXER_STATUS_UNAVAILABLE',
-      'INDEXER_NOT_READY',
-      'INDEXER_HALTED',
-      'INDEXER_LEASE_EXPIRED',
-      'INDEXER_EVIDENCE_INVALID',
-    ])
-    if (response.status === 503 && apiErrorCode && indexerUnavailableCodes.has(apiErrorCode)) {
-      throw new CliError(
-        'XCS_CLI_INDEXER_UNAVAILABLE',
-        'The XCS API cannot provide a fresh indexed proof.',
-        3,
-        { response: body },
-      )
-    }
-    throw new CliError('XCS_CLI_API_RESPONSE', `XCS API returned HTTP ${response.status}.`, 3, {
-      response: body,
+    return await io.readTextFile(path)
+  } catch (cause) {
+    throw new CliError('XCS_CLI_FILE_READ', `Cannot read ${path}.`, 2, {
+      cause: cause instanceof Error ? cause.message : String(cause),
     })
   }
+}
+
+async function writeFile(io: CliIo, path: string, value: string): Promise<void> {
   try {
-    return parseVerificationReport(body)
-  } catch (error) {
-    throw new CliError(
-      'XCS_CLI_API_RESPONSE',
-      'XCS API returned an invalid verification report.',
-      3,
-      { cause: error instanceof Error ? error.message : String(error) },
-    )
+    await io.writeTextFile(path, value)
+  } catch (cause) {
+    throw new CliError('XCS_CLI_FILE_WRITE', `Cannot write ${path}.`, 2, {
+      cause: cause instanceof Error ? cause.message : String(cause),
+    })
   }
 }
 
-async function requestReadiness(dependencies: CliDependencies, api: string, profileId: string) {
-  const body = await requestApiJson(
-    dependencies,
-    `v1/networks/${encodeURIComponent(profileId)}/readiness`,
-    api,
-  )
-  try {
-    return parseAuthoritativeReadiness(body)
-  } catch (error) {
-    throw new CliError(
-      'XCS_CLI_API_RESPONSE',
-      'XCS API returned an invalid authoritative readiness response.',
-      3,
-      { cause: error instanceof Error ? error.message : String(error) },
-    )
+async function readSignedBlob(io: CliIo, path?: string): Promise<string> {
+  if (path === undefined && io.stdinIsTerminal) {
+    throw new CliError('XCS_CLI_SIGNED_BLOB_REQUIRED', 'Provide --file or pipe a signed blob.', 2)
   }
+  const value = path === undefined ? await io.readStdin() : await readFile(io, path)
+  const trimmed = value.trim()
+  if (trimmed === '') {
+    throw new CliError('XCS_CLI_SIGNED_BLOB_REQUIRED', 'Signed blob input is empty.', 2)
+  }
+  return trimmed
 }
 
-async function requestSchemaCatalog(
+async function requestJson(
   dependencies: CliDependencies,
   api: string,
-  profileId: string,
-  schemaUid: string,
-): Promise<{
-  readonly catalog: ReturnType<typeof parseSchemaCatalogBundle>
-  readonly resolved: ReturnType<typeof resolveSchemaCatalogBundle>
-}> {
-  const normalizedUid = schemaUid.toLowerCase()
-  const body = await requestApiJson(
-    dependencies,
-    `v1/networks/${encodeURIComponent(profileId)}/schemas/${encodeURIComponent(
-      normalizedUid,
-    )}/catalog`,
-    api,
-    MAX_SCHEMA_CATALOG_RESPONSE_BYTES,
-  )
-  let catalog: ReturnType<typeof parseSchemaCatalogBundle>
-  let resolved: ReturnType<typeof resolveSchemaCatalogBundle>
-  try {
-    catalog = parseSchemaCatalogBundle(JSON.stringify(body))
-    resolved = resolveSchemaCatalogBundle(catalog)
-  } catch (error) {
-    throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API returned an invalid schema catalog.', 3, {
-      cause: error instanceof Error ? error.message : String(error),
-    })
-  }
-  if (catalog.profile.profileId !== profileId || catalog.targetUid !== normalizedUid) {
-    throw new CliError(
-      'XCS_CLI_API_RESPONSE',
-      'XCS API schema catalog does not match the requested network and schema.',
-      3,
-    )
-  }
-  return { catalog, resolved }
-}
-
-async function requestApiJson(
-  dependencies: CliDependencies,
   path: string,
-  api: string,
-  maxResponseBytes = MAX_API_RESPONSE_BYTES,
+  body: JsonValue,
 ): Promise<unknown> {
   const endpoint = apiEndpoint(api, path)
   const controller = new AbortController()
-  let timedOut = false
-  const timeout = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, API_REQUEST_TIMEOUT_MS)
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
   let response: Response
-  let text: string
+  let bytes: Uint8Array
   try {
     response = await dependencies.fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        'cache-control': 'no-cache',
-        pragma: 'no-cache',
-      },
-      cache: 'no-store',
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      body: JSON.stringify(body),
       redirect: 'error',
       signal: controller.signal,
     })
-    text = await readBoundedApiResponse(response, maxResponseBytes)
-  } catch (error) {
-    if (error instanceof CliError) throw error
-    throw new CliError(
-      'XCS_CLI_NETWORK',
-      timedOut ? 'The XCS API request timed out.' : 'Cannot reach the XCS API.',
-      3,
-      { cause: error instanceof Error ? error.message : String(error) },
-    )
+    bytes = await readBoundedResponse(response)
+  } catch (cause) {
+    if (cause instanceof CliError) throw cause
+    throw new CliError('XCS_CLI_NETWORK', 'Cannot reach the XCS API.', 3, {
+      cause: cause instanceof Error ? cause.message : String(cause),
+    })
   } finally {
     clearTimeout(timeout)
   }
 
-  let body: unknown
+  let parsed: unknown
   try {
-    body = parseJsonStrict(text)
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
   } catch {
-    throw new CliError(
-      'XCS_CLI_API_RESPONSE',
-      `XCS API returned non-JSON content with HTTP ${response.status}.`,
-      3,
-    )
+    throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API returned invalid JSON.', 3)
   }
   if (!response.ok) {
     throw new CliError('XCS_CLI_API_RESPONSE', `XCS API returned HTTP ${response.status}.`, 3, {
-      response: body,
+      response: asDetails(parsed),
     })
   }
-  return body
+  return parsed
 }
 
-function apiEndpoint(api: string, path: string): URL {
-  let endpoint: URL
-  try {
-    endpoint = new URL(path, ensureTrailingSlash(api))
-  } catch {
-    throw new CliError('XCS_CLI_API_INPUT', '--api must be an absolute HTTP(S) URL.', 2)
+async function readBoundedResponse(response: Response): Promise<Uint8Array> {
+  const contentLength = Number(response.headers.get('content-length') ?? 0)
+  if (Number.isFinite(contentLength) && contentLength > MAX_API_RESPONSE_BYTES) {
+    throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response exceeds 1 MiB.', 3)
   }
-  const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
-  if (
-    endpoint.protocol !== 'https:' &&
-    !(endpoint.protocol === 'http:' && loopbackHosts.has(endpoint.hostname))
-  ) {
+  if (response.body === null) return new Uint8Array()
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    length += value.length
+    if (length > MAX_API_RESPONSE_BYTES) {
+      await reader.cancel()
+      throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response exceeds 1 MiB.', 3)
+    }
+    chunks.push(value)
+  }
+
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+  return bytes
+}
+
+function isSuccessfulVerification(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const report = value as Record<string, unknown>
+  return report.onChain === 'active' && report.schema === 'valid' && report.payload === 'valid'
+}
+
+function asDetails(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : { value }
+}
+
+function requireOnePayloadLocation(options: PayloadBuildOptions): void {
+  if ((options.httpsUrl === undefined) === (options.ipfs !== true)) {
     throw new CliError(
-      'XCS_CLI_API_INPUT',
-      '--api must use HTTPS; HTTP is accepted only for a loopback self-hosted service.',
+      'XCS_CLI_PAYLOAD_LOCATION',
+      'Choose exactly one of --https-url or --ipfs.',
       2,
     )
   }
+}
+
+function positiveInteger(value: string, name: string): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new CliError('XCS_CLI_INVALID_NUMBER', `${name} must be a positive integer.`, 2)
+  }
+  return parsed
+}
+
+function nonNegativeInteger(value: string, name: string): number {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new CliError('XCS_CLI_INVALID_NUMBER', `${name} must be a non-negative integer.`, 2)
+  }
+  return parsed
+}
+
+function apiEndpoint(api: string, path: string): URL {
+  const endpoint = parseUrl(path, api.endsWith('/') ? api : `${api}/`, '--api')
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)
+  if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
+    throw new CliError('XCS_CLI_API_INPUT', '--api must use HTTPS or loopback HTTP.', 2)
+  }
   if (endpoint.username !== '' || endpoint.password !== '') {
-    throw new CliError('XCS_CLI_API_INPUT', '--api must not contain embedded credentials.', 2)
+    throw new CliError('XCS_CLI_API_INPUT', '--api cannot contain credentials.', 2)
   }
   return endpoint
 }
 
-async function readBoundedApiResponse(
-  response: Response,
-  maxBytes = MAX_API_RESPONSE_BYTES,
-): Promise<string> {
-  const limitLabel = `${maxBytes / (1024 * 1024)} MiB`
-  const contentLength = response.headers.get('content-length')
-  if (contentLength !== null) {
-    if (!/^[0-9]+$/u.test(contentLength)) {
-      throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API returned an invalid Content-Length.', 3)
-    }
-    if (Number(contentLength) > maxBytes) {
-      throw new CliError(
-        'XCS_CLI_API_RESPONSE',
-        `XCS API response exceeds the ${limitLabel} limit.`,
-        3,
-      )
-    }
-  }
-
-  if (response.body === null) {
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > maxBytes) {
-      throw new CliError(
-        'XCS_CLI_API_RESPONSE',
-        `XCS API response exceeds the ${limitLabel} limit.`,
-        3,
-      )
-    }
-    return decodeApiResponse(bytes)
-  }
-
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let byteLength = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) break
-      byteLength += next.value.byteLength
-      if (byteLength > maxBytes) {
-        await reader.cancel('XCS_CLI_API_RESPONSE_TOO_LARGE').catch(() => undefined)
-        throw new CliError(
-          'XCS_CLI_API_RESPONSE',
-          `XCS API response exceeds the ${limitLabel} limit.`,
-          3,
-        )
-      }
-      chunks.push(next.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-
-  const bytes = new Uint8Array(byteLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return decodeApiResponse(bytes)
-}
-
-function decodeApiResponse(bytes: Uint8Array): string {
-  try {
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-  } catch {
-    throw new CliError('XCS_CLI_API_RESPONSE', 'XCS API response is not valid UTF-8.', 3)
-  }
-}
-
-function isAcceptableVerification(report: ReturnType<typeof parseVerificationReport>): boolean {
-  return report.onChain === 'active' && report.schema === 'valid' && report.payload === 'valid'
-}
-
-function parsePositiveInteger(value: string, field: string): number {
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new CliError('XCS_CLI_INVALID_NUMBER', `${field} must be a positive safe integer.`, 2)
-  }
-  return parsed
-}
-
-function parseNonNegativeInteger(value: string, field: string): number {
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new CliError('XCS_CLI_INVALID_NUMBER', `${field} must be a non-negative safe integer.`, 2)
-  }
-  return parsed
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value : `${value}/`
-}
-
 function websocketEndpoint(input: string): string {
-  if (input.trim() !== input) {
-    throw new CliError(
-      'XCS_CLI_SERVER_INPUT',
-      '--server must not contain surrounding whitespace.',
-      2,
-    )
-  }
-  let endpoint: URL
-  try {
-    endpoint = new URL(input)
-  } catch {
-    throw new CliError('XCS_CLI_SERVER_INPUT', '--server must be an absolute WebSocket URL.', 2)
-  }
-  if (endpoint.username !== '' || endpoint.password !== '') {
-    throw new CliError('XCS_CLI_SERVER_INPUT', '--server must not contain embedded credentials.', 2)
-  }
-  if (endpoint.hash !== '') {
-    throw new CliError('XCS_CLI_SERVER_INPUT', '--server must not contain a URL fragment.', 2)
-  }
+  const endpoint = parseUrl(input, undefined, '--server')
   const loopback =
     endpoint.hostname === 'localhost' ||
     endpoint.hostname === '[::1]' ||
     /^127(?:\.[0-9]{1,3}){3}$/u.test(endpoint.hostname)
   if (endpoint.protocol !== 'wss:' && !(endpoint.protocol === 'ws:' && loopback)) {
-    throw new CliError(
-      'XCS_CLI_SERVER_INPUT',
-      '--server must use WSS; WS is accepted only for a loopback self-hosted server.',
-      2,
-    )
+    throw new CliError('XCS_CLI_SERVER_INPUT', '--server must use WSS or loopback WS.', 2)
+  }
+  if (endpoint.username !== '' || endpoint.password !== '' || endpoint.hash !== '') {
+    throw new CliError('XCS_CLI_SERVER_INPUT', '--server contains forbidden URL components.', 2)
   }
   return endpoint.toString()
+}
+
+function parseUrl(value: string, base: string | undefined, option: string): URL {
+  if (value.trim() !== value) {
+    throw new CliError('XCS_CLI_USAGE', `${option} cannot contain surrounding whitespace.`, 2)
+  }
+  try {
+    return base === undefined ? new URL(value) : new URL(value, base)
+  } catch {
+    throw new CliError('XCS_CLI_USAGE', `${option} must be an absolute URL.`, 2)
+  }
 }

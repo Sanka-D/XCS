@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 
-import { parseJsonStrict, type JsonValue } from '@xcs-protocol/core'
+import type { JsonValue } from '@xcs-protocol/core'
 
 import { CliError } from './errors.js'
 
@@ -39,7 +39,13 @@ export async function readJsonFile(io: CliIo, path: string): Promise<JsonValue> 
     })
   }
 
-  return parseJsonStrict(contents)
+  try {
+    return JSON.parse(contents) as JsonValue
+  } catch (cause) {
+    throw new CliError('XCS_CLI_FILE_READ', `${path} is not valid JSON.`, 2, {
+      cause: cause instanceof Error ? cause.message : String(cause),
+    })
+  }
 }
 
 export function writeJson(io: CliIo, value: unknown): void {
