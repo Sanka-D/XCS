@@ -1,29 +1,32 @@
-# XCS implementation plan
+# Implementation plan
 
-This plan takes XCS from the current Testnet alpha to an accountless public Testnet beta that
-organizations can use to discover and register schemas, issue native XRPL Credentials, and inspect
-exact verification evidence without giving XCS custody of their signing keys or claims. It is
-outcome-driven: a milestone is complete only when its exit criteria are demonstrated.
+## Current baseline
 
-## Product outcome
+- Core uses maintained protocol dependencies and exposes a small deterministic API.
+- SDK and CLI consume that API and do not own signing keys.
+- Indexer and API use local I/O adapters around core instead of importing implementation helpers.
+- Web supports schema creation, Credential issuance/acceptance/deletion, exact verification, and wallet adapters.
+- PostgreSQL remains a rebuildable projection and is being maintained separately.
 
-An organization must be able to complete this flow:
+## Next milestones
 
-1. define and locally validate an XCS schema;
-2. register it on the intended XRPL network through an externally controlled wallet or signer;
-3. build a canonical, integrity-bound credential payload and publish it to an approved public
-   location;
-4. create the native Credential, let its subject accept it, and later revoke or remove it;
-5. let an independent verifier reconstruct the same schema and lifecycle state from validated
-   ledgers and report payload integrity separately from issuer trust.
-6. expose the result through one Explorer, Studio and Developers site without creating a Commons
-   issuer directory or a public subject feed.
+1. Merge the database package work and rerun PostgreSQL integration tests.
+2. Publish a reviewed disposable Testnet network profile and start both complete-history ledger sources.
+3. Run the complete schema -> issue -> accept -> verify -> delete flow with real supported wallets.
+4. Record transaction hashes, payload availability, indexer checkpoints, and verification output as Testnet acceptance evidence.
+5. Remove pilot-only payload storage from public deployment and configure real issuer-controlled HTTPS/IPFS hosting.
+6. Add production observability and recovery drills before calling the service beta.
 
-The reference service remains non-custodial and reproducible. A self-hosted indexer processing the
-same validated ledgers must reach the same protocol result as the shared service.
+## Exit criteria for Testnet beta
 
-## Accepted beta product boundaries
+- all workspace and PostgreSQL integration checks pass;
+- the indexer can rebuild from the activation ledger and produce the same projection digest;
+- API verification fails closed during source disagreement or stale indexing;
+- at least one issuer wallet and one subject wallet complete native Credential transactions on Testnet;
+- no service receives or stores wallet seeds;
+- public documentation matches the deployed endpoints and limitations.
 
+Mainnet is explicitly out of scope until the Testnet beta has durable operational evidence and a separately reviewed network profile.
 - XCS v0.1 normative semantics are frozen. Product/API work must not alter historical schema
   validity, UID bytes, payload interpretation or lifecycle projection.
 - EAS and EASScan are UX references only; the protocol remains native XRPL Credentials plus XCS.

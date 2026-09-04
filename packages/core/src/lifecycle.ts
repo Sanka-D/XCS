@@ -1,11 +1,19 @@
 import { fail } from './errors.js'
-import type { CredentialLifecycleInput, CredentialLifecycleState } from './types.js'
+
+export type CredentialLifecycleState = 'pending' | 'active' | 'expired' | 'deleted'
+
+export interface CredentialLifecycleInput {
+  objectExists: boolean
+  accepted: boolean
+  expiration?: number | null
+  closeTime: number
+}
 
 const UINT32_MAX = 0xffff_ffff
 
 function requireRippleTime(value: number): void {
   if (!Number.isInteger(value) || value < 0 || value > UINT32_MAX) {
-    return fail('RIPPLE_TIME_INVALID', 'Credential lifecycle time must be a uint32', '$time')
+    return fail('INVALID_RIPPLE_TIME', 'Credential lifecycle time must be a uint32', '$time')
   }
 }
 

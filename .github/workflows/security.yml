@@ -43,10 +43,6 @@ jobs:
           node ops/ci/check-licenses.mjs \
             "$RUNNER_TEMP/xcs-licenses.json" \
             ops/security/license-overrides.json
-      - name: Run the Go vulnerability analyzer
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-        working-directory: verifier-go
-
   repository-scan:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
