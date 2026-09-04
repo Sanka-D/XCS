@@ -11,6 +11,15 @@ import type { SchemaProjectionEvidence } from './types.js'
 
 export const MAX_SCHEMA_CATALOG_ENTRIES = 256
 
+class SchemaCatalogLimitExceededError extends Error {
+  readonly code = 'SCHEMA_CATALOG_LIMIT_EXCEEDED'
+
+  constructor() {
+    super('Schema catalog exceeds the supported closure size')
+    this.name = 'SchemaCatalogLimitExceededError'
+  }
+}
+
 export interface SchemaCatalogEntry {
   uid: string
   definition: SchemaDefinition
@@ -57,7 +66,7 @@ export function authoritativeSchemaCatalogBundle(input: {
 }): SchemaCatalogBundle {
   try {
     if (input.evidence.length > MAX_SCHEMA_CATALOG_ENTRIES) {
-      throw new Error('Schema catalog exceeds the supported closure size')
+      throw new SchemaCatalogLimitExceededError()
     }
     const expected = {
       profileId: input.network.profileId,
