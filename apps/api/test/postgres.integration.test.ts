@@ -1,16 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 
-import { computeSchemaUid, parseSchema, type SchemaDefinition } from '@xcs-protocol/core'
 import {
-  createDatabaseClient,
-  migrateDatabase,
-  provisionRuntimeDatabaseRoles,
-  schemaEvents,
-  schemas,
-  XCS_PROVISION_CONTROL_ROLE,
-  type DatabaseClient,
-} from '@xcs-protocol/db'
+  computeSchemaUid,
+  MAX_SCHEMA_CATALOG_ENTRIES,
+  validateSchema,
+  type SchemaDefinition,
+} from '@xcs-protocol/core'
+import { createDatabaseClient, schemaEvents, schemas, type DatabaseClient } from '@xcs-protocol/db'
+import { bootstrapDatabase, databasePasswordFromUrl } from '@xcs-protocol/db/bootstrap'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { PostgresOperationalMetricsRepository } from '../src/operational-metrics-repository.js'
@@ -29,7 +26,6 @@ if (postgresTestsRequired && adminDatabaseUrl === undefined) {
   throw new Error('XCS_TEST_DATABASE_URL is required by test:postgres')
 }
 
-const MIGRATIONS_FOLDER = fileURLToPath(new URL('../../../packages/db/drizzle/', import.meta.url))
 const TEMPORARY_DATABASE_PATTERN = /^xcs_api_it_[0-9a-f]{32}$/u
 const PROFILE_ID = 'metrics-testnet'
 const CATALOG_PROFILE_ID = 'catalog-testnet'
@@ -145,31 +141,16 @@ describePostgres('PostgreSQL 18 API integration', () => {
     `
     temporaryDatabaseUrl = databaseUrl(adminDatabaseUrl, temporaryDatabaseName)
     databaseClient = createDatabaseClient(temporaryDatabaseUrl)
-    await migrateDatabase(databaseClient, { migrationsFolder: MIGRATIONS_FOLDER })
-
-    const preexistingRoles = await adminClient.sql<{ roleName: string }[]>`
-      SELECT rolname AS "roleName"
-      FROM pg_roles
-      WHERE rolname IN (
-        'xcs_indexer',
-        'xcs_api',
-        'xcs_monitor',
-        ${XCS_PROVISION_CONTROL_ROLE}
-      )
-    `
-    if (preexistingRoles.length > 0) {
-      throw new Error(
-        'PostgreSQL integration tests require a disposable cluster without xcs runtime roles',
-      )
-    }
     runtimeRoleCleanupAllowed = true
-    await provisionRuntimeDatabaseRoles(databaseClient, {
+    const bootstrapPasswords = {
       clusterScope: 'dedicated',
-      administratorPassword: new URL(temporaryDatabaseUrl).password,
+      administratorPassword: databasePasswordFromUrl(temporaryDatabaseUrl),
       indexerPassword: INDEXER_DATABASE_PASSWORD,
       apiPassword: API_DATABASE_PASSWORD,
       monitorPassword: MONITOR_DATABASE_PASSWORD,
-    })
+    } as const
+    await bootstrapDatabase(databaseClient, bootstrapPasswords)
+    await bootstrapDatabase(databaseClient, bootstrapPasswords)
     runtimeApiClient = createDatabaseClient(
       runtimeDatabaseUrl(temporaryDatabaseUrl, 'xcs_api', API_DATABASE_PASSWORD),
     )
@@ -214,8 +195,7 @@ describePostgres('PostgreSQL 18 API integration', () => {
             DROP ROLE IF EXISTS
               xcs_indexer,
               xcs_api,
-              xcs_monitor,
-              ${adminClient.sql(XCS_PROVISION_CONTROL_ROLE)}
+              xcs_monitor
           `
           runtimeRoleCleanupAllowed = false
         } catch (error) {
