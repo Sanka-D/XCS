@@ -132,6 +132,73 @@ describe('reliable submission', () => {
     expect(autofill).not.toHaveBeenCalled()
   })
 
+  it('accepts an explicitly allowed LastLedgerSequence refresh and tracks the signed value', async () => {
+    const journal = new MemoryOperationJournal()
+    const blob = signedBlob(75)
+    const onValidatedSignature = vi.fn()
+    const result = await signPreparedAndSubmit(
+      mockClient(),
+      {
+        TransactionType: 'Payment',
+        Account: ACCOUNT,
+        Destination: DESTINATION,
+        Amount: '1',
+        Fee: '12',
+        Sequence: 1,
+        LastLedgerSequence: 50,
+      },
+      {
+        sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }),
+      },
+      {
+        journal,
+        pollIntervalMs: 1,
+        timeoutMs: 10,
+        allowSignerLastLedgerSequenceRefresh: true,
+        onValidatedSignature,
+      },
+    )
+
+    expect(result).toMatchObject({ status: 'validated', lastLedgerSequence: 75 })
+    expect(onValidatedSignature).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transaction: expect.objectContaining({ LastLedgerSequence: 75 }),
+        lastLedgerSequence: 75,
+      }),
+    )
+    expect(
+      journal.entries.map(({ stage, lastLedgerSequence }) => [stage, lastLedgerSequence]),
+    ).toEqual([
+      ['prepared', 50],
+      ['signed', 75],
+      ['submitted', 75],
+      ['validated', 75],
+    ])
+  })
+
+  it('rejects a LastLedgerSequence refresh unless the caller explicitly allows it', async () => {
+    const blob = signedBlob(75)
+    const submit = vi.fn()
+
+    await expect(
+      signPreparedAndSubmit(
+        mockClient({ submit }),
+        {
+          TransactionType: 'Payment',
+          Account: ACCOUNT,
+          Destination: DESTINATION,
+          Amount: '1',
+          Fee: '12',
+          Sequence: 1,
+          LastLedgerSequence: 50,
+        },
+        { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
+        { journal: new MemoryOperationJournal() },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNER_RESULT' })
+    expect(submit).not.toHaveBeenCalled()
+  })
+
   it('runs the validated-signature hook after exact comparison and before submit', async () => {
     const calls: string[] = []
     const blob = signedBlob()
@@ -175,6 +242,41 @@ describe('reliable submission', () => {
     )
 
     expect(calls).toEqual(['persist', 'guard', 'submit'])
+  })
+
+  it('keeps a validated signed transaction recoverable when the final guard fails', async () => {
+    const journal = new MemoryOperationJournal()
+    const blob = signedBlob()
+    const submit = vi.fn()
+
+    await expect(
+      signPreparedAndSubmit(
+        mockClient({ submit }),
+        {
+          TransactionType: 'Payment',
+          Account: ACCOUNT,
+          Destination: DESTINATION,
+          Amount: '1',
+          Fee: '12',
+          Sequence: 1,
+          LastLedgerSequence: 50,
+        },
+        { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
+        {
+          journal,
+          beforeSubmit: async () => {
+            throw new Error('READINESS_UNAVAILABLE')
+          },
+        },
+      ),
+    ).rejects.toThrow('READINESS_UNAVAILABLE')
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(journal.entries.at(-1)).toMatchObject({
+      stage: 'signed',
+      txHash: hashes.hashSignedTx(blob),
+      message: 'Final pre-submission validation failed; signed transaction retained for retry.',
+    })
   })
 
   it('still reconciles after an ambiguous submit acknowledgement failure', async () => {
@@ -339,7 +441,11 @@ describe('reliable submission', () => {
             hash: hashes.hashSignedTx(changedBlob),
           }),
         },
-        { journal: new MemoryOperationJournal(), onValidatedSignature },
+        {
+          journal: new MemoryOperationJournal(),
+          onValidatedSignature,
+          allowSignerLastLedgerSequenceRefresh: true,
+        },
       ),
     ).rejects.toMatchObject({ code: 'XCS_SDK_INVALID_SIGNER_RESULT' })
     expect(onValidatedSignature).not.toHaveBeenCalled()

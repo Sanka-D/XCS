@@ -210,6 +210,9 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@noble/hashes':
+        specifier: 2.3.0
+        version: 2.3.0
       '@xcs-protocol/core':
         specifier: workspace:*
         version: link:../core

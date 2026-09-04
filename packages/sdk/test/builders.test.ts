@@ -1,10 +1,4 @@
-import {
-  canonicalize,
-  computeSchemaUid,
-  createHttpsPayloadUri,
-  decodeUtf8Hex,
-  type JsonValue,
-} from '@xcs-protocol/core'
+import { computeSchemaUid, createHttpsPayloadUri, encodeSchema } from '@xcs-protocol/core'
 import { decode, encode, type Payment } from 'xrpl'
 import { describe, expect, it } from 'vitest'
 
@@ -14,6 +8,7 @@ import {
   buildCredentialDelete,
   buildSchemaRegistrationPayment,
   credentialHexToUri,
+  decodeMemoField,
   deriveSchemaUid,
   MAX_XRPL_MEMO_BYTES,
   measureSchemaRegistrationMemoBytes,
@@ -74,9 +69,11 @@ describe('schema transaction builders', () => {
       Destination: REGISTRY,
       Amount: '1',
     })
-    expect(decodeUtf8Hex(memo?.MemoType ?? '')).toBe(XCS_SCHEMA_MEMO_TYPE)
-    expect(decodeUtf8Hex(memo?.MemoFormat ?? '')).toBe(XCS_SCHEMA_MEMO_FORMAT)
-    expect(decodeUtf8Hex(memo?.MemoData ?? '')).toBe(canonicalize(schema as unknown as JsonValue))
+    expect(decodeMemoField(memo?.MemoType ?? '')).toBe(XCS_SCHEMA_MEMO_TYPE)
+    expect(decodeMemoField(memo?.MemoFormat ?? '')).toBe(XCS_SCHEMA_MEMO_FORMAT)
+    expect(decodeMemoField(memo?.MemoData ?? '')).toBe(
+      new TextDecoder().decode(encodeSchema(schema)),
+    )
     expect(built.memoByteLength).toBe(measureSchemaRegistrationMemoBytes(built.canonicalSchema))
     expect(built.memoByteLength).toBeGreaterThan(
       new TextEncoder().encode(built.canonicalSchema).byteLength,
@@ -121,7 +118,7 @@ describe('schema transaction builders', () => {
       expect((error as XcsSdkError).code).toBe('XCS_SDK_MEMO_TOO_LARGE')
       expect((error as XcsSdkError).details?.byteLength).toBe(
         measureSchemaRegistrationMemoBytes(
-          canonicalize({ ...schema, fields } as unknown as JsonValue),
+          new TextDecoder().decode(encodeSchema({ ...schema, fields })),
         ),
       )
     }
@@ -129,7 +126,7 @@ describe('schema transaction builders', () => {
 
   it('matches rippled memo accounting at the exact 1,024-byte boundary', () => {
     const exactLimitSchema = schemaAtMemoBoundary(249)
-    const exactLimitCanonical = canonicalize(exactLimitSchema as unknown as JsonValue)
+    const exactLimitCanonical = new TextDecoder().decode(encodeSchema(exactLimitSchema))
 
     expect(measureSchemaRegistrationMemoBytes(exactLimitCanonical)).toBe(MAX_XRPL_MEMO_BYTES)
 
@@ -153,7 +150,7 @@ describe('schema transaction builders', () => {
     )
 
     const overLimitSchema = schemaAtMemoBoundary(250)
-    const overLimitCanonical = canonicalize(overLimitSchema as unknown as JsonValue)
+    const overLimitCanonical = new TextDecoder().decode(encodeSchema(overLimitSchema))
     expect(measureSchemaRegistrationMemoBytes(overLimitCanonical)).toBe(MAX_XRPL_MEMO_BYTES + 1)
 
     try {

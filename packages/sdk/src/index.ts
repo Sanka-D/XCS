@@ -2,23 +2,27 @@ export * from './builders.js'
 export * from './encoding.js'
 export * from './errors.js'
 export * from './network.js'
-export * from './prepared.js'
 export * from './submission.js'
 export * from './transaction-validation.js'
 
 export type {
+  CredentialContext,
   CredentialPayload,
+  CredentialPayloadStatus,
   NetworkProfile,
+  PayloadIntegrityResult,
   ResolvedSchema,
   SchemaDefinition,
 } from '@xcs-protocol/core'
 
 export {
   createHttpsPayloadUri,
-  createIpfsRawPayloadUri,
-  iso8601ToRippleTime,
+  createIpfsPayloadUri,
+  encodeCredentialPayload,
+  isoTimeToRippleTime,
   parseCredentialPayload,
-  rippleTimeToIso8601,
-  validateCredentialPayload,
+  parsePayloadUri,
+  rippleTimeToIso,
+  verifyCredentialPayload,
   verifyPayloadIntegrity,
 } from '@xcs-protocol/core'
