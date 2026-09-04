@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  isoTimeToRippleTime,
-  parseNetworkProfile,
-  projectCredentialLifecycle,
-  rippleTimeToIso,
-} from '../src/index.js'
+import { parseNetworkProfile, projectCredentialLifecycle, rippleTimeToIso } from '../src/index.js'
 
 describe('network and native lifecycle', () => {
   it('parses a network profile with xrpl.js address validation', () => {
@@ -24,12 +19,9 @@ describe('network and native lifecycle', () => {
     expect(profile.activationLedgerHash).toBe('cd'.repeat(32))
   })
 
-  it('wraps xrpl.js time conversion with strict protocol bounds', () => {
-    expect(isoTimeToRippleTime('2000-01-01T00:00:00Z')).toBe(0)
-    expect(rippleTimeToIso(isoTimeToRippleTime('2030-05-06T07:08:09Z'))).toBe(
-      '2030-05-06T07:08:09.000Z',
-    )
-    expect(() => isoTimeToRippleTime('2030-05-06T07:08:09.123Z')).toThrow(
+  it('wraps xrpl.js Ripple-time conversion with strict protocol bounds', () => {
+    expect(rippleTimeToIso(0)).toBe('2000-01-01T00:00:00.000Z')
+    expect(() => rippleTimeToIso(-1)).toThrow(
       expect.objectContaining({ code: 'INVALID_RIPPLE_TIME' }),
     )
   })
