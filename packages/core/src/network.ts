@@ -1,8 +1,4 @@
-import {
-  isoTimeToRippleTime as xrplIsoTimeToRippleTime,
-  isValidClassicAddress,
-  rippleTimeToISOTime as xrplRippleTimeToIso,
-} from 'xrpl'
+import { isValidClassicAddress, rippleTimeToISOTime as xrplRippleTimeToIso } from 'xrpl'
 
 import { fail } from './errors.js'
 
@@ -105,22 +101,6 @@ export function parseNetworkProfile(input: unknown): NetworkProfile {
     activationLedgerIndex: input.activationLedgerIndex,
     activationLedgerHash: input.activationLedgerHash.toLowerCase(),
   }
-}
-
-export function isoTimeToRippleTime(value: string): number {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.000)?Z$/.test(value)) {
-    return fail('INVALID_RIPPLE_TIME', 'Expected a whole-second UTC ISO timestamp', '$time')
-  }
-  const date = new Date(value)
-  const expected = value.includes('.') ? value : value.replace('Z', '.000Z')
-  if (!Number.isFinite(date.getTime()) || date.toISOString() !== expected) {
-    return fail('INVALID_RIPPLE_TIME', 'Invalid calendar timestamp', '$time')
-  }
-  const rippleTime = xrplIsoTimeToRippleTime(date)
-  if (!isUint32(rippleTime)) {
-    return fail('INVALID_RIPPLE_TIME', 'Timestamp is outside the XRPL uint32 range', '$time')
-  }
-  return rippleTime
 }
 
 export function rippleTimeToIso(rippleTime: number): string {

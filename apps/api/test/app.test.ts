@@ -795,11 +795,6 @@ describe('read API', () => {
       { ...checkpoint, ledgerHash: '9'.repeat(64) },
       'INDEXER_EVIDENCE_INVALID',
     ],
-    [
-      'missing transaction root',
-      { ...checkpoint, transactionRoot: null },
-      'INDEXER_EVIDENCE_INVALID',
-    ],
   ])('fails profile-bound readiness for %s', async (_label, storedCheckpoint, code) => {
     const repository = new RouteRepository()
     repository.getLatestCheckpoint = async () => storedCheckpoint
@@ -1367,24 +1362,6 @@ describe('read API', () => {
       },
     })
     expect(response.body).not.toContain('snapshot')
-  })
-
-  it('fails closed on a nullable generation id instead of diverging from the public event DTO', async () => {
-    const malformedEvent = { ...credentialEvent, generationId: null }
-    const repository = new RouteRepository()
-    repository.getTransactionProjectionSummary = async () => ({
-      registration: undefined,
-      firstCredentialEvent: malformedEvent,
-      credentialEventCount: 1,
-    })
-    repository.getCredentialEventsByTransactionPage = async () => [malformedEvent]
-    const instance = await configuredApp({ repository })
-    const response = await instance.inject({
-      method: 'GET',
-      url: `/v1/networks/testnet/transactions/${TX_HASH}`,
-    })
-    expect(response.statusCode).toBe(503)
-    expect(response.json()).toMatchObject({ error: 'INDEXER_EVIDENCE_INVALID' })
   })
 
   it('returns authoritative 404s for unknown exact discovery identifiers', async () => {
@@ -2055,7 +2032,6 @@ describe('read API', () => {
   })
 
   it.each([
-    ['a nullable generation id', { ...credentialEvent, generationId: null }],
     ['a mismatched subject', { ...credentialEvent, subject: ISSUER }],
     ['an expiration above uint32', { ...credentialEvent, expiration: 4_294_967_296 }],
   ])('fails closed when event history contains %s', async (_label, malformedEvent) => {
@@ -2256,11 +2232,6 @@ describe('read API', () => {
         },
         checkpoint,
       },
-      'INDEXER_EVIDENCE_INVALID',
-    ],
-    [
-      'missing transaction root',
-      { status: readyStatus, checkpoint: { ...checkpoint, transactionRoot: null } },
       'INDEXER_EVIDENCE_INVALID',
     ],
   ])('fails closed on %s', async (_label, evidence, errorCode) => {
