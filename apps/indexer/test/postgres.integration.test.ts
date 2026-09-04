@@ -27,13 +27,7 @@ import {
   XCS_PROVISION_CONTROL_ROLE,
   type DatabaseClient,
 } from '@xcs-protocol/db'
-import {
-  canonicalize,
-  computeSchemaUid,
-  createIpfsRawPayloadUri,
-  encodeUtf8,
-  type JsonValue,
-} from '@xcs-protocol/core'
+import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '@xcs-protocol/core'
 import { and, asc, eq } from 'drizzle-orm'
 import { migrate as drizzleMigrate } from 'drizzle-orm/postgres-js/migrator'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -43,6 +37,7 @@ import { prepareFixtureReplay } from '../src/fixture-replay.js'
 import { computeProjectionDigest } from '../src/projection-digest.js'
 import { QuorumLedgerSource } from '../src/quorum-ledger-source.js'
 import { PostgresIndexerRepository } from '../src/repository.js'
+import { canonicalJson, encodeUtf8 } from '../src/serialization.js'
 import { IndexerWorker } from '../src/worker.js'
 import type {
   CredentialDeletionCause,
@@ -483,7 +478,7 @@ const FIXTURE_DELETION_CASES: readonly FixtureDeletionCase[] = [
   },
 ]
 
-const FIXTURE_URI_HEX = Buffer.from(createIpfsRawPayloadUri('complete-projection-fixture'), 'utf8')
+const FIXTURE_URI_HEX = Buffer.from(createIpfsPayloadUri('complete-projection-fixture'), 'utf8')
   .toString('hex')
   .toUpperCase()
 
@@ -533,7 +528,7 @@ function completeProjectionFixture(replayProfile: NetworkProfile): {
   ledgers: ReadonlyMap<number, ValidatedLedger>
   schemaUid: string
 } {
-  const registrationText = canonicalize(schemaDefinition as unknown as JsonValue)
+  const registrationText = canonicalJson(schemaDefinition)
   const schemaUid = computeSchemaUid({
     networkId: replayProfile.networkId,
     ledgerHash: replayProfile.activationLedgerHash,
@@ -656,10 +651,7 @@ class CompleteProjectionFixtureSource implements LedgerSource {
   async disconnect(): Promise<void> {}
 
   async preflight(profileToCheck: NetworkProfile): Promise<LedgerSourcePreflight> {
-    if (
-      canonicalize(profileToCheck as unknown as JsonValue) !==
-      canonicalize(this.replayProfile as unknown as JsonValue)
-    ) {
+    if (canonicalJson(profileToCheck) !== canonicalJson(this.replayProfile)) {
       throw new Error('Fixture replay profile mismatch')
     }
     return {
@@ -2500,7 +2492,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       requiredAmendment: 'B'.repeat(64),
     }
     const fixture = completeProjectionFixture(replayProfile)
-    const profileFileBytes = encodeUtf8(canonicalize(replayProfile as unknown as JsonValue))
+    const profileFileBytes = encodeUtf8(canonicalJson(replayProfile))
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'xcs-complete-replay-'))
     const bundleDirectory = join(temporaryRoot, 'bundle')
 
