@@ -27,13 +27,7 @@ import {
   XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
   XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
 } from '@xcs-protocol/db/bootstrap'
-import {
-  canonicalize,
-  computeSchemaUid,
-  createIpfsRawPayloadUri,
-  encodeUtf8,
-  type JsonValue,
-} from '@xcs-protocol/core'
+import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '@xcs-protocol/core'
 import { and, asc, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
