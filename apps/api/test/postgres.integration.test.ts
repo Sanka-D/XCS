@@ -1,11 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import {
-  computeSchemaUid,
-  MAX_SCHEMA_CATALOG_ENTRIES,
-  validateSchema,
-  type SchemaDefinition,
-} from '@xcs-protocol/core'
+import { computeSchemaUid, parseSchema, type SchemaDefinition } from '@xcs-protocol/core'
 import { createDatabaseClient, schemaEvents, schemas, type DatabaseClient } from '@xcs-protocol/db'
 import { bootstrapDatabase, databasePasswordFromUrl } from '@xcs-protocol/db/bootstrap'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
