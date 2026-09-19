@@ -312,18 +312,47 @@ describe('reliable submission', () => {
     expect(request).not.toHaveBeenCalled()
   })
 
-  it('reports expiration only after the last ledger sequence passes', async () => {
-    const notFound = Object.assign(new Error('txnNotFound'), { data: { error: 'txnNotFound' } })
+  it('does not infer final failure from an open ledger or incomplete history', async () => {
+    const notFound = Object.assign(new Error('txnNotFound'), {
+      data: { error: 'txnNotFound', searched_all: false },
+    })
     const client = mockClient({
-      request: vi
-        .fn()
-        .mockRejectedValueOnce(notFound)
-        .mockResolvedValueOnce({ result: { ledger_current_index: 51 } }),
+      request: vi.fn(async (request: { command: string }) => {
+        if (request.command === 'tx') throw notFound
+        return { result: { ledger_current_index: 51 } }
+      }),
     })
 
     await expect(getTransactionStatus(client, 'AB'.repeat(32), 50)).resolves.toMatchObject({
-      status: 'expired',
+      status: 'not_found',
     })
+  })
+
+  it('keeps polling after txnNotFound so a later validated result is not lost', async () => {
+    const journal = new MemoryOperationJournal()
+    let lookups = 0
+    const client = mockClient({
+      request: vi.fn(async ({ command }: { command: string }) => {
+        if (command !== 'tx') return { result: { ledger_current_index: 51 } }
+        if (lookups++ === 0) {
+          throw Object.assign(new Error('txnNotFound'), { data: { error: 'txnNotFound' } })
+        }
+        return {
+          result: {
+            validated: true,
+            ledger_index: 50,
+            meta: { TransactionResult: 'tesSUCCESS' },
+          },
+        }
+      }),
+    })
+    const result = await submitSignedTransaction(client, signedBlob(), {
+      journal,
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+    })
+    expect(result).toMatchObject({ status: 'validated', ledgerIndex: 50 })
+    expect(journal.entries.map((entry) => entry.stage)).not.toContain('expired')
   })
 
   it('rejects an expired prepared transaction before any submit side effect', async () => {

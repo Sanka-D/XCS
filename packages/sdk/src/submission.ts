@@ -392,17 +392,10 @@ export async function getTransactionStatus(
     }
   }
 
-  if (lastLedgerSequence !== undefined) {
-    const currentLedger = await getCurrentLedgerIndex(client)
-    if (currentLedger > lastLedgerSequence) {
-      return {
-        status: 'expired',
-        txHash: txHash.toUpperCase(),
-        lastLedgerSequence,
-      }
-    }
-  }
-
+  // A missing hash is not proof of expiry: the open ledger can be ahead of
+  // validation, and the server may lack historical ledgers. This API has no
+  // persisted submission-window start with which to prove complete absence.
+  // Keep the operation reconcilable instead of recording a terminal failure.
   return { status: 'not_found', txHash: txHash.toUpperCase(), lastLedgerSequence }
 }
 
