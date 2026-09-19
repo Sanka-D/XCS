@@ -31,6 +31,7 @@ import {
 } from '~/utils/operationJournal'
 import { assertCredentialGenerationCurrent } from '~/utils/credentialReview'
 import { assertPublicRpcUrl } from '~/utils/publicRpcUrl'
+import { closeWalletRpc, finishWalletOperation } from '~/utils/walletOperationCleanup'
 import { assertTransactionSigner } from '~/utils/transactions'
 import {
   assertWalletSupportsXcsTransaction,
@@ -332,7 +333,7 @@ export function useWallet() {
       preparedWalletSessions.set(prepared.transaction, walletSession)
       return prepared.transaction
     } finally {
-      if (client.isConnected()) await client.disconnect()
+      await closeWalletRpc(client)
     }
   }
 
@@ -367,11 +368,11 @@ export function useWallet() {
 
     walletBusy.value = true
     walletError.value = null
-    const operationId = crypto.randomUUID()
-    const operationStore = operationJournal()
-    const client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
-
+    let client: ReturnType<typeof $xrplClientFactory> | undefined
     try {
+      const operationId = crypto.randomUUID()
+      const operationStore = operationJournal()
+      client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
       // Network identity is known before the wallet is asked to sign. The SDK
       // will refuse to sign or submit through an unvalidated client.
       await connectAndValidateNetwork(client, activeProfile)
@@ -460,9 +461,7 @@ export function useWallet() {
       preparedWalletSessions.delete(transaction)
       return { ...result, ...businessResult }
     } finally {
-      await loadOperations().catch(() => undefined)
-      if (client.isConnected()) await client.disconnect()
-      walletBusy.value = false
+      await finishWalletOperation(walletBusy, loadOperations, client)
     }
   }
 
@@ -475,9 +474,10 @@ export function useWallet() {
   async function retryOperation(operationId: string): Promise<WalletSubmissionResult> {
     walletBusy.value = true
     walletError.value = null
-    const operationStore = operationJournal()
-    const client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
+    let client: ReturnType<typeof $xrplClientFactory> | undefined
     try {
+      const operationStore = operationJournal()
+      client = $xrplClientFactory(assertPublicRpcUrl(config.public.rpcUrl))
       const stored = (await operationStore.list()).find(
         (operation) => operation.operationId === operationId,
       )
@@ -552,17 +552,15 @@ export function useWallet() {
       )
       return { ...result, ...businessResult }
     } finally {
-      await loadOperations().catch(() => undefined)
-      if (client.isConnected()) await client.disconnect()
-      walletBusy.value = false
+      await finishWalletOperation(walletBusy, loadOperations, client)
     }
   }
 
   async function reconfirmOperation(operationId: string) {
     walletBusy.value = true
     walletError.value = null
-    const operationStore = operationJournal()
     try {
+      const operationStore = operationJournal()
       const stored = (await operationStore.list()).find(
         (operation) => operation.operationId === operationId,
       )
@@ -591,8 +589,7 @@ export function useWallet() {
           operationStore.setBusinessConfirmation(operationId, confirmation, at, evidence),
       })
     } finally {
-      await loadOperations().catch(() => undefined)
-      walletBusy.value = false
+      await finishWalletOperation(walletBusy, loadOperations)
     }
   }
 
@@ -602,8 +599,7 @@ export function useWallet() {
     try {
       await operationJournal().abandon(operationId)
     } finally {
-      await loadOperations().catch(() => undefined)
-      walletBusy.value = false
+      await finishWalletOperation(walletBusy, loadOperations)
     }
   }
 

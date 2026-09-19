@@ -399,6 +399,11 @@ without creating an XRPL side effect. If it is still unvalidated, retransmission
 readiness proof and a second ownership check on the business lock. It never asks the wallet to sign
 again.
 
+RPC teardown and history-refresh failures do not replace the transaction result or leave
+the UI busy. Unknown transaction hashes remain recoverable; the SDK no longer records
+terminal expiry from the open ledger number alone. Proving final absence requires a
+complete validated submission window, which the current journal does not retain.
+
 Native `CredentialAccept` and `CredentialDelete` transactions contain only issuer, subject and
 credential type; they cannot cryptographically bind an XCS generation ID. An issuer could therefore
 delete and recreate the same tuple after the final generation check but before ledger execution. The
