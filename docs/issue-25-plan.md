@@ -95,8 +95,7 @@ No browser, live wallet or XRP Identity flow was tested: this work adds no UI/au
 No new dependencies or deployment. The tests used only disposable synthetic records.
 
 Before committing, the staged #25 tree was exported separately from the concurrent #26 work:
-54 database unit tests passed, followed by all 20 application-model tests on disposable PostgreSQL
-18. Database typecheck and build also passed against that isolated tree; staged file formatting
+54 database unit tests passed, followed by all 20 application-model tests on disposable PostgreSQL 18. Database typecheck and build also passed against that isolated tree; staged file formatting
 and whitespace checks passed.
 
 The intended rollout is additive: provision application tables and least-privilege runtime grants
