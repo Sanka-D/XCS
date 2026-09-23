@@ -7,6 +7,37 @@ const INTERNAL_SSR_TOKEN = 'test-internal-ssr-token-000000000001'
 const METRICS_TOKEN = 'test-operational-metrics-token-00000001'
 
 describe('API configuration', () => {
+  it('enables hosted public payloads only with an explicit short HTTPS origin and configuration', () => {
+    const env = {
+      XCS_DATABASE_URL: 'postgres://localhost/xcs',
+      XCS_INTERNAL_API_TOKEN: INTERNAL_SSR_TOKEN,
+      XCS_HOSTED_PAYLOADS_ENABLED: 'true',
+      XCS_PUBLIC_PAYLOAD_BASE_URL: 'https://payload.test',
+      XCS_PAYLOAD_STORAGE_IP_HASH_SECRET: 'test-storage-ip-hash-secret-0000000',
+      XCS_HOSTED_PAYLOAD_NETWORKS: 'testnet',
+    }
+    expect(loadApiConfig(env).hostedPayloads).toMatchObject({
+      enabled: true,
+      publicBaseUrl: 'https://payload.test',
+      networks: ['testnet'],
+    })
+    for (const origin of [
+      'http://localhost',
+      'https://payload.test/path',
+      'https://user:pass@payload.test',
+      `https://${'a'.repeat(50)}.test`,
+    ]) {
+      expect(() => loadApiConfig({ ...env, XCS_PUBLIC_PAYLOAD_BASE_URL: origin })).toThrow(
+        'short HTTPS origin',
+      )
+    }
+    expect(() => loadApiConfig({ ...env, XCS_HOSTED_PAYLOADS_ENABLED: 'yes' })).toThrow(
+      'exactly true or false',
+    )
+    expect(() => loadApiConfig({ ...env, XCS_PAYLOAD_STORAGE_IP_HASH_SECRET: undefined })).toThrow(
+      'XCS_PAYLOAD_STORAGE_IP_HASH_SECRET is required',
+    )
+  })
   it('uses repository-standard XCS variables and disables fetching by default', () => {
     const config = loadApiConfig({
       XCS_DATABASE_URL: 'postgres://xcs:xcs@localhost/xcs',

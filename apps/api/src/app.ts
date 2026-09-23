@@ -32,6 +32,11 @@ import {
   encodeSchemaRegistrationCursor,
 } from './pagination.js'
 import { DemoPinningService, PinningError } from './pinning.js'
+import {
+  HostedPayloadError,
+  HostedPayloadService,
+  HOSTED_PAYLOAD_LOCATOR_PATTERN,
+} from './hosted-payloads.js'
 import { authoritativeSchemaCatalogBundle, MAX_SCHEMA_CATALOG_ENTRIES } from './schema-catalog.js'
 import {
   authoritativeResolvedSchema,
@@ -128,6 +133,7 @@ export interface CreateApiOptions {
   trustedProxyCidrs?: string[]
   verifyRateLimit?: number
   pinningService?: DemoPinningService
+  hostedPayloadService?: HostedPayloadService
   operationalMetrics?: {
     token: string
     repository: OperationalMetricsRepository
@@ -305,6 +311,10 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
   }
 
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof HostedPayloadError) {
+      reply.code(error.statusCode).send({ error: error.code, message: error.code })
+      return
+    }
     if (error instanceof PinningError) {
       reply.code(error.statusCode).send({ error: error.code, message: error.code })
       return
@@ -346,6 +356,74 @@ export async function createApi(options: CreateApiOptions): Promise<FastifyInsta
     reply.header('cache-control', 'no-store')
     return { status: 'ok' }
   })
+  if (options.hostedPayloadService !== undefined) {
+    const service = options.hostedPayloadService
+    const params = {
+      type: 'object',
+      additionalProperties: false,
+      required: ['locator'],
+      properties: { locator: { type: 'string', pattern: HOSTED_PAYLOAD_LOCATOR_PATTERN } },
+    }
+    app.get<{ Params: { locator: string } }>(
+      '/p/:locator',
+      {
+        schema: { params },
+        config: { rateLimit: { max: 300, timeWindow: '1 minute' } },
+      },
+      async (request, reply) => {
+        const payload = await service.get(request.params.locator)
+        reply.header('cache-control', 'public, max-age=31536000, immutable')
+        reply.header('content-type', 'application/json; charset=utf-8')
+        reply.header('etag', `"${payload.digestHex}"`)
+        reply.header('x-content-type-options', 'nosniff')
+        return reply.send(payload.content)
+      },
+    )
+    app.post<{
+      Params: { locator: string }
+      Body: { network: string; payloadBase64: string; signedTransactionBlob: string }
+    }>(
+      '/v1/payloads/:locator',
+      {
+        schema: {
+          params,
+          body: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['network', 'payloadBase64', 'signedTransactionBlob'],
+            properties: {
+              network: { type: 'string', pattern: PROFILE_PATTERN },
+              payloadBase64: { type: 'string', minLength: 4, maxLength: 90_000 },
+              signedTransactionBlob: {
+                type: 'string',
+                pattern: '^(?:[0-9A-Fa-f]{2})+$',
+                maxLength: 32768,
+              },
+            },
+          },
+          response: {
+            400: errorResponseSchema,
+            401: errorResponseSchema,
+            403: errorResponseSchema,
+            404: errorResponseSchema,
+            409: errorResponseSchema,
+            413: errorResponseSchema,
+            429: errorResponseSchema,
+            503: errorResponseSchema,
+          },
+        },
+        config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+      },
+      async (request) =>
+        service.publish({
+          network: request.body.network,
+          locator: request.params.locator,
+          payloadBase64: request.body.payloadBase64,
+          signedTransactionBlob: request.body.signedTransactionBlob,
+          ipAddress: request.ip,
+        }),
+    )
+  }
   app.get('/health/ready', { config: { rateLimit: false } }, async (_request, reply) => {
     reply.header('cache-control', 'no-store')
     try {

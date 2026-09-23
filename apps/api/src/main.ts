@@ -2,6 +2,9 @@ import { createDatabaseClient } from '@xcs-protocol/db'
 
 import { createApi } from './app.js'
 import { loadApiConfig } from './config.js'
+import { HostedPayloadService } from './hosted-payloads.js'
+import { PostgresHostedPayloadRepository } from './hosted-payloads-repository.js'
+import { HostedPayloadResolver } from './hosted-payload-resolver.js'
 import { KuboPinStore } from './kubo.js'
 import { PostgresOperationalMetricsRepository } from './operational-metrics-repository.js'
 import { DisabledPayloadResolver, SafePayloadResolver } from './payload-resolver.js'
@@ -23,10 +26,26 @@ const pinningService = config.demoPinning.enabled
       maxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
     })
   : undefined
+const hostedPayloadService = config.hostedPayloads.enabled
+  ? new HostedPayloadService({
+      repository: new PostgresHostedPayloadRepository(database.db),
+      apiRepository: repository,
+      publicBaseUrl: config.hostedPayloads.publicBaseUrl,
+      ipHashSecret: config.hostedPayloads.ipHashSecret,
+      enabledNetworks: new Set(config.hostedPayloads.networks),
+      maxLedgerAgeSeconds: config.readinessMaxLedgerAgeSeconds,
+    })
+  : undefined
 const app = await createApi({
   repository,
   resolver: config.payloadFetchEnabled
-    ? new SafePayloadResolver(config.ipfsGateway)
+    ? config.hostedPayloads.enabled && hostedPayloadService !== undefined
+      ? new HostedPayloadResolver(
+          config.hostedPayloads.publicBaseUrl,
+          hostedPayloadService,
+          new SafePayloadResolver(config.ipfsGateway),
+        )
+      : new SafePayloadResolver(config.ipfsGateway)
     : new DisabledPayloadResolver(),
   trustPolicy: new StaticTrustPolicy({
     trusted: config.trustedIssuers,
@@ -46,6 +65,7 @@ const app = await createApi({
       }
     : {}),
   ...(pinningService === undefined ? {} : { pinningService }),
+  ...(hostedPayloadService === undefined ? {} : { hostedPayloadService }),
   logger: true,
 })
 

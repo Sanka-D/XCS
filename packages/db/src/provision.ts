@@ -190,6 +190,7 @@ const GRANT_RUNTIME_ACCESS_SQL = `
     schema_events, schemas, credential_generations, credential_events
   TO xcs_api;
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_api;
+  GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_api;
 `
 
 export async function provisionRuntimeDatabaseRoles(

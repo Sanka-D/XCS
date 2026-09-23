@@ -8,6 +8,20 @@
       "when": 1788476248914,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788803750924,
+      "tag": "0001_hosted_payloads",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788959680306,
+      "tag": "0002_hosted_payload_locator_compatibility",
+      "breakpoints": true
     }
   ]
 }

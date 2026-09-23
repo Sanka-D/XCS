@@ -111,13 +111,21 @@ describe('database schema', () => {
     expect(indexerStatuses.leaseExpiresAt.notNull).toBe(false)
   })
 
-  it('ships one generated baseline instead of pre-production migration history', () => {
+  it('preserves the deployed baseline and additive hosted payload migrations', () => {
     const migrationFiles = readdirSync(DRIZZLE_DIRECTORY).filter((name) => name.endsWith('.sql'))
     const snapshotFiles = readdirSync(new URL('meta/', DRIZZLE_DIRECTORY)).filter((name) =>
       name.endsWith('_snapshot.json'),
     )
-    expect(migrationFiles).toEqual(['0000_baseline.sql'])
-    expect(snapshotFiles).toEqual(['0000_snapshot.json'])
+    expect(migrationFiles).toEqual([
+      '0000_baseline.sql',
+      '0001_hosted_payloads.sql',
+      '0002_hosted_payload_locator_compatibility.sql',
+    ])
+    expect(snapshotFiles).toEqual([
+      '0000_snapshot.json',
+      '0001_snapshot.json',
+      '0002_snapshot.json',
+    ])
 
     const baseline = readFileSync(new URL('0000_baseline.sql', DRIZZLE_DIRECTORY), 'utf8')
     expect(baseline).toContain('CREATE TABLE "ledger_checkpoints"')
@@ -129,6 +137,10 @@ describe('database schema', () => {
     const journal = JSON.parse(
       readFileSync(new URL('meta/_journal.json', DRIZZLE_DIRECTORY), 'utf8'),
     ) as { entries: Array<{ idx: number; tag: string }> }
-    expect(journal.entries).toEqual([expect.objectContaining({ idx: 0, tag: '0000_baseline' })])
+    expect(journal.entries).toEqual([
+      expect.objectContaining({ idx: 0, tag: '0000_baseline' }),
+      expect.objectContaining({ idx: 1, tag: '0001_hosted_payloads' }),
+      expect.objectContaining({ idx: 2, tag: '0002_hosted_payload_locator_compatibility' }),
+    ])
   })
 })

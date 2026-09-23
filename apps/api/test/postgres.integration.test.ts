@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { PostgresOperationalMetricsRepository } from '../src/operational-metrics-repository.js'
 import { PostgresPinningRepository } from '../src/pinning-repository.js'
+import { PostgresHostedPayloadRepository } from '../src/hosted-payloads-repository.js'
 import { PostgresApiRepository } from '../src/repository.js'
 import {
   authoritativeSchemaCatalogBundle,
@@ -208,6 +209,63 @@ describePostgres('PostgreSQL 18 API integration', () => {
     if (cleanupErrors.length > 0) {
       throw new AggregateError(cleanupErrors, 'Failed to clean API PostgreSQL integration database')
     }
+  })
+
+  it('preserves hosted payload compatibility, idempotency, quotas and append-only runtime grants', async () => {
+    if (databaseClient === undefined || runtimeApiClient === undefined)
+      throw new Error('PostgreSQL test database is not initialized')
+    const profile = 'hosted-testnet'
+    const uid = '9'.repeat(64)
+    const txHash = '8'.repeat(64)
+    await databaseClient.sql`INSERT INTO network_profiles (profile_id,xcs_version,network_id,required_amendment,registry_address,registration_amount_drops,activation_ledger_index,activation_ledger_hash,enabled) VALUES (${profile},'0.1',1,${HASH},${PUBLISHER},1,1,${HASH},true)`
+    await databaseClient.sql`INSERT INTO schema_events (profile_id,transaction_hash,ledger_index,ledger_hash,transaction_index,publisher,status,schema_uid,memo_json) VALUES (${profile},${txHash},1,${HASH},0,${PUBLISHER},'accepted',${uid},'{}')`
+    await databaseClient.sql`INSERT INTO schemas (profile_id,schema_uid,publisher,name,description,definition,resolved_definition,registration_transaction_hash,ledger_index,transaction_index) VALUES (${profile},${uid},${PUBLISHER},'Hosted','Synthetic','{}','{}',${txHash},1,0)`
+    const repository = new PostgresHostedPayloadRepository(runtimeApiClient.db)
+    const input = {
+      locator: '1'.repeat(18),
+      digestHex: '1'.repeat(64),
+      content: '{}',
+      transactionHash: '2'.repeat(64),
+      profileId: profile,
+      issuer: PUBLISHER,
+      subject: PUBLISHER,
+      schemaUid: uid,
+      requesterIpHash: '3'.repeat(64),
+      now: new Date(),
+      dailyLimit: 2,
+    }
+    const stored = await repository.publish(input)
+    expect(await repository.publish(input)).toEqual(stored)
+    const legacy = { ...input, locator: '1'.repeat(20), transactionHash: '4'.repeat(64) }
+    expect(await repository.publish(legacy)).toMatchObject({ locator: legacy.locator })
+    await expect(
+      repository.publish({ ...input, transactionHash: '5'.repeat(64) }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_PUBLICATION_QUOTA_EXCEEDED' })
+    await expect(
+      repository.publish({ ...input, subject: 'rLs1MzkFWCxTbuAHgjeTZK4fcCDDnf2KRv' }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_PUBLICATION_CONFLICT' })
+    await expect(
+      repository.publish({
+        ...input,
+        transactionHash: '6'.repeat(64),
+        content: '{"changed":true}',
+        dailyLimit: 50,
+      }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD_LOCATOR_COLLISION' })
+    await expect(
+      runtimeApiClient.sql`UPDATE hosted_payloads SET content='changed' WHERE locator=${input.locator}`,
+    ).rejects.toMatchObject({ code: '42501' })
+    await expect(
+      runtimeApiClient.sql`DELETE FROM hosted_payloads WHERE locator=${input.locator}`,
+    ).rejects.toMatchObject({ code: '42501' })
+    await expect(
+      databaseClient.sql`INSERT INTO hosted_payloads (locator,digest_hex,content) VALUES (${'a'.repeat(18)},${'a'.repeat(64)},${'x'.repeat(65537)})`,
+    ).rejects.toMatchObject({ code: '23514' })
+    await databaseClient.sql`DELETE FROM hosted_payload_publications WHERE profile_id=${profile}`
+    await databaseClient.sql`DELETE FROM hosted_payloads WHERE locator IN (${input.locator}, ${legacy.locator})`
+    await databaseClient.sql`DELETE FROM schemas WHERE profile_id=${profile}`
+    await databaseClient.sql`DELETE FROM schema_events WHERE profile_id=${profile}`
+    await databaseClient.sql`DELETE FROM network_profiles WHERE profile_id=${profile}`
   })
 
   it('decodes database time inside an authoritative read snapshot', async () => {

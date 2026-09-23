@@ -12,6 +12,9 @@ export interface ApiConfig {
   untrustedIssuers: string[]
   allowedOrigins: string[]
   payloadFetchEnabled: boolean
+  hostedPayloads:
+    | { enabled: false }
+    | { enabled: true; publicBaseUrl: string; ipHashSecret: string; networks: string[] }
   readinessMaxLedgerAgeSeconds: number
   operationalMetrics:
     | { enabled: false }
@@ -138,6 +141,22 @@ function origins(value: string | undefined): string[] {
   })
 }
 
+function hostedPayloadBaseUrl(value: string): string {
+  const parsed = new URL(value)
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.origin !== value ||
+    Buffer.byteLength(`${value}/p/${'0'.repeat(18)}#xcs-sha256=${'0'.repeat(64)}`, 'utf8') > 128
+  ) {
+    throw new Error(
+      'XCS_PUBLIC_PAYLOAD_BASE_URL must be a short HTTPS origin that produces a URI of at most 128 bytes',
+    )
+  }
+  return value
+}
+
 export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
   const configuredInternalSsrToken = internalSsrToken(environment)
   const port = Number(environment.XCS_API_PORT ?? environment.API_PORT ?? '3001')
@@ -168,6 +187,19 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       }
     : ({ enabled: false } as const)
   const trustedIssuers = addressList(environment.XCS_TRUSTED_ISSUERS, 'XCS_TRUSTED_ISSUERS')
+  const hostedPayloadsEnabled = strictBoolean(
+    environment.XCS_HOSTED_PAYLOADS_ENABLED,
+    false,
+    'XCS_HOSTED_PAYLOADS_ENABLED',
+  )
+  const hostedPayloads: ApiConfig['hostedPayloads'] = hostedPayloadsEnabled
+    ? {
+        enabled: true,
+        publicBaseUrl: hostedPayloadBaseUrl(required(environment, 'XCS_PUBLIC_PAYLOAD_BASE_URL')),
+        ipHashSecret: required(environment, 'XCS_PAYLOAD_STORAGE_IP_HASH_SECRET'),
+        networks: list(environment.XCS_HOSTED_PAYLOAD_NETWORKS),
+      }
+    : { enabled: false }
   const untrustedIssuers = addressList(environment.XCS_UNTRUSTED_ISSUERS, 'XCS_UNTRUSTED_ISSUERS')
   if (trustedIssuers.some((issuer) => untrustedIssuers.includes(issuer))) {
     throw new Error('XCS_TRUSTED_ISSUERS and XCS_UNTRUSTED_ISSUERS must not overlap')
@@ -189,6 +221,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       'XCS_PAYLOAD_FETCH_ENABLED',
     ),
     readinessMaxLedgerAgeSeconds,
+    hostedPayloads,
     operationalMetrics: operationalMetrics(environment, configuredInternalSsrToken),
     demoPinning,
   }
