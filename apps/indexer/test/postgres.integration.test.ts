@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   acquireIndexerLease,
@@ -29,6 +30,7 @@ import {
 } from '@xcs-protocol/db/bootstrap'
 import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '@xcs-protocol/core'
 import { and, asc, eq } from 'drizzle-orm'
+import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { captureLedgerFixtureBundle, ledgerFixtureBundleDigest } from '../src/fixture-bundle.js'
@@ -822,6 +824,58 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     expect(integrityConstraints.every((constraint) => constraint.validated)).toBe(true)
   })
 
+  it('upgrades the baseline and legacy hosted storage without losing profiles or payloads', async () => {
+    if (adminDatabaseUrl === undefined) throw new Error('PostgreSQL admin URL is not initialized')
+    const database = await createTemporaryDatabase(adminDatabaseUrl, { initialize: false })
+    const source = fileURLToPath(new URL('../../../packages/db/drizzle/', import.meta.url))
+    const fixture = await mkdtemp(join(tmpdir(), 'xcs-migration-upgrade-'))
+    const journal = JSON.parse(await readFile(join(source, 'meta/_journal.json'), 'utf8'))
+    const content = '{"course":"test-upgrade"}'
+    const digest = createHash('sha256').update(content).digest('hex')
+    try {
+      await mkdir(join(fixture, 'meta'))
+      for (const count of [1, 2]) {
+        const entries = journal.entries.slice(0, count)
+        for (const entry of entries) {
+          await copyFile(join(source, `${entry.tag}.sql`), join(fixture, `${entry.tag}.sql`))
+        }
+        await writeFile(
+          join(fixture, 'meta/_journal.json'),
+          JSON.stringify({ ...journal, entries }),
+        )
+        await migrate(database.client.db, { migrationsFolder: fixture })
+        if (count === 1) {
+          await new PostgresIndexerRepository(database.client.db).initializeProfile(
+            profile('upgrade'),
+          )
+        } else {
+          await database.client.sql`
+            INSERT INTO hosted_payloads (locator, digest_hex, content)
+            VALUES (${digest.slice(0, 20)}, ${digest}, ${content})
+          `
+        }
+      }
+      await initializeDatabase(database.client)
+      await initializeDatabase(database.client)
+      const profiles = await database.client.sql`SELECT profile_id FROM network_profiles`
+      expect(profiles.map((row) => row.profile_id)).toEqual(['upgrade'])
+      // The same bytes may have an old 20-character link and a new 18-character link.
+      await database.client.sql`
+        INSERT INTO hosted_payloads (locator, digest_hex, content)
+        VALUES (${digest.slice(0, 18)}, ${digest}, ${content})
+      `
+      const payloads = await database.client.sql`
+        SELECT locator, content FROM hosted_payloads ORDER BY length(locator)
+      `
+      expect(payloads).toEqual([
+        { locator: digest.slice(0, 18), content },
+        { locator: digest.slice(0, 20), content },
+      ])
+    } finally {
+      await rm(fixture, { recursive: true, force: true })
+    }
+  })
+
   it('allows exact restarts but rejects another profile in exclusive database scope', async () => {
     if (adminDatabaseUrl === undefined) throw new Error('PostgreSQL admin URL is not initialized')
     const database = await createTemporaryDatabase(adminDatabaseUrl)
@@ -1031,6 +1085,30 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       { grantee: 'xcs_api', tableName: 'demo_pins', privilegeType: 'INSERT', grantable: false },
       { grantee: 'xcs_api', tableName: 'demo_pins', privilegeType: 'SELECT', grantable: false },
       { grantee: 'xcs_api', tableName: 'demo_pins', privilegeType: 'UPDATE', grantable: false },
+      {
+        grantee: 'xcs_api',
+        tableName: 'hosted_payload_publications',
+        privilegeType: 'INSERT',
+        grantable: false,
+      },
+      {
+        grantee: 'xcs_api',
+        tableName: 'hosted_payload_publications',
+        privilegeType: 'SELECT',
+        grantable: false,
+      },
+      {
+        grantee: 'xcs_api',
+        tableName: 'hosted_payloads',
+        privilegeType: 'INSERT',
+        grantable: false,
+      },
+      {
+        grantee: 'xcs_api',
+        tableName: 'hosted_payloads',
+        privilegeType: 'SELECT',
+        grantable: false,
+      },
       {
         grantee: 'xcs_api',
         tableName: 'indexer_incidents',

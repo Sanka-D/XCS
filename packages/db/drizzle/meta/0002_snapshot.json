@@ -86,12 +86,8 @@
           "name": "ledger_checkpoints_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "ledger_checkpoints",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -99,10 +95,7 @@
       "compositePrimaryKeys": {
         "ledger_checkpoints_pk": {
           "name": "ledger_checkpoints_pk",
-          "columns": [
-            "profile_id",
-            "ledger_index"
-          ]
+          "columns": ["profile_id", "ledger_index"]
         }
       },
       "uniqueConstraints": {},
@@ -295,12 +288,8 @@
           "name": "indexer_incidents_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "indexer_incidents",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -308,10 +297,7 @@
       "compositePrimaryKeys": {
         "indexer_incidents_pk": {
           "name": "indexer_incidents_pk",
-          "columns": [
-            "profile_id",
-            "writer_epoch"
-          ]
+          "columns": ["profile_id", "writer_epoch"]
         }
       },
       "uniqueConstraints": {},
@@ -418,12 +404,8 @@
           "name": "indexer_status_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "indexer_status",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -639,12 +621,8 @@
           "name": "schema_events_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "schema_events",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -652,10 +630,7 @@
       "compositePrimaryKeys": {
         "schema_events_pk": {
           "name": "schema_events_pk",
-          "columns": [
-            "profile_id",
-            "transaction_hash"
-          ]
+          "columns": ["profile_id", "transaction_hash"]
         }
       },
       "uniqueConstraints": {},
@@ -885,12 +860,8 @@
           "name": "schemas_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "schemas",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -898,14 +869,8 @@
           "name": "schemas_registration_event_fk",
           "tableFrom": "schemas",
           "tableTo": "schema_events",
-          "columnsFrom": [
-            "profile_id",
-            "registration_transaction_hash"
-          ],
-          "columnsTo": [
-            "profile_id",
-            "transaction_hash"
-          ],
+          "columnsFrom": ["profile_id", "registration_transaction_hash"],
+          "columnsTo": ["profile_id", "transaction_hash"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -913,10 +878,7 @@
       "compositePrimaryKeys": {
         "schemas_pk": {
           "name": "schemas_pk",
-          "columns": [
-            "profile_id",
-            "schema_uid"
-          ]
+          "columns": ["profile_id", "schema_uid"]
         }
       },
       "uniqueConstraints": {},
@@ -1148,12 +1110,8 @@
           "name": "credential_events_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "credential_events",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1161,14 +1119,8 @@
           "name": "credential_events_schema_fk",
           "tableFrom": "credential_events",
           "tableTo": "schemas",
-          "columnsFrom": [
-            "profile_id",
-            "schema_uid"
-          ],
-          "columnsTo": [
-            "profile_id",
-            "schema_uid"
-          ],
+          "columnsFrom": ["profile_id", "schema_uid"],
+          "columnsTo": ["profile_id", "schema_uid"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1176,14 +1128,8 @@
           "name": "credential_events_generation_fk",
           "tableFrom": "credential_events",
           "tableTo": "credential_generations",
-          "columnsFrom": [
-            "profile_id",
-            "generation_id"
-          ],
-          "columnsTo": [
-            "profile_id",
-            "generation_id"
-          ],
+          "columnsFrom": ["profile_id", "generation_id"],
+          "columnsTo": ["profile_id", "generation_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1191,11 +1137,7 @@
       "compositePrimaryKeys": {
         "credential_events_pk": {
           "name": "credential_events_pk",
-          "columns": [
-            "profile_id",
-            "transaction_hash",
-            "node_index"
-          ]
+          "columns": ["profile_id", "transaction_hash", "node_index"]
         }
       },
       "uniqueConstraints": {},
@@ -1461,12 +1403,8 @@
           "name": "credential_generations_profile_fk",
           "tableFrom": "credential_generations",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1474,14 +1412,8 @@
           "name": "credential_generations_schema_fk",
           "tableFrom": "credential_generations",
           "tableTo": "schemas",
-          "columnsFrom": [
-            "profile_id",
-            "schema_uid"
-          ],
-          "columnsTo": [
-            "profile_id",
-            "schema_uid"
-          ],
+          "columnsFrom": ["profile_id", "schema_uid"],
+          "columnsTo": ["profile_id", "schema_uid"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1489,10 +1421,7 @@
       "compositePrimaryKeys": {
         "credential_generations_pk": {
           "name": "credential_generations_pk",
-          "columns": [
-            "profile_id",
-            "generation_id"
-          ]
+          "columns": ["profile_id", "generation_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1727,12 +1656,8 @@
           "name": "demo_pins_challenge_id_pin_challenges_challenge_id_fk",
           "tableFrom": "demo_pins",
           "tableTo": "pin_challenges",
-          "columnsFrom": [
-            "challenge_id"
-          ],
-          "columnsTo": [
-            "challenge_id"
-          ],
+          "columnsFrom": ["challenge_id"],
+          "columnsTo": ["challenge_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1740,12 +1665,8 @@
           "name": "demo_pins_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "demo_pins",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1755,9 +1676,7 @@
         "demo_pins_challenge_id_unique": {
           "name": "demo_pins_challenge_id_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "challenge_id"
-          ]
+          "columns": ["challenge_id"]
         }
       },
       "policies": {},
@@ -1921,12 +1840,8 @@
           "name": "pin_challenges_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "pin_challenges",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2072,12 +1987,8 @@
           "name": "hosted_payload_publications_locator_hosted_payloads_locator_fk",
           "tableFrom": "hosted_payload_publications",
           "tableTo": "hosted_payloads",
-          "columnsFrom": [
-            "locator"
-          ],
-          "columnsTo": [
-            "locator"
-          ],
+          "columnsFrom": ["locator"],
+          "columnsTo": ["locator"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2085,12 +1996,8 @@
           "name": "hosted_payload_publications_profile_id_network_profiles_profile_id_fk",
           "tableFrom": "hosted_payload_publications",
           "tableTo": "network_profiles",
-          "columnsFrom": [
-            "profile_id"
-          ],
-          "columnsTo": [
-            "profile_id"
-          ],
+          "columnsFrom": ["profile_id"],
+          "columnsTo": ["profile_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2098,14 +2005,8 @@
           "name": "hosted_payload_publications_schema_fk",
           "tableFrom": "hosted_payload_publications",
           "tableTo": "schemas",
-          "columnsFrom": [
-            "profile_id",
-            "schema_uid"
-          ],
-          "columnsTo": [
-            "profile_id",
-            "schema_uid"
-          ],
+          "columnsFrom": ["profile_id", "schema_uid"],
+          "columnsTo": ["profile_id", "schema_uid"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
