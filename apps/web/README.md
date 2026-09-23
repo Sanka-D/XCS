@@ -39,6 +39,10 @@ Credential list. The RPC provider can observe the queried address and browser ne
 Aggregate statistics contain only ledger-derived metadata. See
 [`ADR 0002`](../../docs/adr/0002-public-product-and-discovery.md).
 
+The next-phase portal admission and private-claim access decisions are recorded in
+[ADR 0004](../../docs/adr/0004-role-based-application.md). They are not implemented: the current
+site remains accountless, and existing public payloads do not become private through this decision.
+
 ## Implemented site map
 
 English is the default, unprefixed locale. French remains available under `/fr` from the language

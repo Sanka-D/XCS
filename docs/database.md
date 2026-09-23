@@ -1,9 +1,13 @@
 # Database model
 
-PostgreSQL is a rebuildable read model of validated XRP Ledger history. It is not the source of XCS
-protocol truth and it stores neither XRPL signing keys nor Credential claim payloads. The application
-schema contains ten tables grouped around network evidence, indexer coordination, schema discovery,
-Credential lifecycle projection, and optional demo pinning.
+PostgreSQL separates a rebuildable projection of validated XRP Ledger history from application-owned
+data. It is not the source of XCS protocol truth and never stores XRPL signing keys. Existing public
+payload hosting stores canonical public bytes; private claims and review-document bytes must instead
+remain in access-controlled object storage.
+
+The [application ERD and complete data dictionary](database-app.md) cover the ten new `app_*` tables,
+invitation redemption and private-claim access helpers from issue #25. They are not yet exposed by
+authenticated site routes. The projection and operational tables below remain unchanged by #25.
 
 The Drizzle bookkeeping table in the internal `drizzle` schema is not part of the application model.
 
