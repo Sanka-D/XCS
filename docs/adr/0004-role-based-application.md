@@ -148,12 +148,31 @@ per-issuer allowlist proposal in issues #25 and #30; implementation must follow 
 
 ## Implementation status
 
-These are product decisions, not an implemented private credential feature. This ADR does not
-retire the current accountless Studio, change existing routes or make existing public payloads
-private.
+### Managed issuer payload storage (#31)
+
+The issuer workspace stores canonical payload bytes in private PostgreSQL application tables through
+a separate restricted `xcs_issuer` connection. The on-chain HTTPS URI uses an opaque `/q/` locator
+and the digest of the full canonical bytes. Publication records are bound to an exact validated
+credential generation, schema, issuer wallet and recipient wallet before disclosure begins.
+
+For private credentials, the issuer's current responsible account and the recipient may retrieve
+full bytes. Anonymous requests receive only the issuer-selected public claim fields after validated
+issuance; full payload digests cannot be verified from this projection. Administrator status confers
+no extra access. Verifier presentation endpoints remain #33 and must use the same authorization
+boundary, including the recipient's designated audience and revocation.
+
+Private bytes are never written to the accountless public hosting endpoint or browser recovery
+storage. This is application authorization, not end-to-end encryption: database administrators and
+backups can contain full payloads. Public disclosure is irreversible in practice; a later setting
+cannot recall copies. Keep private backups and document their retention with the deployment.
+
+The optional issuer workspace implements managed payload storage as described above. Recipient
+presentation management and verifier interfaces remain separate work. Existing accountless Studio
+routes and previously public payloads retain their public behavior.
 
 Issue #25 implements the [application data model and server-side helpers](../database-app.md).
-Authentication, private object delivery and the role-based site flows remain separate work.
+Issue #27 adds optional authentication, sessions and wallet linking; see the [authentication runbook](../runbooks/authentication.md).
+Private object delivery and the role-based mutation flows remain separate work.
 
 ## Implementation handoff
 

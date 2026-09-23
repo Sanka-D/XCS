@@ -1,0 +1,29 @@
+# Local issuer flow, after secrets, auth and admin overlays. SMTP remains local Mailpit.
+services:
+  db-bootstrap:
+    environment:
+      XCS_ISSUER_DATABASE_PASSWORD_FILE: /run/secrets/issuer_database_password
+    secrets: [issuer_database_password]
+
+  web:
+    environment:
+      XCS_ISSUER_ENABLED: '1'
+      NUXT_PUBLIC_ISSUER_ENABLED: '1'
+      NUXT_ISSUER_DATABASE_URL_FILE: /run/secrets/issuer_database_url
+      XCS_ISSUER_DOCUMENT_DIRECTORY: /var/lib/xcs-review
+      XCS_ISSUER_INVITE_DAYS: ${XCS_ISSUER_INVITE_DAYS:-7}
+      XCS_SMTP_HOST: mailpit
+      XCS_SMTP_PORT: '1025'
+    secrets: [issuer_database_url]
+    volumes:
+      - xcs-admin-documents:/var/lib/xcs-review:rw
+    networks: [edge, database, admin-mail]
+    depends_on:
+      mailpit:
+        condition: service_healthy
+
+secrets:
+  issuer_database_password:
+    file: ${XCS_ISSUER_DATABASE_PASSWORD_FILE:?Set XCS_ISSUER_DATABASE_PASSWORD_FILE}
+  issuer_database_url:
+    file: ${NUXT_ISSUER_DATABASE_URL_FILE:?Set NUXT_ISSUER_DATABASE_URL_FILE}

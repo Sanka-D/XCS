@@ -61,6 +61,8 @@ export type OperationBusinessContext =
       readonly expiration?: string | undefined
       /** Links consented hosted-payload bytes to this exact signed operation. */
       readonly publicationJobId?: string | undefined
+      /** Portal invitation UUID; never its bearer token. Adds cross-tab exclusion across wallets. */
+      readonly issuerInviteId?: string | undefined
     }
   | {
       readonly action:
@@ -219,6 +221,13 @@ export function validateOperationBusinessContext(input: unknown): OperationBusin
     }
     const expiration = optionalExpiration(candidate.expiration)
     const publicationJobId = candidate.publicationJobId
+    const issuerInviteId = candidate.issuerInviteId
+    if (
+      issuerInviteId !== undefined &&
+      (typeof issuerInviteId !== 'string' || !PUBLICATION_JOB_ID.test(issuerInviteId))
+    ) {
+      throw new Error('OPERATION_ISSUER_INVITE_ID_INVALID')
+    }
     if (
       publicationJobId !== undefined &&
       (typeof publicationJobId !== 'string' || !PUBLICATION_JOB_ID.test(publicationJobId))
@@ -235,6 +244,9 @@ export function validateOperationBusinessContext(input: unknown): OperationBusin
       ...(expiration ? { expiration } : {}),
       ...(typeof publicationJobId === 'string'
         ? { publicationJobId: publicationJobId.toLowerCase() }
+        : {}),
+      ...(typeof issuerInviteId === 'string'
+        ? { issuerInviteId: issuerInviteId.toLowerCase() }
         : {}),
     }
   }
@@ -653,6 +665,35 @@ function holdsBusinessLock(operation: StoredOperation): boolean {
   return confirmation === 'pending' || confirmation === 'timeout'
 }
 
+/** Preserve public tuple locks, with an additional invitation lock for the managed issuer flow. */
+export function operationConflictsWith(
+  existing: StoredOperation,
+  candidate: OperationSeed,
+): boolean {
+  if (existing.profileId !== candidate.profileId) return false
+  const previous = sanitizeOperationBusinessContext(existing.business)
+  const next = sanitizeOperationBusinessContext(candidate.business)
+  const key = operationBusinessKey(candidate.profileId, next)
+  if (
+    key &&
+    holdsBusinessLock(existing) &&
+    operationBusinessKey(existing.profileId, previous) === key
+  )
+    return true
+  if (
+    previous?.action !== 'credential-issue' ||
+    next?.action !== 'credential-issue' ||
+    !previous.issuerInviteId ||
+    previous.issuerInviteId !== next.issuerInviteId
+  )
+    return false
+  // A confirmed issue consumes this invitation even before portal metadata has been saved.
+  return (
+    holdsBusinessLock(existing) ||
+    (existing.stage === 'validated' && existing.engineResult === 'tesSUCCESS')
+  )
+}
+
 export class IndexedDbOperationJournal implements OperationJournal {
   readonly #factory: IDBFactory
   #databasePromise: Promise<IDBDatabase> | undefined
@@ -680,17 +721,7 @@ export class IndexedDbOperationJournal implements OperationJournal {
           if (existing.some((operation) => operation.operationId === seed.operationId)) {
             throw new Error('OPERATION_ID_ALREADY_EXISTS')
           }
-          const businessKey = operationBusinessKey(seed.profileId, business)
-          if (
-            businessKey &&
-            existing.some((operation) => {
-              const existingBusiness = sanitizeOperationBusinessContext(operation.business)
-              return (
-                holdsBusinessLock(operation) &&
-                operationBusinessKey(operation.profileId, existingBusiness) === businessKey
-              )
-            })
-          ) {
+          if (existing.some((operation) => operationConflictsWith(operation, normalizedSeed))) {
             throw new Error('OPERATION_BUSINESS_LOCKED')
           }
           store.put({
@@ -725,18 +756,11 @@ export class IndexedDbOperationJournal implements OperationJournal {
           )
           if (!existing) throw new Error('OPERATION_NOT_FOUND')
           if (existing.stage !== 'prepared') throw new Error('OPERATION_LOCK_OWNERSHIP_LOST')
-          const business = sanitizeOperationBusinessContext(existing.business)
-          const businessKey = operationBusinessKey(existing.profileId, business)
           if (
-            businessKey &&
             operations.some(
               (operation) =>
                 operation.operationId !== existing.operationId &&
-                holdsBusinessLock(operation) &&
-                operationBusinessKey(
-                  operation.profileId,
-                  sanitizeOperationBusinessContext(operation.business),
-                ) === businessKey,
+                operationConflictsWith(operation, existing),
             )
           ) {
             throw new Error('OPERATION_LOCK_OWNERSHIP_LOST')
@@ -884,20 +908,11 @@ export class IndexedDbOperationJournal implements OperationJournal {
     const operations = await this.list()
     const existing = operations.find((operation) => operation.operationId === operationId)
     if (!existing || !holdsBusinessLock(existing)) throw new Error('OPERATION_LOCK_OWNERSHIP_LOST')
-    const businessKey = operationBusinessKey(
-      existing.profileId,
-      sanitizeOperationBusinessContext(existing.business),
-    )
     if (
-      businessKey &&
       operations.some(
         (operation) =>
           operation.operationId !== existing.operationId &&
-          holdsBusinessLock(operation) &&
-          operationBusinessKey(
-            operation.profileId,
-            sanitizeOperationBusinessContext(operation.business),
-          ) === businessKey,
+          operationConflictsWith(operation, existing),
       )
     ) {
       throw new Error('OPERATION_LOCK_OWNERSHIP_LOST')

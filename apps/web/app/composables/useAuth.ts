@@ -32,10 +32,24 @@ export function useAuth() {
   }
 
   async function mutate<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+    return mutateApplication<T>(`/api/auth/${path}`, body)
+  }
+
+  async function mutateApplication<T>(path: string, body?: Record<string, unknown>): Promise<T> {
+    const target = new URL(path, 'https://xcs.invalid')
+    if (
+      target.origin !== 'https://xcs.invalid' ||
+      target.pathname !== path ||
+      target.search ||
+      target.hash ||
+      !/^\/api\/(?:auth|issuer)\//.test(target.pathname)
+    ) {
+      throw new Error('AUTH_PATH_INVALID')
+    }
     if (import.meta.server) throw new Error('AUTH_BROWSER_REQUIRED')
     if (!session.value?.csrfToken) throw new Error('AUTH_REQUIRED')
     try {
-      return await request<T>(`/api/auth/${path}`, {
+      return await request<T>(path, {
         method: 'POST',
         headers: { 'x-xcs-csrf': session.value.csrfToken },
         ...(body ? { body } : {}),
@@ -75,6 +89,7 @@ export function useAuth() {
     absoluteExpiresAt: computed(() => session.value?.absoluteExpiresAt),
     unavailable: readonly(unavailable),
     load,
+    mutateApplication,
     hasRole,
     checkRole: (role: AppRole, organizationId?: string) =>
       request('/api/auth/access', {

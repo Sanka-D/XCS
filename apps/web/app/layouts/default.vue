@@ -3,6 +3,7 @@ const { locale, locales, setLocale, t } = useI18n()
 const localePath = useLocalePath()
 const { account } = useWallet()
 const auth = useAuth()
+const issuerEnabled = String(useRuntimeConfig().public.issuerEnabled) === '1'
 await auth.load()
 const clientReady = ref(false)
 
@@ -29,6 +30,14 @@ const navigation = computed(() => [
     : []),
   { label: t('nav.docs'), to: localePath('/developers') },
   ...(auth.hasRole('admin') ? [{ label: t('admin.title'), to: localePath('/admin') }] : []),
+  ...(issuerEnabled && auth.user.value
+    ? [
+        {
+          label: t('auth.issuerSpace'),
+          to: localePath(auth.hasRole('issuer') ? '/issuer' : '/issuer/application'),
+        },
+      ]
+    : []),
 ])
 
 const footerLinks = computed(() => [

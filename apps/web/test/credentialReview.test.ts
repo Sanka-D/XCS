@@ -64,6 +64,23 @@ const report = {
 }
 
 describe('exact credential review', () => {
+  it('preserves restricted access as unavailable evidence and never approves a filtered view', async () => {
+    await expect(
+      loadCredentialReview({
+        credential,
+        report,
+        issuer: ISSUER,
+        subject: SUBJECT,
+        schemaUid: UID,
+        schema,
+        fetchPayload: true,
+        fetchImpl: async () =>
+          new Response('{"claims":{}}', {
+            headers: { 'content-type': 'application/json', 'x-xcs-claim-scope': 'public' },
+          }),
+      }),
+    ).rejects.toThrow('PAYLOAD_SCOPE_RESTRICTED')
+  })
   it('loads the exact HTTPS payload and permits a fully valid trusted acceptance', async () => {
     const review = await loadCredentialReview({
       credential,

@@ -30,6 +30,7 @@ import {
   canRetryOperation,
   completeOperationPublication,
   operationBusinessKey,
+  operationConflictsWith,
   serializeOperationReceipts,
   toSanitizedOperationReceipt,
   validateOperationBusinessContext,
@@ -707,6 +708,71 @@ describe('operation journal state', () => {
         schemaUid: tuple.schemaUid,
       }),
     ).not.toBe(operationBusinessKey(profileId, { action: 'credential-accept', ...tuple }))
+  })
+
+  it('preserves public tuple exclusion while locking one issuer invitation across recipient wallets', () => {
+    const business = validateOperationBusinessContext({
+      action: 'credential-issue',
+      issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+      subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+      schemaUid: 'a'.repeat(64),
+      issuerInviteId: '12345678-1234-4234-8234-123456789abc',
+    })
+    const existing = storedOperation({ business, stage: 'signed' })
+    const differentWallet = storedOperation({
+      operationId: 'second',
+      business: {
+        ...business,
+        action: 'credential-issue',
+        issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        subject: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        schemaUid: 'a'.repeat(64),
+      },
+    })
+    expect(operationConflictsWith(existing, differentWallet)).toBe(true)
+    const publicBusiness = validateOperationBusinessContext({
+      ...business,
+      issuerInviteId: undefined,
+    })
+    expect(operationConflictsWith(existing, storedOperation({ business: publicBusiness }))).toBe(
+      true,
+    )
+    expect(operationConflictsWith(storedOperation({ business: publicBusiness }), existing)).toBe(
+      true,
+    )
+    expect(
+      operationConflictsWith(
+        {
+          ...existing,
+          stage: 'validated',
+          engineResult: 'tesSUCCESS',
+          businessConfirmation: 'confirmed',
+        },
+        differentWallet,
+      ),
+    ).toBe(true)
+    expect(operationConflictsWith({ ...existing, stage: 'expired' }, differentWallet)).toBe(false)
+    expect(
+      operationConflictsWith(
+        { ...existing, stage: 'validated', engineResult: 'tecNO_TARGET' },
+        differentWallet,
+      ),
+    ).toBe(false)
+    expect(
+      operationConflictsWith(existing, { ...differentWallet, profileId: 'other-profile' }),
+    ).toBe(false)
+  })
+
+  it('rejects malformed portal invitation identifiers instead of silently dropping the lock', () => {
+    expect(() =>
+      validateOperationBusinessContext({
+        action: 'credential-issue',
+        issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+        schemaUid: 'a'.repeat(64),
+        issuerInviteId: 'bearer-token-is-not-an-invitation-UUID',
+      }),
+    ).toThrow('OPERATION_ISSUER_INVITE_ID_INVALID')
   })
 
   it('allows abandoning only an unsigned prepared draft', () => {

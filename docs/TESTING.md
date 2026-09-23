@@ -63,6 +63,13 @@ Unit and browser mocks prove application transitions; they do not prove a specif
 
 If a required environment is unavailable, report the exact skipped command and do not describe it as passing.
 
+## Authentication
+
+`pnpm --filter @xcs-protocol/web test:e2e:auth` runs the isolated OIDC browser flow on port 3127.
+It verifies sign-in, reload, denied issuer access, wallet link/unlink, logout and FR/EN copy.
+`pnpm test:postgres` also covers auth schema/grants and repository behavior through `xcs_app`.
+See [authentication boundaries and real-provider limitations](runbooks/authentication.md).
+
 ## Administrator portal (#30)
 
 Use a disposable PostgreSQL cluster: provisioning changes cluster-wide runtime role credentials,
@@ -87,3 +94,31 @@ public-key fingerprint in the test Chromium process; no OS trust is changed. It 
 sessions using the same PostgreSQL repository as authentication, exercises direct protected
 navigation and a real persisted decision, and revokes the admin role. It does not perform a real
 XRP Identity login. The mockup's human usability sessions remain unperformed.
+
+## Issuer workspace (#31)
+
+`XCS_E2E_PORT=3131 pnpm --filter @xcs-protocol/web exec playwright test e2e/issuer.spec.ts`
+checks onboarding, own-schema/invitation interfaces, FR/EN copy, denial states and fragment handling
+with API fixtures. `test/issuer-postgres.integration.test.ts` exercises actual restricted grants,
+claim concurrency, exact-generation recording and full/filtered payload responses. Storage, mail,
+input validation and engine recovery have focused unit suites. Run PostgreSQL suites sequentially
+on a disposable cluster. These checks do not prove live Identity login, real wallet consent or
+external email delivery. See [issuer deployment and privacy boundaries](runbooks/issuer.md).
+
+After building, the optional runtime suite uses real compiled Nitro, restricted PostgreSQL roles,
+Chromium HTTPS and local Mailpit. Set `XCS_TEST_DATABASE_URL` to an isolated disposable cluster and
+start Mailpit on the chosen ports, then run:
+
+```sh
+XCS_ISSUER_RUNTIME_TEST=1 XCS_ISSUER_RUNTIME_SMTP_PORT=5531 \
+  XCS_ISSUER_RUNTIME_MAILPIT_ORIGIN=http://127.0.0.1:8031 \
+  pnpm --filter @xcs-protocol/web exec vitest run test/issuer-runtime.integration.test.ts
+```
+
+This exercises application upload, invitation delivery and claim, and private payload disclosure
+without intercepting issuer endpoints. Approval, sessions and indexed ledger evidence are synthetic
+fixtures; no external mailbox, real Identity client or wallet signature is required.
+
+The default browser suite also runs `issuer-journal.spec.ts`: two real Chromium tabs contend for
+one invitation in native IndexedDB, then reload/recover it. To run only this test without a Nuxt
+server, use `pnpm --filter @xcs-protocol/web exec playwright test --config playwright.issuer-journal.config.ts`.

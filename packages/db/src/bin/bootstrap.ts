@@ -11,6 +11,7 @@ async function main(): Promise<void> {
   const applicationPassword = optionalEnvironment('XCS_APP_DATABASE_PASSWORD')
   const adminApplicationPassword = optionalEnvironment('XCS_ADMIN_DATABASE_PASSWORD')
   const notifierPassword = optionalEnvironment('XCS_NOTIFIER_DATABASE_PASSWORD')
+  const issuerPassword = optionalEnvironment('XCS_ISSUER_DATABASE_PASSWORD')
   const client = createDatabaseClient(databaseUrl, { onNotice: () => undefined })
 
   try {
@@ -24,9 +25,10 @@ async function main(): Promise<void> {
       ...(applicationPassword === undefined ? {} : { applicationPassword }),
       ...(adminApplicationPassword === undefined ? {} : { adminApplicationPassword }),
       ...(notifierPassword === undefined ? {} : { notifierPassword }),
+      ...(issuerPassword === undefined ? {} : { issuerPassword }),
     })
     process.stdout.write(
-      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', ...(applicationPassword === undefined ? [] : ['xcs_app']), ...(adminApplicationPassword === undefined ? [] : ['xcs_admin_app']), ...(notifierPassword === undefined ? [] : ['xcs_notifier'])] })}\n`,
+      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', ...(applicationPassword === undefined ? [] : ['xcs_app']), ...(adminApplicationPassword === undefined ? [] : ['xcs_admin_app']), ...(notifierPassword === undefined ? [] : ['xcs_notifier']), ...(issuerPassword === undefined ? [] : ['xcs_issuer'])] })}\n`,
     )
   } finally {
     await client.close()

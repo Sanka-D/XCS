@@ -28,12 +28,34 @@ flows available. No issuer/verifier auto-approval, admin override, invitation or
 
 ## Milestones
 
-1. **In progress:** verify provider and wallet contracts; add auth schema and least-privilege role.
-2. **Pending:** implement OIDC/session routes, CSRF, live permission guards and atomic wallet proofs.
-3. **Pending:** add bilingual account screens and navigation, with explicit unsupported-wallet states.
-4. **Pending:** test provider errors, session expiry/revocation, denied roles, invalid/replayed proofs,
+1. **Complete:** verify provider and wallet contracts; add auth schema and least-privilege role.
+2. **Complete:** implement OIDC/session routes, CSRF, live permission guards and atomic wallet proofs.
+3. **Complete:** add bilingual account screens and navigation, with explicit unsupported-wallet states.
+4. **Complete:** test provider errors, session expiry/revocation, denied roles, invalid/replayed proofs,
    restricted database grants, browser reload/logout and unchanged public routes.
-5. **Pending:** synchronize configuration, registration/deployment runbook and verification evidence.
+5. **Complete:** synchronize configuration, registration/deployment runbook and verification evidence.
+
+## Validation evidence
+
+- `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`: passed; 890 unit tests.
+- Focused authentication suites: 72 tests covering configuration, real OIDC exchanges with a
+  loopback provider, HTTP/session boundaries and wallet signatures.
+- `pnpm test:postgres`: 63 tests passed on a dedicated disposable PostgreSQL 18 cluster, including
+  restricted-role grants, additive migrations, concurrent proofs and logout during session rotation.
+- `pnpm --filter @xcs-protocol/web test:runtime`: 2 production Nuxt/PostgreSQL tests passed.
+- Browser suites: 42 tests passed (37 public flows, 3 production security, 2 OIDC/account flows).
+  The public suite used `XCS_E2E_PORT=3147` because the existing service on port 3100 was left running;
+  the security and auth suites used their normal isolated ports. Production builds completed first.
+- Compose base, development, secrets, auth and hosted-payload overlays rendered with their profiles.
+  Production DB/web images built and started with mounted secrets, read-only filesystems and uid 1000. Bootstrap, public liveness, unauthenticated session and denied issuer access passed.
+- `pnpm verify` stops at existing formatting in unchanged `docs/issue-25-plan.md`; its remaining
+  checks were run separately and passed. That unrelated document was left intact.
+- Real Identity client registration, provider login and extension consent remain unverified external
+  release prerequisites. See [the authentication runbook](runbooks/authentication.md).
+
+Validation caught and fixed raw PostgreSQL timestamp conversion, session-rotation/logout races and
+a nonreactive wallet-button dependency. Production image smoke also caught `pnpm deploy` stripping
+Nitro's nested dependency symlinks; the web image now preserves the complete generated output.
 
 ## Verification and rollout
 

@@ -43,6 +43,13 @@
       "when": 1790195791971,
       "tag": "0005_admin_review",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790199613077,
+      "tag": "0006_issuer_workspace",
+      "breakpoints": true
     }
   ]
 }

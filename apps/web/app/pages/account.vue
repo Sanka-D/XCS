@@ -10,16 +10,22 @@ const { user, expiresAt, absoluteExpiresAt } = auth
 const wallet = import.meta.client ? useXrplConnectWallet() : undefined
 const { account: walletAccount } = useWallet()
 const busy = ref(false)
+const mounted = ref(false)
+onMounted(() => {
+  mounted.value = true
+})
 const error = ref('')
 const notice = ref('')
-const canLink = computed(() =>
-  Boolean(
+const canLink = computed(() => {
+  // Read Vue's account ref before the SDK's plain getters can short-circuit tracking.
+  const current = walletAccount.value
+  return Boolean(
+    current?.network.id === 'testnet' &&
     wallet?.manager.connected &&
-    walletAccount.value?.network.id === 'testnet' &&
     ['gemwallet', 'metamask-snap', 'otsu'].includes(wallet.manager.wallet?.id ?? '') &&
     wallet.manager.supports('signMessage'),
-  ),
-)
+  )
+})
 const isLinked = computed(() =>
   user.value?.wallets.some(
     (link) => link.address === walletAccount.value?.address && link.networkId === 1,
@@ -94,11 +100,13 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
           <dd>{{ formatDate(absoluteExpiresAt) }} UTC</dd>
         </MetadataList>
         <div class="mt-5 flex flex-wrap gap-3">
-          <UButton :disabled="busy" @click="action(auth.refresh, 'auth.sessionExtended')">{{
-            $t('auth.extendSession')
-          }}</UButton>
           <UButton
-            :disabled="busy"
+            :disabled="!mounted || busy"
+            @click="action(auth.refresh, 'auth.sessionExtended')"
+            >{{ $t('auth.extendSession') }}</UButton
+          >
+          <UButton
+            :disabled="!mounted || busy"
             color="neutral"
             variant="outline"
             data-testid="auth-logout"
@@ -160,7 +168,7 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
                 <td class="p-3">{{ formatDate(linked.verifiedAt) }} UTC</td>
                 <td class="p-3">
                   <UButton
-                    :disabled="busy"
+                    :disabled="!mounted || busy"
                     color="neutral"
                     variant="outline"
                     :aria-label="$t('auth.unlinkAddress', { address: linked.address })"
@@ -181,7 +189,7 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             <p v-else-if="!canLink" class="mb-3 text-muted">{{ $t('auth.walletUnsupported') }}</p>
             <p v-else-if="isLinked" class="mb-3 text-muted">{{ $t('auth.alreadyLinked') }}</p>
             <UButton
-              :disabled="busy || !canLink || isLinked"
+              :disabled="!mounted || busy || !canLink || isLinked"
               :loading="busy"
               data-testid="auth-link-wallet"
               @click="action(link, 'auth.walletLinked')"

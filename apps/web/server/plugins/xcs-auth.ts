@@ -1,7 +1,13 @@
 import { defineNitroPlugin, useRuntimeConfig } from 'nitropack/runtime'
 import { createDatabaseClient } from '@xcs-protocol/db'
 import { loadAuthConfig } from '../xcs/auth/config'
-import { createAuthHandler, requireAuthRole, requireCsrf } from '../xcs/auth/http'
+import {
+  createAuthHandler,
+  readAuthSession,
+  requireAuthSession,
+  requireAuthRole,
+  requireCsrf,
+} from '../xcs/auth/http'
 import { OidcProvider } from '../xcs/auth/oidc'
 import { PostgresAuthRepository } from '../xcs/auth/repository'
 import type { H3Event } from 'h3'
@@ -10,6 +16,8 @@ import type { Session } from '../xcs/auth/types'
 declare module 'h3' {
   interface H3EventContext {
     xcsRequireAdmin?: (event: H3Event, mutation: boolean) => Promise<Session>
+    xcsRequireSession?: (event: H3Event, mutation: boolean) => Promise<Session>
+    xcsReadSession?: (event: H3Event) => Promise<Session | null>
   }
 }
 
@@ -41,6 +49,12 @@ export default defineNitroPlugin(async (nitroApp) => {
   const handler = createAuthHandler({ ...config, repository, provider })
   nitroApp.hooks.hook('request', (event) => {
     event.context.xcsAuth = handler
+    event.context.xcsReadSession = (request) => readAuthSession(request, repository)
+    event.context.xcsRequireSession = async (request, mutation) => {
+      const session = await requireAuthSession(request, repository)
+      if (mutation) requireCsrf(request, session, config.origin)
+      return session
+    }
     event.context.xcsRequireAdmin = async (request, mutation) => {
       const session = await requireAuthRole(request, repository, 'admin')
       if (mutation) requireCsrf(request, session, config.origin)

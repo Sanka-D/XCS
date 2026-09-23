@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Route } from '@playwright/test'
 
 test('signs in through OIDC, persists a session, denies issuer access, links and unlinks a wallet, then signs out', async ({
   page,
@@ -27,8 +27,26 @@ test('signs in through OIDC, persists a session, denies issuer access, links and
   await expect(page.getByTestId('auth-link-wallet')).toBeEnabled()
   await page.getByTestId('auth-link-wallet').click()
   await expect(page.getByTestId('linked-wallets').locator('tbody tr')).toHaveCount(1)
-  await page.reload()
-  await expect(page.getByTestId('linked-wallets').locator('tbody tr')).toHaveCount(1)
+  // Hold hydration deterministically: SSR mutation buttons must remain disabled
+  // until their click listeners are attached, even when the account is visible.
+  let releaseScripts!: () => void
+  const scriptsReady = new Promise<void>((resolve) => {
+    releaseScripts = resolve
+  })
+  const holdScripts = async (route: Route) => {
+    if (route.request().resourceType() === 'script') await scriptsReady
+    await route.continue()
+  }
+  await page.route('**/*', holdScripts)
+  try {
+    await page.reload({ waitUntil: 'commit' })
+    await expect(page.getByTestId('linked-wallets').locator('tbody tr')).toHaveCount(1)
+    await expect(page.getByTestId('linked-wallets').getByRole('button')).toBeDisabled()
+    await expect(page.getByTestId('auth-logout')).toBeDisabled()
+  } finally {
+    releaseScripts()
+    await page.unrouteAll({ behavior: 'wait' })
+  }
   await page.getByTestId('linked-wallets').getByRole('button').click()
   await expect(page.getByTestId('linked-wallets')).toHaveCount(0)
   await page.getByTestId('auth-logout').click()

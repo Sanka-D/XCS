@@ -8,7 +8,7 @@ import { signWalletLinkChallenge, type WalletProofManager } from '../app/utils/w
 import { verifyWalletProof, type WalletProof } from '../server/xcs/auth/wallet-proof'
 
 const message = 'XCS wallet link\norigin:https://xcs.example\nnetwork:testnet\nnonce:one-use'
-const keypair = deriveKeypair(generateSeed({ algorithm: 'secp256k1' }))
+const keypair = deriveKeypair(generateSeed({ algorithm: 'ecdsa-secp256k1' }))
 const address = deriveAddress(keypair.publicKey)
 
 function wallet(id = 'gemwallet') {
@@ -50,7 +50,7 @@ function wallet(id = 'gemwallet') {
 }
 
 describe('wallet proof cryptography', () => {
-  it.each(['secp256k1', 'ed25519'] as const)(
+  it.each(['ecdsa-secp256k1', 'ed25519'] as const)(
     'verifies genuine ripple %s signatures',
     (algorithm) => {
       const keys = deriveKeypair(generateSeed({ algorithm }))

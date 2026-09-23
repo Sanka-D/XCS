@@ -8,9 +8,12 @@ integrators.
 
 ## Public product and discovery
 
-The statements below describe the current accountless beta. The accepted next-phase portal and
-private-claim access policy is recorded in [ADR 0004](adr/0004-role-based-application.md); accounts,
-approval gates and private sharing are not implemented yet. Existing public payloads remain public.
+The public surfaces below retain their accountless beta behavior. The accepted next-phase portal and
+private-claim access policy is recorded in [ADR 0004](adr/0004-role-based-application.md). Optional
+accounts and wallet linking are available via the [authentication runbook](runbooks/authentication.md).
+Admin approval and the [issuer workspace](runbooks/issuer.md) implement applications, invitations
+and authorized private payload delivery. Recipient inbox/presentations and verifier workflows remain
+separate work. Existing public payloads remain public.
 
 - EAS and EASScan are UX references only. XCS uses native XRPL Credentials and does not reproduce
   the EAS contracts or attestation model.
@@ -25,8 +28,9 @@ approval gates and private sharing are not implemented yet. Existing public payl
   lists schema registrations, not Credential events.
 - Commons publishes no issuer badges, rankings or universal trust result. Issuer trust remains an
   application policy separate from ledger state, schema validity and payload integrity.
-- The beta has no XCS user or organization account. Wallet operations and receipts are local to one
-  browser, so clearing site data or moving devices loses that local history.
+- The public Studio requires no XCS account. Optional organization accounts add server-side
+  credential metadata; wallet operations and signed recovery receipts remain local to one browser,
+  so clearing site data or moving devices loses that local recovery history.
 - Issuance is one Credential at a time through a supported wallet. Batch issuance, teams, RBAC,
   hosted automation and GraphQL are outside the beta scope.
 - `@xcs-protocol/core`, `@xcs-protocol/sdk`, and `@xcs-protocol/cli` have reproducible tarball and
@@ -174,7 +178,9 @@ short HTTPS base URL until the upstream validator is fixed.
 
 The Commons Testnet beta uses issuer-hosted HTTPS payloads. The issuer must retain the exact
 canonical bytes, serve a JSON media type, enable CORS for the site, and keep the integrity-bound URL
-available. Commons does not store or index payload claims.
+available. The projection does not index payload claims. The optional issuer workspace separately
+stores canonical claims in private application tables; its authorization-aware URLs and backups
+must remain available for issued credentials. This storage is not end-to-end encryption.
 
 The JSON media type is an interoperability recommendation for browsers, not normative verification
 evidence. The optional server resolver classifies the observed, integrity-bound bytes even when

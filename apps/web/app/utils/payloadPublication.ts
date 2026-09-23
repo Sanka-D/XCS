@@ -80,7 +80,7 @@ export function inspectPilotHttpsPayloadHost(credentialUri: string): string {
     typeof window !== 'undefined' &&
     url.origin === window.location.origin &&
     url.search === '' &&
-    /^\/p\/(?:[0-9a-f]{18}|[0-9a-f]{20})$/u.test(url.pathname)
+    /^(?:\/p\/(?:[0-9a-f]{18}|[0-9a-f]{20})|\/q\/[0-9a-f]{18})$/u.test(url.pathname)
   )
     return hostname
   assertPilotPublicPayloadHostname(hostname)
@@ -185,6 +185,12 @@ export async function readCanonicalHttpsPayload(
     }
     if (!isJsonContentType(response.headers.get('content-type'))) {
       throw new Error('PAYLOAD_CONTENT_TYPE_INVALID')
+    }
+    // A deliberately filtered view cannot establish the full payload's digest.
+    // Keep it unavailable to this public reader; never escalate to credentialed access.
+    if (response.headers.get('x-xcs-claim-scope') === 'public') {
+      await response.body?.cancel().catch(() => undefined)
+      throw new Error('PAYLOAD_SCOPE_RESTRICTED')
     }
 
     let bytes: Uint8Array

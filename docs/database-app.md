@@ -1,15 +1,24 @@
 # Application data model — issue #25
 
-This is the implemented database model and server-side helper boundary, not a released account or
-private-hosting feature. [ADR 0004](adr/0004-role-based-application.md) records the accepted policy.
-The application is still accountless until authentication and the role-specific APIs are implemented.
+This is the implemented database model and server-side helper boundary.
+[ADR 0004](adr/0004-role-based-application.md) records the accepted policy. Optional authentication
+is implemented in #27, admin review in #30 and issuer mutations/private delivery in #31; see the
+[issuer runbook](runbooks/issuer.md) for deployment and remaining release checks.
 
 ## Ownership and authority
 
-The ten `app_*` tables are defined under `packages/db/src/schema/app/` and exported from
+The original ten `app_*` tables are defined under `packages/db/src/schema/app/` and exported from
 `@xcs-protocol/db`. Migration `0003_application_model.sql` adds them; migrations 0000–0002 and the
 projection definitions are unchanged. Drizzle generation includes both the existing projection
 entry point and the separate application entry point.
+
+Migrations 0004–0006 extend that model with sessions, review/audit and issuer delivery storage.
+`0006_issuer_workspace.sql` adds `app_issuer_payloads` (canonical payloads bounded to 1 MiB,
+unique opaque locator, invite/creator/subject, digest, URI and disclosure selectors) and
+`app_invite_deliveries` (attempt kind, destination, status and sanitized error code). Only token
+hashes persist in invitations; delivery rows contain no raw invitation bearer. Issuance and
+revocation delivery records are unique per invitation and event kind to prevent automatic resend.
+The dedicated `xcs_issuer` role cannot approve organizations, grant admins or write projection rows.
 
 An organization has one responsible human account, not a shared login. Issuer and verifier
 applications are independent. Personal roles are `admin` and `recipient`; organization roles are
@@ -247,7 +256,7 @@ means the credential itself is valid or accepted.
 private payload envelope into a public DTO. Object-field paths use RFC 6901, relative to `claims`:
 `/course/title`, with `~0` and `~1` escapes. Missing paths disclose nothing. Arrays are atomic: an
 explicit `/modules` shares the whole array; `/modules/0/name` is not supported and discloses nothing.
-Selecting an object explicitly shares its subtree; the future UI must preview that fact. Invalid,
+Selecting an object explicitly shares its subtree; the issuer UI previews that fact. Invalid,
 overlong, overly deep or prototype-sensitive selectors fail closed. The empty root pointer cannot
 mean “all private claims.” No cryptographic selective-disclosure proof is implied by a filtered view.
 
@@ -257,8 +266,8 @@ per pointer, 32 path segments. Unknown access scopes throw rather than returning
 
 Tokens use Node's standard `randomBytes(32)` and SHA-256, with no custom cryptography. Raw bearer
 tokens belong only in the delivery/link response, never database columns, logs or analytics. Private
-object storage, authenticated delivery, request limits and CSRF remain future endpoint requirements;
-these helpers alone do not implement those protections.
+object storage, authenticated delivery, request limits and CSRF are enforced by the issuer endpoints;
+these helpers alone do not implement those protections. Presentation routes remain separate work.
 
 ## PII, deletion and deployment
 
@@ -277,8 +286,8 @@ required retention are **not decided or implemented by this issue**. Do not clai
 erasure merely because fields can be nulled.
 
 The forward migration grants no new runtime privileges. Existing projection readers/indexer and
-public-payload writers must not be reused as unrestricted application writers. Provision a reviewed
-application role and server-only connection when the authenticated API is introduced. Nothing here
+public-payload writers must not be reused as unrestricted application writers. Issue #27 now provisions an optional, restricted `xcs_app` role and server-only connection for authentication;
+see the [authentication runbook](runbooks/authentication.md). Nothing here
 enables production private hosting or converts a public payload into a private one.
 
 ## Verification

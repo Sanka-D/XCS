@@ -14,6 +14,7 @@ import { chromium } from '@playwright/test'
 export async function startAdminRuntime(
   directory: string,
   databaseUrls: { api: string; auth: string; admin: string },
+  issuer?: { issuerDatabaseUrl: string; smtpPort: number },
 ) {
   const certPath = join(directory, 'tls.crt'),
     keyPath = join(directory, 'tls.key'),
@@ -77,6 +78,15 @@ export async function startAdminRuntime(
         XCS_ADMIN_ENABLED: '1',
         XCS_ADMIN_DOCUMENT_DIRECTORY: directory,
         XCS_ADMIN_DOCUMENT_KEY: 'synthetic-runtime-document-key-32-bytes',
+        ...(issuer
+          ? {
+              XCS_ISSUER_ENABLED: '1',
+              NUXT_ISSUER_DATABASE_URL: issuer.issuerDatabaseUrl,
+              XCS_ISSUER_DOCUMENT_DIRECTORY: directory,
+              XCS_SMTP_HOST: '127.0.0.1',
+              XCS_SMTP_PORT: String(issuer.smtpPort),
+            }
+          : {}),
       },
     },
   )
