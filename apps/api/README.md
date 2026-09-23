@@ -9,6 +9,8 @@ This REST API is the public integration contract for the accountless Testnet bet
 part of the beta. XRPL Commons may operate a shared instance, but PostgreSQL remains a reconstructible
 ledger projection rather than protocol truth. The API never accepts a signing seed or private key,
 and it does not persist credential payload claims submitted for verification.
+The separately enabled Testnet publication service below stores explicitly published public
+payloads; it is not enabled by verification requests.
 
 The server requires `XCS_INTERNAL_API_TOKEN` (32–256 URL-safe random characters). The private Nuxt
 SSR hop presents this token with an opaque HMAC key deterministically derived from the visitor
@@ -166,3 +168,26 @@ content is written.
 Credential event history and exact-transaction responses expose the event's `ledgerHash`,
 `transactionIndex`, and resulting `accepted` flag in addition to the transaction and credential
 tuple. Transaction hashes supplied in uppercase are accepted and returned as lowercase hexadecimal.
+
+## Optional hosted Testnet payloads
+
+Disabled by default. Enable with `XCS_HOSTED_PAYLOADS_ENABLED=true`, a short HTTPS origin in
+`XCS_PUBLIC_PAYLOAD_BASE_URL` (no path or trailing slash), comma-separated profile IDs in
+`XCS_HOSTED_PAYLOAD_NETWORKS`, and a distinct `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` of at least
+32 bytes. Docker uses the secret-file overlay described in the deployment runbook.
+The origin must keep the complete credential URI within XRPL's 128-byte limit.
+
+- `POST /v1/payloads/:locator` accepts `network`, `payloadBase64` and `signedTransactionBlob`.
+  It verifies the signature, exact URI/digest, issuer, subject, resolved schema and indexed
+  successful creation under fresh ledger evidence. Only Testnet network ID 1 is accepted.
+- `GET /p/:locator` (and HEAD) serves the exact canonical bytes with an immutable cache header.
+  Existing 20-hex locators remain readable; new publications use 18 hex characters.
+- Maximum size is 64 KiB; publication is idempotent for the same transaction and content.
+  Daily quotas are 50 publications per issuer and hashed requester IP. An existing locator
+  cannot be overwritten with different bytes. Claims field names are not a privacy filter;
+  publish only deliberately public, non-sensitive test data.
+
+The payload and quota records persist in PostgreSQL. Include these tables in backups: replaying
+XRPL cannot reconstruct off-chain payload bytes. Quota or availability failures can occur after
+the ledger transaction succeeds; the browser's publication recovery retries the same signed
+transaction without creating another credential. See [web recovery](../web/README.md#hosted-https-payloads).

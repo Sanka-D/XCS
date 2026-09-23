@@ -47,17 +47,17 @@ To enable the two adapters that require public application registration, optiona
 
 ```dotenv
 XCS_PUBLIC_XAMAN_API_KEY=public-xaman-application-id
-XCS_PUBLIC_XAMAN_REDIRECT_URL=https://xcs.example/
 XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID=public-reown-project-id
 ```
 
-Compose exposes these as `NUXT_PUBLIC_XAMAN_API_KEY`, `NUXT_PUBLIC_XAMAN_REDIRECT_URL` and
+Compose exposes these as `NUXT_PUBLIC_XAMAN_API_KEY` and
 `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID`. They are intentionally visible in browser JavaScript and
 must contain public identifiers or URLs only, never signing keys, API secrets, relay secrets or
-private RPC credentials. Register the exact redirect URL in the Xaman Developer Console. It must be
-the deployment's HTTPS origin with a trailing slash; loopback HTTP is accepted only for local
-development. If the redirect variable is omitted, XCS derives that same root URL from the browser
-origin. Omitting the application identifiers leaves the other six XRPL Connect adapters registered.
+private RPC credentials. Register the SDK's requested browser redirect URLs in the Xaman Developer
+Console. XRPL Connect rc.2 delegates redirect selection to Xaman's SDK, which uses the current page
+URL; XCS no longer consumes `NUXT_PUBLIC_XAMAN_REDIRECT_URL`. Check connection from both the homepage
+and deep-linked workflow pages before rollout. Omitting the application identifiers leaves the
+other six XRPL Connect adapters registered.
 
 Put the Commons primary WSS URL in the ignored file selected by `XCS_RPC_URL_PRIMARY_FILE`, supplying
 it out of band without logging or embedding its credentials. Put
@@ -315,9 +315,8 @@ rollback plans.
    query parameter is a provider secret.
 8. Optionally set `XCS_PUBLIC_XAMAN_API_KEY` and
    `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID` to the public application identifiers provisioned by
-   Xaman and Reown/WalletConnect. For Xaman, also set `XCS_PUBLIC_XAMAN_REDIRECT_URL` to the exact
-   HTTPS deployment origin with a trailing slash and register that URL in the Xaman Developer
-   Console. The same application key serves every visitor of that deployment, but a self-hosted
+   Xaman and Reown/WalletConnect. For Xaman, register the SDK's requested browser redirect URLs
+   in the Xaman Developer Console. The same application key serves every visitor of that deployment, but a self-hosted
    deployment on another origin needs its own Xaman application. Compose maps these values to the
    corresponding `NUXT_PUBLIC_*` runtime values. They are public client configuration, not secret
    files. Leave either application identifier empty to remove that adapter while retaining the six
@@ -519,7 +518,7 @@ running from the Compose stack (or another host) in the same region and VPC:
 | `NUXT_PUBLIC_PROFILE_ID`                | `XCS_PUBLIC_PROFILE_ID`                           |
 | `NUXT_PUBLIC_RPC_URL`                   | `XCS_PUBLIC_RPC_URL`                              |
 | `NUXT_PUBLIC_XAMAN_API_KEY`             | `XCS_PUBLIC_XAMAN_API_KEY`                        |
-| `NUXT_PUBLIC_XAMAN_REDIRECT_URL`        | `XCS_PUBLIC_XAMAN_REDIRECT_URL`                   |
+| `NUXT_PUBLIC_PAYLOAD_BASE_URL`          | `XCS_PUBLIC_PAYLOAD_BASE_URL` (optional overlay)  |
 | `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` | `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`            |
 | `NUXT_TRUSTED_PROXY_CIDRS`              | `XCS_TRUSTED_PROXY_CIDRS`                         |
 
@@ -530,8 +529,8 @@ Before the first deploy:
    `NUXT_API_BASE_URL`; never reuse the public URL for the SSR hop.
 2. Generate `NUXT_API_INTERNAL_TOKEN` through the tool (`# generate shared`) and place the same
    value in `XCS_INTERNAL_API_TOKEN_FILE` on the Compose host.
-3. Register the App Platform origin with a trailing slash in the Xaman Developer Console when
-   `NUXT_PUBLIC_XAMAN_API_KEY` is set.
+3. Register the SDK's redirect URLs for the App Platform deployment in the Xaman Developer Console
+   when `NUXT_PUBLIC_XAMAN_API_KEY` is set; verify homepage and deep-link connection.
 4. Determine the address the platform ingress presents to the container (log one request) and set
    `NUXT_TRUSTED_PROXY_CIDRS` to that exact range; leaving it empty collapses every visitor into one
    SSR rate-limit budget behind the ingress.
@@ -566,6 +565,37 @@ per-wallet/IP quotas, 64 KiB demo limit, 90-day retention, and cleanup job reduc
 detect all personal data. Never pin PII, secrets, or production credentials.
 
 ## Operations and rollback
+
+### Optional hosted payloads for Testnet testing
+
+This opt-in testing service is separate from the default issuer-hosted beta policy above.
+It does not change trust decisions, enable server-side payload fetching or approve a public launch.
+
+1. Back up PostgreSQL, then run the new `db-bootstrap` image before starting the new API.
+   Migrations `0001_hosted_payloads.sql` and `0002_hosted_payload_locator_compatibility.sql`
+   add the storage tables and preserve legacy 20-hex payload links. Do not rewrite previously
+   applied SQL or reset the indexer to apply them. Bootstrap also grants the API SELECT/INSERT
+   on these tables; it grants neither UPDATE nor DELETE.
+2. Configure `XCS_PUBLIC_PAYLOAD_BASE_URL` as a stable short HTTPS origin with `/p/*` forwarded
+   to the API, and `XCS_HOSTED_PAYLOAD_NETWORKS` as the explicit Testnet profile IDs. Configure
+   browser CORS using `XCS_ALLOWED_ORIGINS`. The API validates the 128-byte final URI limit.
+3. Set `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE` to an ignored file containing a distinct
+   random secret of at least 32 bytes, readable by the container's unprivileged `node` user.
+4. Add `-f docker-compose.hosted-payloads.yml` to the normal Compose invocation, after the
+   base and production secret overlays, with `--profile site`. It enables API publication and
+   passes the matching payload origin to Nuxt. Run `config --quiet` before `up`.
+
+For App Platform web deployments, set `NUXT_PUBLIC_PAYLOAD_BASE_URL` to the same origin;
+the separately deployed API still needs the configuration documented in its README.
+For a host-side API process use `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` directly; `_FILE` loading
+belongs to the Docker entrypoint, not the TypeScript configuration loader.
+
+A localhost HTTPS origin tests only clients on that machine. It is not a shareable public
+payload host. Never promise durability from a rotating tunnel or clear the browser recovery
+queue before an interrupted publication is recovered. Disabling this service removes payload
+routes: keep reads available for existing credentials when rolling back write functionality.
+
+### General operations
 
 - Back up PostgreSQL and the exact network profile together. Kubo blocks are reconstructable only
   while their source payload still exists.

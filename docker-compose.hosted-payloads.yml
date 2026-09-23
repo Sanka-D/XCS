@@ -1,0 +1,17 @@
+# Optional Testnet-only storage. Combine with the normal stack and, for a hosted
+# deployment, docker-compose.secrets.yml. The default stack keeps storage disabled.
+services:
+  api:
+    environment:
+      XCS_HOSTED_PAYLOADS_ENABLED: 'true'
+      XCS_PUBLIC_PAYLOAD_BASE_URL: ${XCS_PUBLIC_PAYLOAD_BASE_URL:?Set a stable HTTPS payload origin}
+      XCS_HOSTED_PAYLOAD_NETWORKS: ${XCS_HOSTED_PAYLOAD_NETWORKS:?Set allowed Testnet profile IDs}
+      XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE: /run/secrets/payload_storage_ip_hash_secret
+    secrets: [payload_storage_ip_hash_secret]
+  web:
+    environment:
+      NUXT_PUBLIC_PAYLOAD_BASE_URL: ${XCS_PUBLIC_PAYLOAD_BASE_URL:?Set a stable HTTPS payload origin}
+
+secrets:
+  payload_storage_ip_hash_secret:
+    file: ${XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE:?Set XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE}

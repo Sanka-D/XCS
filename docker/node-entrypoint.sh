@@ -52,6 +52,7 @@ for secret_variable in \
   XCS_RPC_URL_PRIMARY \
   XCS_RPC_URL_SECONDARY \
   XCS_PINNING_IP_HASH_SECRET \
+  XCS_PAYLOAD_STORAGE_IP_HASH_SECRET \
   NUXT_API_INTERNAL_TOKEN
 do
   load_secret "$secret_variable"

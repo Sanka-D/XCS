@@ -21,6 +21,12 @@ XCS_DATABASE_PASSWORD_FILE="$special_password_file" \
     if (process.env.XCS_DATABASE_PASSWORD_FILE !== undefined) process.exit(1)
   '
 
+XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE="$special_password_file" \
+  sh docker/node-entrypoint.sh node -e '
+    if (process.env.XCS_PAYLOAD_STORAGE_IP_HASH_SECRET !== "p@ss:/?#%with spaces") process.exit(1)
+    if (process.env.XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE !== undefined) process.exit(1)
+  '
+
 conflict_output=''
 if conflict_output="$(
   XCS_DATABASE_PASSWORD=never-print-this-value \
