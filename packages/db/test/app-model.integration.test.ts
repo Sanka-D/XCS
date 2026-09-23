@@ -124,7 +124,7 @@ describe.skipIf(!adminUrl)('application model on PostgreSQL', () => {
 
   beforeEach(async () => {
     // Only this suite's isolated database and application tables are reset.
-    await database.sql`TRUNCATE app_presentations, app_credential_metadata, app_invites, app_schema_metadata, app_documents, app_organization_applications, app_wallets, app_user_roles, app_organizations, app_users`
+    await database.sql`TRUNCATE app_wallet_challenges, app_sessions, app_auth_transactions, app_presentations, app_credential_metadata, app_invites, app_schema_metadata, app_documents, app_organization_applications, app_wallets, app_user_roles, app_organizations, app_users`
     await database.db.insert(appUsers).values(
       Object.entries(ids)
         .filter(([name]) => !name.endsWith('Org'))
@@ -202,7 +202,7 @@ describe.skipIf(!adminUrl)('application model on PostgreSQL', () => {
         SELECT count(*)::integer AS count FROM information_schema.tables
         WHERE table_schema = 'public' AND left(table_name, 4) = 'app_'
       `
-      expect(row?.count).toBe(10)
+      expect(row?.count).toBe(13)
       expect(await fresh.db.select().from(appUsers)).toEqual([])
     } finally {
       await fresh.close()

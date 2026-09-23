@@ -20,6 +20,24 @@ function client(): DatabaseClient {
 }
 
 describe('runtime database role provisioning', () => {
+  it.each(['short', 'd'.repeat(32), 'i'.repeat(32)])(
+    'rejects invalid or reused optional application passwords',
+    async (applicationPassword) => {
+      const database = client()
+      await expect(
+        provisionRuntimeDatabaseRoles(database, {
+          clusterScope: 'dedicated',
+          administratorPassword: 'd'.repeat(32),
+          indexerPassword: 'i'.repeat(32),
+          apiPassword: 'a'.repeat(32),
+          payloadWriterPassword: 'p'.repeat(32),
+          monitorPassword: 'm'.repeat(32),
+          applicationPassword,
+        }),
+      ).rejects.toThrow()
+      expect(database.sql.begin).not.toHaveBeenCalled()
+    },
+  )
   it('rejects invalid bootstrap configuration before reserving a connection or applying DDL', async () => {
     const database = client()
     await expect(

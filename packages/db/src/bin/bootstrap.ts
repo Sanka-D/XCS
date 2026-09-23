@@ -4,10 +4,11 @@ import {
   parseDatabaseClusterScope,
 } from '../bootstrap.js'
 import { createDatabaseClient } from '../client.js'
-import { requiredEnvironment } from './environment.js'
+import { optionalEnvironment, requiredEnvironment } from './environment.js'
 
 async function main(): Promise<void> {
   const databaseUrl = requiredEnvironment('XCS_BOOTSTRAP_DATABASE_URL')
+  const applicationPassword = optionalEnvironment('XCS_APP_DATABASE_PASSWORD')
   const client = createDatabaseClient(databaseUrl, { onNotice: () => undefined })
 
   try {
@@ -18,9 +19,10 @@ async function main(): Promise<void> {
       apiPassword: requiredEnvironment('XCS_API_DATABASE_PASSWORD'),
       payloadWriterPassword: requiredEnvironment('XCS_PAYLOAD_DATABASE_PASSWORD'),
       monitorPassword: requiredEnvironment('XCS_MONITOR_DATABASE_PASSWORD'),
+      ...(applicationPassword === undefined ? {} : { applicationPassword }),
     })
     process.stdout.write(
-      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer'] })}\n`,
+      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', ...(applicationPassword === undefined ? [] : ['xcs_app'])] })}\n`,
     )
   } finally {
     await client.close()

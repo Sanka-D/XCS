@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { requiredEnvironment } from '../src/bin/environment.js'
+import { optionalEnvironment, requiredEnvironment } from '../src/bin/environment.js'
 
 const directories: string[] = []
 afterEach(() => {
@@ -21,6 +21,18 @@ function fixture(value: string): string {
 }
 
 describe('database command environment', () => {
+  it('disables an absent application password but rejects an explicitly empty one', () => {
+    vi.stubEnv('XCS_APP_DATABASE_PASSWORD', undefined)
+    vi.stubEnv('XCS_APP_DATABASE_PASSWORD_FILE', undefined)
+    expect(optionalEnvironment('XCS_APP_DATABASE_PASSWORD')).toBeUndefined()
+    vi.stubEnv('XCS_APP_DATABASE_PASSWORD', '')
+    expect(() => optionalEnvironment('XCS_APP_DATABASE_PASSWORD')).toThrow(
+      'DATABASE_ENVIRONMENT_REQUIRED',
+    )
+    vi.stubEnv('XCS_APP_DATABASE_PASSWORD', undefined)
+    vi.stubEnv('XCS_APP_DATABASE_PASSWORD_FILE', fixture('application-fixture-password\n'))
+    expect(optionalEnvironment('XCS_APP_DATABASE_PASSWORD')).toBe('application-fixture-password')
+  })
   it('uses a direct URL or a one-line secret file without changing encoded credentials', () => {
     const value = 'postgres://test:fixture%25encoded@127.0.0.1/example?sslmode=verify-full'
     vi.stubEnv('XCS_BOOTSTRAP_DATABASE_URL_FILE', undefined)

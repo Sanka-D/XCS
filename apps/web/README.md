@@ -1,6 +1,6 @@
 # XCS Testnet web app
 
-The Nuxt application is the accountless, non-custodial Testnet site for XCS. Its public navigation
+The Nuxt application is a non-custodial Testnet site for XCS, with optional XRP Identity sign-in. Its public navigation
 keeps four entries—Explorer, Create, Verify and Docs—while preserving the schema, issuance,
 lifecycle and developer workflows in one deployment. EAS and EASScan are interaction-design
 references only; the site constructs native XRPL transactions under the frozen XCS v0.1 protocol.
@@ -41,7 +41,7 @@ Aggregate statistics contain only ledger-derived metadata. See
 
 The next-phase portal admission and private-claim access decisions are recorded in
 [ADR 0004](../../docs/adr/0004-role-based-application.md). They are not implemented: the current
-site remains accountless, and existing public payloads do not become private through this decision.
+site remains public by default, and existing public payloads do not become private through this decision.
 
 ## Implemented site map
 
@@ -547,3 +547,11 @@ removal and issuer revocation return to that same generation page so its updated
 can be reviewed. A generation-bound subject action resolves that generation before the tuple lookup
 and rejects a connected wallet that is not its subject, instead of surfacing a misleading tuple 404.
 Reconfirmation never reads a signed blob, connects to XRPL or rebroadcasts the transaction.
+
+## Optional authentication
+
+Issue #27 adds `/account`, XRP Identity code/PKCE sign-in, PostgreSQL sessions, role guards and
+Testnet wallet linking. It is disabled by default and requires a registered OIDC client, migration
+0004 and a dedicated `xcs_app` connection. See the [authentication runbook](../../docs/runbooks/authentication.md)
+for configuration, supported wallet formats, testing and rollout limitations. The existing public
+Studio and verification routes keep their accountless behavior.

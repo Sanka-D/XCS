@@ -153,7 +153,8 @@ retire the current accountless Studio, change existing routes or make existing p
 private.
 
 Issue #25 implements the [application data model and server-side helpers](../database-app.md).
-Authentication, private object delivery and the role-based site flows remain separate work.
+Issue #27 adds optional authentication, sessions and wallet linking; see the [authentication runbook](../runbooks/authentication.md).
+Private object delivery and the role-based mutation flows remain separate work.
 
 ## Implementation handoff
 

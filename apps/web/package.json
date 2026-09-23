@@ -11,11 +11,12 @@
     "start": "node .output/server/index.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:postgres": "XCS_REQUIRE_POSTGRES_TESTS=1 vitest run test/api/suites/postgres.integration.test.ts",
+    "test:postgres": "XCS_REQUIRE_POSTGRES_TESTS=1 vitest run --no-file-parallelism test/api/suites/postgres.integration.test.ts test/auth-postgres.integration.test.ts",
     "test:runtime": "XCS_REQUIRE_RUNTIME_TESTS=1 vitest run test/api/runtime.integration.test.ts",
     "test:e2e": "playwright test",
     "test:e2e:security": "playwright test --config playwright.security.config.ts",
-    "typecheck": "NODE_ENV=development XCS_BROWSER_E2E=0 XCS_LOCAL_PAYLOAD_STORE=0 nuxt typecheck"
+    "typecheck": "NODE_ENV=development XCS_BROWSER_E2E=0 XCS_LOCAL_PAYLOAD_STORE=0 nuxt typecheck",
+    "test:e2e:auth": "playwright test --config playwright.auth.config.ts"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.135",
@@ -34,7 +35,9 @@
     "nuxt": "^4.5.2",
     "nuxt-security": "2.6.0",
     "ofetch": "^1.5.1",
+    "openid-client": "6.8.8",
     "rate-limiter-flexible": "^7.3.1",
+    "ripple-keypairs": "3.0.0",
     "undici": "^7.13.0",
     "vue": "^3.5.21",
     "vue-router": "^5.2.0",

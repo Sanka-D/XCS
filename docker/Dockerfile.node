@@ -30,7 +30,13 @@ RUN test -n "$XCS_PACKAGE" && pnpm --filter "$XCS_PACKAGE..." build
 RUN --mount=type=cache,id=xcs-pnpm-store,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store && \
     pnpm --filter "$XCS_PACKAGE" --prod deploy --legacy /runtime && \
-    rm -rf /runtime/src /runtime/test /runtime/coverage /runtime/.turbo
+    rm -rf /runtime/src /runtime/test /runtime/coverage /runtime/.turbo && \
+    if [ "$XCS_PACKAGE" = '@xcs-protocol/web' ]; then \
+      rm -rf /runtime/.output && cp -a apps/web/.output /runtime/.output; \
+    fi
+
+# pnpm deploy filters nested symlinks. Preserve Nitro's self-contained output,
+# including .nitro links used when dependencies have multiple runtime versions.
 
 FROM ${XCS_NODE_IMAGE} AS runtime
 

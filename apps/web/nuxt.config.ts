@@ -96,6 +96,7 @@ export default defineNuxtConfig({
         '@xrpl-commons/xrpl-connect-vue',
         'xrpl',
         'xrpl-connect',
+        'ripple-keypairs',
       ],
       // Served unbundled so the CSS-injection strip above also runs in dev.
       exclude: ['vaul-vue'],
@@ -139,7 +140,7 @@ export default defineNuxtConfig({
         'base-uri': ["'none'"],
         'connect-src': cspConnectSources,
         'font-src': ["'self'"],
-        'form-action': ["'self'"],
+        'form-action': ["'self'", 'https://account.xrpl.in'],
         'frame-ancestors': ["'none'"],
         'frame-src': ["'none'"],
         'img-src': ["'self'", 'data:'],

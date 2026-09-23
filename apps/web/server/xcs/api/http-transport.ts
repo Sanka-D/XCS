@@ -81,7 +81,7 @@ class RequestError extends Error {
 }
 
 // Bound bytes while reading, not only Content-Length: chunked bodies are equally untrusted.
-async function readJsonBody(event: H3Event, maxBytes: number): Promise<unknown> {
+export async function readJsonBody(event: H3Event, maxBytes: number): Promise<unknown> {
   const contentType = getHeader(event, 'content-type')?.split(';')[0]?.trim().toLowerCase()
   if (contentType !== 'application/json') {
     throw new RequestError(415, 'Unsupported Media Type')

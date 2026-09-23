@@ -43,6 +43,10 @@ load_secret() {
 # interpreted, and secret values are never included in diagnostics.
 for secret_variable in \
   XCS_BOOTSTRAP_DATABASE_URL \
+  XCS_APP_DATABASE_PASSWORD \
+  XCS_IDENTITY_CLIENT_ID \
+  XCS_IDENTITY_CLIENT_SECRET \
+  NUXT_APP_DATABASE_URL \
   XCS_DATABASE_PASSWORD \
   XCS_POSTGRES_ADMIN_PASSWORD \
   XCS_INDEXER_DATABASE_PASSWORD \

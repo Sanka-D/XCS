@@ -2,7 +2,7 @@
 
 This is the implemented database model and server-side helper boundary, not a released account or
 private-hosting feature. [ADR 0004](adr/0004-role-based-application.md) records the accepted policy.
-The application is still accountless until authentication and the role-specific APIs are implemented.
+Optional authentication is implemented in #27; role-specific mutation and private-delivery APIs remain separate work.
 
 ## Ownership and authority
 
@@ -277,8 +277,8 @@ required retention are **not decided or implemented by this issue**. Do not clai
 erasure merely because fields can be nulled.
 
 The forward migration grants no new runtime privileges. Existing projection readers/indexer and
-public-payload writers must not be reused as unrestricted application writers. Provision a reviewed
-application role and server-only connection when the authenticated API is introduced. Nothing here
+public-payload writers must not be reused as unrestricted application writers. Issue #27 now provisions an optional, restricted `xcs_app` role and server-only connection for authentication;
+see the [authentication runbook](runbooks/authentication.md). Nothing here
 enables production private hosting or converts a public payload into a private one.
 
 ## Verification

@@ -50,6 +50,10 @@ jobs:
           printf '%s' "$XCS_PAYLOAD_DATABASE_PASSWORD" > "$SECRET_DIRECTORY/payload_database_password"
           printf '%s' "$XCS_RPC_URL_PRIMARY" > "$SECRET_DIRECTORY/rpc_url_primary"
           printf '%s' "$XCS_RPC_URL_SECONDARY" > "$SECRET_DIRECTORY/rpc_url_secondary"
+          printf '%s' 'compose-ci-application-password-000001' > "$SECRET_DIRECTORY/app_database_password"
+          printf '%s' 'postgres://xcs_app:compose-ci-application-password-000001@postgres:5432/xcs' > "$SECRET_DIRECTORY/app_database_url"
+          printf '%s' 'compose-ci-identity-client' > "$SECRET_DIRECTORY/identity_client_id"
+          printf '%s' 'compose-ci-identity-secret' > "$SECRET_DIRECTORY/identity_client_secret"
           # Compose file-backed secrets retain the host mode. The directory is
           # private while 0644 lets each image's distinct unprivileged UID read
           # only the files explicitly mounted into that service.
@@ -65,6 +69,12 @@ jobs:
             echo "XCS_PAYLOAD_DATABASE_PASSWORD_FILE=$SECRET_DIRECTORY/payload_database_password"
             echo "XCS_RPC_URL_PRIMARY_FILE=$SECRET_DIRECTORY/rpc_url_primary"
             echo "XCS_RPC_URL_SECONDARY_FILE=$SECRET_DIRECTORY/rpc_url_secondary"
+            echo "XCS_APP_DATABASE_PASSWORD_FILE=$SECRET_DIRECTORY/app_database_password"
+            echo "NUXT_APP_DATABASE_URL_FILE=$SECRET_DIRECTORY/app_database_url"
+            echo "XCS_IDENTITY_CLIENT_ID_FILE=$SECRET_DIRECTORY/identity_client_id"
+            echo "XCS_IDENTITY_CLIENT_SECRET_FILE=$SECRET_DIRECTORY/identity_client_secret"
+            echo "XCS_AUTH_ORIGIN=https://xcs.example"
+
           } >> "$GITHUB_ENV"
 
       - name: Render and validate every Compose profile
@@ -82,6 +92,19 @@ jobs:
             XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE="$XCS_METRICS_TOKEN_FILE" \
             docker compose -f docker-compose.yml -f docker-compose.secrets.yml \
               -f docker-compose.hosted-payloads.yml --profile monitoring --profile demo-pinning --profile maintenance config --quiet
+
+          docker compose -f docker-compose.yml -f docker-compose.secrets.yml -f docker-compose.auth.yml \
+            --profile maintenance --profile monitoring --profile demo-pinning config --format json \
+            > "$RUNNER_TEMP/xcs-compose-auth.json"
+          jq -e '
+            (.services.web.environment.XCS_AUTH_ENABLED == "1") and
+            (.services.web.environment.NUXT_APP_DATABASE_URL == null) and
+            (.services.web.environment.NUXT_APP_DATABASE_URL_FILE == "/run/secrets/app_database_url") and
+            (.services.web.environment.XCS_IDENTITY_CLIENT_SECRET == null) and
+            (.services.web.environment.XCS_IDENTITY_CLIENT_SECRET_FILE == "/run/secrets/identity_client_secret") and
+            (.services["db-bootstrap"].environment.XCS_APP_DATABASE_PASSWORD_FILE == "/run/secrets/app_database_password") and
+            (.services.indexer.environment.XCS_APP_DATABASE_PASSWORD_FILE == null)
+          ' "$RUNNER_TEMP/xcs-compose-auth.json"
 
           mapfile -t DEFAULT_SERVICES < <(docker compose config --services | sort)
           EXPECTED=(db-bootstrap indexer postgres web)

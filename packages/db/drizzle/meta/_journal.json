@@ -29,6 +29,13 @@
       "when": 1790192599816,
       "tag": "0003_application_model",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790194700162,
+      "tag": "0004_auth_sessions",
+      "breakpoints": true
     }
   ]
 }

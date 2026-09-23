@@ -8,9 +8,9 @@ integrators.
 
 ## Public product and discovery
 
-The statements below describe the current accountless beta. The accepted next-phase portal and
-private-claim access policy is recorded in [ADR 0004](adr/0004-role-based-application.md); accounts,
-approval gates and private sharing are not implemented yet. Existing public payloads remain public.
+The public surfaces below retain their accountless beta behavior. The accepted next-phase portal and
+private-claim access policy is recorded in [ADR 0004](adr/0004-role-based-application.md); optional accounts and wallet linking are now available via the [authentication runbook](runbooks/authentication.md);
+portal approval workflows and private delivery remain unimplemented. Existing public payloads remain public.
 
 - EAS and EASScan are UX references only. XCS uses native XRPL Credentials and does not reproduce
   the EAS contracts or attestation model.

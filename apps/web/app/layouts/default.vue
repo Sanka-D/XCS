@@ -2,6 +2,8 @@
 const { locale, locales, setLocale, t } = useI18n()
 const localePath = useLocalePath()
 const { account } = useWallet()
+const auth = useAuth()
+await auth.load()
 const clientReady = ref(false)
 
 const localeItems = computed(() =>
@@ -88,6 +90,16 @@ onMounted(() => {
           />
         </div>
         <WalletButton />
+        <UButton
+          v-if="auth.enabled.value"
+          :to="localePath(auth.user.value ? '/account' : '/auth/login')"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          data-testid="auth-account-link"
+        >
+          {{ $t(auth.user.value ? 'auth.account' : 'auth.signIn') }}
+        </UButton>
       </template>
 
       <template #body>

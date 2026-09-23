@@ -46,7 +46,9 @@ export const appUserRoles = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => appUsers.id, { onDelete: 'restrict' }),
-    role: text('role', { enum: ['admin', 'recipient'] }).notNull(),
+    role: text('role', { enum: ['admin', 'recipient'] })
+      .notNull()
+      .default('recipient'),
     grantedBy: uuid('granted_by').references(() => appUsers.id, { onDelete: 'restrict' }),
     grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),

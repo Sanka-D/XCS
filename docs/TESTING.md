@@ -62,3 +62,10 @@ Unit and browser mocks prove application transitions; they do not prove a specif
 - Web tests prove user-visible workflow transitions and that signing remains in the wallet.
 
 If a required environment is unavailable, report the exact skipped command and do not describe it as passing.
+
+## Authentication
+
+`pnpm --filter @xcs-protocol/web test:e2e:auth` runs the isolated OIDC browser flow on port 3127.
+It verifies sign-in, reload, denied issuer access, wallet link/unlink, logout and FR/EN copy.
+`pnpm test:postgres` also covers auth schema/grants and repository behavior through `xcs_app`.
+See [authentication boundaries and real-provider limitations](runbooks/authentication.md).
