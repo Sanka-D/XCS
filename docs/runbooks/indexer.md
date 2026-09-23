@@ -59,6 +59,12 @@ new empty database; never update this profile in place.
 
 ## Healthy state
 
+Quorum comparison excludes the documented synthetic API metadata fields `nftoken_id`,
+`nftoken_ids`, `offer_id`, `mpt_issuance_id` and lowercase `delivered_amount`.
+Nodes can add these at request time without changing ledger contents. Canonical metadata,
+including `AffectedNodes` and uppercase `DeliveredAmount`, remains subject to strict comparison.
+Do not bypass a divergence by comparing ledger hashes alone or resetting the checkpoint.
+
 Readiness requires matching normalized ledgers from both sources, a live fenced writer lease, the
 configured amendment and activation hash, no ledger gap, and a fresh checkpoint whose index/hash
 exactly matches the writer's agreed state and includes a transaction root.
