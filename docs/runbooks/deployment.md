@@ -77,7 +77,7 @@ PostgreSQL volume is new. Never delete an unfamiliar or legacy volume to make th
 ```sh
 docker volume inspect xcs-controlled-pilot_xcs-postgres
 docker compose config --quiet
-docker compose --profile site up --build
+docker compose up --build
 ```
 
 The initial `docker volume inspect` is expected to report that the volume does not exist. If it
@@ -92,8 +92,8 @@ artifacts only as explicitly labelled staging evidence.
 
 ### Replacing the legacy `XRPL-Commons/xcs` MVP
 
-The generated `packages/db/drizzle/0000_baseline.sql` is the complete current schema for the new XCS
-indexer projection. It is **not** an in-place upgrade from the former root-level Nuxt/Drizzle MVP:
+The generated `packages/db/drizzle/0000_baseline.sql` initializes the XCS indexer projection;
+later journaled migrations add optional payload storage. It is **not** an in-place upgrade from the former root-level Nuxt/Drizzle MVP:
 both schemas define `public.schemas` with incompatible keys and columns, and the legacy application
 also owns a different `credentials` table. Never run the bootstrap against a PostgreSQL database
 or Compose volume previously used by that application.
@@ -140,7 +140,7 @@ Before recreating a PostgreSQL 18 container that ever used the old mount:
    `docker volume prune`; keep every named and anonymous volume until restoration has been verified.
 
    ```sh
-   docker compose stop web api indexer postgres
+   docker compose stop web indexer postgres
    ```
 
 4. With the corrected parent mount, initialize PostgreSQL, apply the same XCS baseline, restore the
@@ -162,30 +162,32 @@ pinning rows separately because they are not reconstructable from XRPL.
 
 The reference deployment separates schema ownership from runtime access:
 
-| Identity      | Use                                   | Database rights                                                                                                                                                                                                      |
-| ------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `xcs_admin`   | One-shot database bootstrap           | Schema/DDL and role administration; never used by a runtime service                                                                                                                                                  |
-| `xcs_indexer` | Indexer and maintenance replay        | `SELECT`/`INSERT` on `network_profiles`, `ledger_checkpoints`, `schema_events`, `schemas`, `credential_events`, and `indexer_incidents`; `SELECT`/`INSERT`/`UPDATE` on `indexer_status` and `credential_generations` |
-| `xcs_api`     | Read API and optional Testnet pinning | `SELECT` on projections; CRUD on `pin_challenges` and `demo_pins` only                                                                                                                                               |
-| `xcs_monitor` | PostgreSQL exporter                   | `pg_monitor`; no DML rights on XCS application tables                                                                                                                                                                |
+| Identity             | Use                                        | Database rights                                                                                                                                                                                                      |
+| -------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xcs_admin`          | One-shot database bootstrap                | Schema/DDL and role administration; never used by a runtime service                                                                                                                                                  |
+| `xcs_indexer`        | Indexer and maintenance replay             | `SELECT`/`INSERT` on `network_profiles`, `ledger_checkpoints`, `schema_events`, `schemas`, `credential_events`, and `indexer_incidents`; `SELECT`/`INSERT`/`UPDATE` on `indexer_status` and `credential_generations` |
+| `xcs_api`            | Nuxt projection reads                      | `SELECT` only on projection tables                                                                                                                                                                                   |
+| `xcs_payload_writer` | Optional Nuxt publication and demo pinning | `SELECT`/`INSERT` on hosted payload and publication tables; DML on `pin_challenges` and `demo_pins`; no projection writes                                                                                            |
+| `xcs_monitor`        | PostgreSQL exporter                        | `pg_monitor`; no DML rights on XCS application tables                                                                                                                                                                |
 
 Runtime-role creation is cluster-wide because PostgreSQL login roles are cluster-wide. Run bootstrap
 only on a PostgreSQL cluster dedicated to XCS, with `XCS_DATABASE_CLUSTER_SCOPE=dedicated`. Grants
 and `PUBLIC` revocations are scoped to the database selected by `XCS_BOOTSTRAP_DATABASE_URL`.
 
 All runtime roles are denied schema creation, and `CREATE` on `public` is revoked from `PUBLIC`.
-The single-replica alpha caps connections at 12 for `xcs_indexer`, 12 for `xcs_api`, and 3 for
+The single-replica alpha caps connections at 12 for `xcs_indexer`, 12 for `xcs_api`, 12 for `xcs_payload_writer`, and 3 for
 `xcs_monitor`, leaving capacity for administration and recovery. Before scaling replicas or pool
 sizes, increase and reapply these limits deliberately while retaining reserved administrator
 slots.
 
-Bootstrap uses `XCS_BOOTSTRAP_DATABASE_URL`; the indexer uses `XCS_INDEXER_DATABASE_URL`; the API
-uses `XCS_DATABASE_URL`. Give the four identities distinct, long URL-safe passwords. Do not expose
+Bootstrap uses `XCS_BOOTSTRAP_DATABASE_URL`; the indexer uses `XCS_INDEXER_DATABASE_URL`; Nuxt
+uses `NUXT_DATABASE_URL` and, for optional publication, `NUXT_PAYLOAD_DATABASE_URL`. Give all five
+identities distinct, long URL-safe passwords. Do not expose
 the admin URL to API or indexer containers. Bootstrap must authenticate as a PostgreSQL role allowed
 to create roles and schema objects; keep that identity confined to bootstrap and recovery jobs.
 
 For each runtime-password rotation, bootstrap overrides any caller-supplied
-`password_encryption` setting with transaction-local `scram-sha-256`, writes all three passwords,
+`password_encryption` setting with transaction-local `scram-sha-256`, writes all four runtime passwords,
 and restores `LOGIN` only after all grants succeed. Configure the corresponding `pg_hba.conf`
 role-to-database entries with `scram-sha-256` as well; verifier storage does not replace an explicit
 authentication policy.
@@ -201,10 +203,10 @@ On a new or recreated database, run the idempotent bootstrap before starting run
 pnpm --filter @xcs-protocol/db db:bootstrap
 ```
 
-The command applies the single generated baseline with Drizzle and then configures runtime roles in
+The command applies the generated migration journal with Drizzle and then configures runtime roles in
 one administrative transaction. A second run is a no-op for schema creation and reapplies the same
-role attributes, passwords and grants. It does not upgrade an older or partially modified schema;
-before production, recreate the projection database and regenerate the baseline instead.
+role attributes, passwords and grants. Applied migrations remain immutable. Review forward migrations against the existing schema; never
+recreate a running database merely to update application grants.
 
 Bootstrap serializes concurrent administrative runs with a transaction advisory lock. It creates
 missing fixed roles as `NOLOGIN`, removes unexpected direct memberships, normalizes their
@@ -224,27 +226,23 @@ change rather than per-database role drift. The residual denial-of-service bound
 
 Bootstrap reports only role names or a stable failure code, never URLs or password values. The
 Compose dependency chain completes `db-bootstrap` before it starts runtime services. During password
-rotation, stop the affected clients, rerun bootstrap with all three distinct passwords, then restart
-them. As an independent guard, configure `pg_hba.conf` so `xcs_indexer`, `xcs_api` and `xcs_monitor`
+rotation, stop the affected clients, rerun bootstrap with all four distinct runtime passwords, then restart
+them. As an independent guard, configure `pg_hba.conf` so `xcs_indexer`, `xcs_api`, `xcs_payload_writer` and `xcs_monitor`
 can authenticate only to the XCS database, with `scram-sha-256` on each allow entry.
 
 ### Pre-production schema changes
 
-`0000_baseline.sql` creates the complete current schema, including the discovery indexes:
+`0000_baseline.sql` creates the initial projection schema, including the discovery indexes:
 
 - `schema_events_activity_idx` supports the reverse-chronological schema-registration activity page;
 - `schemas_order_idx` supports stable schema pagination;
 - `schemas_search_idx` is a PostgreSQL GIN expression index for schema name and description search;
 - `credential_generations_stats_idx` supports aggregate lifecycle counts.
 
-The baseline also creates the projection-integrity checks directly on empty tables. Until production
-launch, change `src/schema/`, remove and regenerate the baseline artifacts, recreate the database,
-run `db:bootstrap`, and replay the ledger-derived projection. Do not edit an applied baseline or
-manually reshape ledger evidence in place.
-
-Before production launch, freeze and archive the reviewed baseline. From that point onward, do not
-regenerate it: introduce reviewed forward migrations with explicit compatibility, lock, backup and
-rollback plans.
+Applied migration files are immutable, including before production. Change `src/schema/`, generate
+and review a forward migration, back up the database and run `db:bootstrap` with the administrative
+identity. Evaluate locks, compatibility and rollback for each change. Never reset a running
+projection or discard off-chain payload rows merely to redeploy the applications.
 
 ### Deployment configuration
 
@@ -256,16 +254,15 @@ rollback plans.
    - `XCS_INDEXER_DATABASE_PASSWORD_FILE`;
    - `XCS_API_DATABASE_PASSWORD_FILE`;
    - `XCS_MONITOR_DATABASE_PASSWORD_FILE`;
-   - `XCS_INTERNAL_API_TOKEN_FILE`;
+   - `XCS_PAYLOAD_DATABASE_PASSWORD_FILE`;
    - `XCS_METRICS_TOKEN_FILE`;
    - `XCS_RPC_URL_PRIMARY_FILE`;
    - `XCS_RPC_URL_SECONDARY_FILE`.
 
-   Generate four distinct PostgreSQL passwords and distinct URL-safe internal/metrics tokens of at
-   least 32 characters. The metrics token file is required by the production overlay even while
+   Generate five distinct PostgreSQL passwords and a URL-safe metrics token of at least 32 characters. The metrics token file is required by the production overlay even while
    metrics remain disabled; set `XCS_METRICS_ENABLED=true` only when Prometheus will scrape it. The
    bootstrap derives the administrator password from `XCS_BOOTSTRAP_DATABASE_URL` and
-   compares it with all three runtime passwords before executing SQL.
+   compares it with all four runtime passwords before executing SQL.
 
    The two RPC files contain the complete WSS URLs and therefore also protect provider credentials
    embedded in a path or query. `docker-compose.secrets.yml` removes all corresponding direct values
@@ -275,10 +272,6 @@ rollback plans.
    the distinct unprivileged container UIDs can read only the secrets mounted into their service.
    Never place these files in a host directory accessible by another user, and never commit, log or
    expose their contents through a `NUXT_PUBLIC_*` variable.
-
-   The internal token authenticates only the private Nuxt SSR-to-API rate-limit identity. It does
-   not authenticate the public API, whose direct browser calls remain IP-limited. Never reuse a
-   database, metrics or RPC secret for it.
 
 2. Complete and independently audit the registry blackhole ceremony described in
    `config/networks/README.md`. The only exception is the private, disposable profile governed by
@@ -290,14 +283,14 @@ rollback plans.
    file after indexing starts; a Testnet reset or changed profile field requires a new profile ID
    and database history. Set `XCS_DATABASE_SCOPE=exclusive-profile` for the controlled pilot and
    public beta so the database cannot silently mix profiles.
-4. Set `XCS_PUBLIC_API_BASE_URL` and `XCS_ALLOWED_ORIGINS` to the browser-visible HTTPS origins when
-   deploying behind a reverse proxy. The Compose web service uses `http://api:3001` separately for
-   server-side rendering, so the public URL is never reused for container-to-container traffic.
-   Configure the proxy to discard incoming forwarding headers and write its own canonical client
-   address, then set `XCS_TRUSTED_PROXY_CIDRS` to that proxy's exact, narrow IP/CIDR. Compose applies
-   this list to the API and Nuxt SSR resolver. Leave it empty for direct exposure; never use a
-   wildcard, a catch-all `/0`, or trust arbitrary `X-Forwarded-For` values. An undeclared proxy is
-   safe but collapses its visitors into the proxy's shared rate-limit budget.
+4. Leave `XCS_PUBLIC_API_BASE_URL` empty for same-origin browser requests. Nuxt serves the site and
+   API on port 3000; there is no private HTTP hop. Set `XCS_ALLOWED_ORIGINS` for any additional
+   browser origins that may call the API. Preserve an existing API hostname by forwarding its
+   `/v1/*`, health and payload routes to Nuxt; do not require integrators to change their URLs.
+   Configure ingress to discard supplied forwarding headers and write its own canonical client
+   address, then set `XCS_TRUSTED_PROXY_CIDRS` to its exact, narrow IP/CIDR. Leave this empty for
+   direct exposure; never trust arbitrary `X-Forwarded-For` or a catch-all `/0`. An undeclared
+   proxy safely shares a single request budget across its visitors.
 5. Keep `XCS_BIND_ADDRESS=127.0.0.1` unless a firewall and authenticated administration boundary
    explicitly protect the exposed services.
 6. Configure the primary and secondary RPC values—directly for local development or in their two
@@ -336,14 +329,12 @@ boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):
 - do not add a subject feed, account-wide Credential export or claims ingestion to the deployment.
 
 Validate the rendered configuration, then build and start the required profile. The default core
-contains only PostgreSQL, database bootstrap, API and indexer. `site` adds Nuxt,
-`monitoring` adds Prometheus, Grafana and both exporters, and `demo-pinning` adds Kubo:
+contains PostgreSQL, database bootstrap, Nuxt (site and API) and the indexer. `monitoring` adds Prometheus, Grafana and both exporters, and `demo-pinning` adds Kubo:
 
 ```sh
 docker compose config --quiet
 docker compose up --build
-docker compose --profile site up --build
-docker compose --profile site --profile monitoring up --build
+docker compose --profile monitoring up --build
 ```
 
 Those commands build the reviewed source locally for the alpha. When every enabled service image
@@ -351,8 +342,8 @@ variable references an already published, reviewed digest, pull and start withou
 build instead:
 
 ```sh
-docker compose --profile site --profile monitoring pull
-docker compose --profile site --profile monitoring up --no-build --detach
+docker compose --profile monitoring pull
+docker compose --profile monitoring up --no-build --detach
 ```
 
 Do not combine `--build` with digest-valued service image variables.
@@ -382,10 +373,9 @@ Signal definitions, SLO/RTO/RPO semantics and the recovery drill are documented 
 
 Use `config --quiet`: it avoids printing direct values if an overlay is accidentally omitted or
 mis-merged. CI separately asserts that the production model contains only secret-file paths. The
-one-shot `db-bootstrap` service applies the current baseline and runtime grants with `xcs_admin`
-before the API and indexer start. The API is
-live at `/health/live`; Compose uses that endpoint for container health and starts the web service
-only after it succeeds. Do not replace this liveness check with `/health/ready`: readiness stays
+one-shot `db-bootstrap` service applies the migration journal and runtime grants with `xcs_admin`
+before Nuxt and the indexer start. Nuxt is live at `/health/live`; Compose uses that endpoint for
+container health. Do not replace this liveness check with `/health/ready`: readiness stays
 unavailable until the dual-source indexer owns a live lease and its status exactly matches a
 transaction-root-bearing checkpoint at the effective tip, and a normal catch-up must not restart the
 API. `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` controls readiness and all authoritative ledger-derived
@@ -403,7 +393,7 @@ When operational metrics are enabled, scrape them with the dedicated bearer toke
 ```sh
 curl --fail --silent --show-error \
   --header "Authorization: Bearer ${XCS_METRICS_TOKEN}" \
-  http://127.0.0.1:3001/internal/metrics
+  http://127.0.0.1:3000/internal/metrics
 ```
 
 The snapshot is JSON schema version 1, carries `Cache-Control: no-store`, and never consumes the
@@ -411,7 +401,7 @@ public rate-limit budget. Alert on `/health/ready` separately: the metrics route
 `200` during a database outage so process-local counters remain observable. Do not interpret
 `logicalSizeBytes` as free disk or `clusterConnections` as API-pool saturation. Obtain physical
 volume capacity and container/process saturation from the deployment monitoring layer; do not mount
-the Docker socket or PostgreSQL volume into the API container. Scrape every 30–60 seconds rather
+the Docker socket or PostgreSQL volume into the Nuxt container. Scrape every 30–60 seconds rather
 than continuously: registration totals are derived from the rebuildable event projection and become
 more expensive as history grows. Alert separately on `database.errorCode`: `DATABASE_UNAVAILABLE`
 means the snapshot query failed, while `METRICS_EVIDENCE_INVALID` means PostgreSQL answered but the
@@ -500,46 +490,52 @@ restrict the XRPL Connect factory in a reviewed web rollback. This changes no XC
 PostgreSQL schema and requires no database rollback. Never route around an adapter failure by
 calling `signAndSubmit`: XCS must retain normalization, persistence and sole submission control.
 
-## DigitalOcean App Platform for the web app
+## DigitalOcean App Platform: Nuxt + independent indexer
 
-The `gh deploy-setup` extension deploys a single Nuxt service from the repository root: the root
-`Dockerfile` builds `@xcs-protocol/web`, and the root `.env.example` is that service's environment
-contract (names only; values live in Passbolt). The Compose stack contract is
-`.env.compose.example`. Run `gh deploy-setup` from the repository root; accept port `3000`.
+The root `Dockerfile` builds the site and API as one Nuxt service on port 3000. The root
+`.env.example` is its configuration contract; values remain in the secret manager. The indexer
+remains an independent worker. Production PostgreSQL is external/managed; the Compose PostgreSQL
+service is a local/self-hosted reference, not a database embedded in Nuxt.
 
-The App Platform service hosts only the web app. PostgreSQL, the indexer and the read API keep
-running from the Compose stack (or another host) in the same region and VPC:
+Provision a dedicated PostgreSQL database/cluster with an administrator able to apply the
+reviewed migrations and runtime grants. Check the managed provider supports the bootstrap role
+operations before rollout. Use the provider's TLS CA and verified TLS connection URLs, never
+`rejectUnauthorized: false`. Restrict database ingress to Nuxt, the indexer and administrative jobs.
 
-| App Platform variable                   | Compose counterpart                               |
-| --------------------------------------- | ------------------------------------------------- |
-| `NUXT_API_BASE_URL`                     | `http://api:3001` → the API's private VPC address |
-| `NUXT_API_INTERNAL_TOKEN`               | `XCS_INTERNAL_API_TOKEN_FILE` (same value)        |
-| `NUXT_PUBLIC_API_BASE_URL`              | `XCS_PUBLIC_API_BASE_URL`                         |
-| `NUXT_PUBLIC_PROFILE_ID`                | `XCS_PUBLIC_PROFILE_ID`                           |
-| `NUXT_PUBLIC_RPC_URL`                   | `XCS_PUBLIC_RPC_URL`                              |
-| `NUXT_PUBLIC_XAMAN_API_KEY`             | `XCS_PUBLIC_XAMAN_API_KEY`                        |
-| `NUXT_PUBLIC_PAYLOAD_BASE_URL`          | `XCS_PUBLIC_PAYLOAD_BASE_URL` (optional overlay)  |
-| `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` | `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`            |
-| `NUXT_TRUSTED_PROXY_CIDRS`              | `XCS_TRUSTED_PROXY_CIDRS`                         |
+1. Run bootstrap as an administrative job with all four distinct runtime passwords. Never give its
+   administrator URL to either application service.
+2. Set Nuxt's `NUXT_DATABASE_URL` to `xcs_api`; set `NUXT_PAYLOAD_DATABASE_URL` to
+   `xcs_payload_writer` only when hosting or demo pinning is enabled. Set the independent worker's
+   `XCS_INDEXER_DATABASE_URL` to `xcs_indexer` on the same database.
+3. Leave `NUXT_PUBLIC_API_BASE_URL` empty for same-origin requests. If an old public API hostname
+   exists, keep that hostname and route it to Nuxt. Preserve payload origins and paths independently.
+4. Configure the narrow `XCS_TRUSTED_PROXY_CIDRS` for ingress, and `XCS_ALLOWED_ORIGINS` for any
+   additional allowed browser origin. Restrict health and `/internal/*` at ingress; metrics require
+   their own bearer token even on the internal network.
+5. Register Xaman's deployment redirect URLs when its public application ID is configured. Verify
+   homepage and deep-link connections and retain the existing browser origin for recovery journals.
+6. Verify header checks below, `/health/live`, `/health/ready`, read and verify API requests, then
+   a real Testnet creation/publication/acceptance. Indexer unavailability must still fail closed.
 
-Before the first deploy:
+No `NUXT_API_BASE_URL`, `NUXT_API_INTERNAL_TOKEN` or `XCS_INTERNAL_API_TOKEN` is used anymore.
+Secret-file URL variants `NUXT_DATABASE_URL_FILE` and `NUXT_PAYLOAD_DATABASE_URL_FILE` are
+available through the Docker entrypoint; App Platform may inject the private values directly.
 
-1. Expose the read API over HTTPS on its own hostname for browsers and add the App Platform domain
-   to `XCS_ALLOWED_ORIGINS`. Give the web service the API's private VPC address in
-   `NUXT_API_BASE_URL`; never reuse the public URL for the SSR hop.
-2. Generate `NUXT_API_INTERNAL_TOKEN` through the tool (`# generate shared`) and place the same
-   value in `XCS_INTERNAL_API_TOKEN_FILE` on the Compose host.
-3. Register the SDK's redirect URLs for the App Platform deployment in the Xaman Developer Console
-   when `NUXT_PUBLIC_XAMAN_API_KEY` is set; verify homepage and deep-link connection.
-4. Determine the address the platform ingress presents to the container (log one request) and set
-   `NUXT_TRUSTED_PROXY_CIDRS` to that exact range; leaving it empty collapses every visitor into one
-   SSR rate-limit budget behind the ingress.
-5. After the first deploy, run the header checks from "Browser security-header rollout" against the
-   App Platform domain: exactly one report-only CSP, one HSTS value, `private, no-store` on HTML,
-   immutable caching on `/_nuxt/` assets.
+### Upgrading from the standalone API
 
-The Compose `web` service and the Dockerfile in `docker/` are unchanged; App Platform builds the
-root `Dockerfile` on every deploy from the configured branch.
+1. Preserve a verified database backup, the network profile, old image digests and all hosted
+   payload origins. Stop the old API and Nuxt writers without resetting the indexer or database.
+2. Supply the new distinct payload-writer password and rerun bootstrap. It revokes the old
+   `xcs_api` publication privileges and grants them only to `xcs_payload_writer`.
+3. Deploy Nuxt with both restricted connections as needed. Point the old API/payload ingress to
+   Nuxt, then check reads, readiness, publication and metrics before reopening writes.
+4. Keep the browser origin unchanged: signed-operation and publication-recovery queues are
+   origin-scoped. Finish or export recoverable work before changing origin; never clear it as
+   a deployment step. Existing HTTPS payload links must continue serving their exact bytes.
+
+Application rollback alone cannot restore old publication rights. A rollback to the old API
+requires an explicit, reviewed restoration of its previous grants and credentials; do not give it
+an administrator connection to bypass this. Keep payload reads working while writes are paused.
 
 ## Optional Testnet demo pinning
 
@@ -571,23 +567,23 @@ detect all personal data. Never pin PII, secrets, or production credentials.
 This opt-in testing service is separate from the default issuer-hosted beta policy above.
 It does not change trust decisions, enable server-side payload fetching or approve a public launch.
 
-1. Back up PostgreSQL, then run the new `db-bootstrap` image before starting the new API.
+1. Back up PostgreSQL, then run the new `db-bootstrap` image before starting the new Nuxt service.
    Migrations `0001_hosted_payloads.sql` and `0002_hosted_payload_locator_compatibility.sql`
    add the storage tables and preserve legacy 20-hex payload links. Do not rewrite previously
-   applied SQL or reset the indexer to apply them. Bootstrap also grants the API SELECT/INSERT
+   applied SQL or reset the indexer to apply them. Bootstrap grants `xcs_payload_writer` SELECT/INSERT
    on these tables; it grants neither UPDATE nor DELETE.
 2. Configure `XCS_PUBLIC_PAYLOAD_BASE_URL` as a stable short HTTPS origin with `/p/*` forwarded
-   to the API, and `XCS_HOSTED_PAYLOAD_NETWORKS` as the explicit Testnet profile IDs. Configure
+   to Nuxt, and `XCS_HOSTED_PAYLOAD_NETWORKS` as the explicit Testnet profile IDs. Configure
    browser CORS using `XCS_ALLOWED_ORIGINS`. The API validates the 128-byte final URI limit.
 3. Set `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE` to an ignored file containing a distinct
    random secret of at least 32 bytes, readable by the container's unprivileged `node` user.
 4. Add `-f docker-compose.hosted-payloads.yml` to the normal Compose invocation, after the
-   base and production secret overlays, with `--profile site`. It enables API publication and
+   base and production secret overlays. It enables publication and
    passes the matching payload origin to Nuxt. Run `config --quiet` before `up`.
 
 For App Platform web deployments, set `NUXT_PUBLIC_PAYLOAD_BASE_URL` to the same origin;
-the separately deployed API still needs the configuration documented in its README.
-For a host-side API process use `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` directly; `_FILE` loading
+the same Nuxt service needs the server-only configuration in [API surfaces](../api-surfaces.md).
+For a host-side Nuxt process use `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` directly; `_FILE` loading
 belongs to the Docker entrypoint, not the TypeScript configuration loader.
 
 A localhost HTTPS origin tests only clients on that machine. It is not a shareable public

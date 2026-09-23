@@ -95,6 +95,7 @@ services:
       XCS_DATABASE_CLUSTER_SCOPE: dedicated
       XCS_INDEXER_DATABASE_PASSWORD: ${XCS_INDEXER_DATABASE_PASSWORD:-}
       XCS_API_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
+      XCS_PAYLOAD_DATABASE_PASSWORD: ${XCS_PAYLOAD_DATABASE_PASSWORD:-}
       XCS_MONITOR_DATABASE_PASSWORD: ${XCS_MONITOR_DATABASE_PASSWORD:-}
     depends_on:
       postgres:
@@ -103,23 +104,30 @@ services:
     mem_limit: ${XCS_JOB_MEMORY_LIMIT:-512m}
     cpus: ${XCS_JOB_CPU_LIMIT:-0.5}
 
-  api:
+  web:
     <<: *runtime-hardening
-    image: ${XCS_API_IMAGE:-xcs-api:local}
+    image: ${XCS_WEB_IMAGE:-xcs-web:local}
     build:
       <<: *node-build
       args:
         XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
-        XCS_PACKAGE: '@xcs-protocol/api'
+        XCS_PACKAGE: '@xcs-protocol/web'
+        XCS_RUNTIME_MAIN: .output/server/index.mjs
         XCS_REVISION: ${XCS_REVISION:-local}
         XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
+    command: ['node', '.output/server/index.mjs']
     environment:
-      XCS_API_HOST: 0.0.0.0
-      XCS_API_PORT: 3001
-      XCS_DATABASE_URL_TARGET: XCS_DATABASE_URL
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3000
+      XCS_DATABASE_URL_TARGET: NUXT_DATABASE_URL
       XCS_DATABASE_USER: xcs_api
       XCS_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
-      XCS_INTERNAL_API_TOKEN: ${XCS_INTERNAL_API_TOKEN:-}
+      XCS_PAYLOAD_DATABASE_PASSWORD: ${XCS_PAYLOAD_DATABASE_PASSWORD:-}
+      NUXT_PUBLIC_API_BASE_URL: ${XCS_PUBLIC_API_BASE_URL:-}
+      NUXT_PUBLIC_PROFILE_ID: ${XCS_PUBLIC_PROFILE_ID:-}
+      NUXT_PUBLIC_RPC_URL: ${XCS_PUBLIC_RPC_URL:-}
+      NUXT_PUBLIC_XAMAN_API_KEY: ${XCS_PUBLIC_XAMAN_API_KEY:-}
+      NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID:-}
       XCS_METRICS_ENABLED: ${XCS_METRICS_ENABLED:-false}
       XCS_METRICS_TOKEN: ${XCS_METRICS_TOKEN:-}
       XCS_ALLOWED_ORIGINS: ${XCS_ALLOWED_ORIGINS:-http://localhost:3000}
@@ -142,19 +150,19 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3001/health/live').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/health/live').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 10s
     ports:
-      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_API_PORT_PUBLISHED:-3001}:3001'
+      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_WEB_PORT_PUBLISHED:-3000}:3000'
     volumes:
       - ./config/networks:/workspace/config/networks:ro
     networks: [edge, database, monitoring]
-    mem_limit: ${XCS_API_MEMORY_LIMIT:-512m}
-    cpus: ${XCS_API_CPU_LIMIT:-0.75}
+    mem_limit: ${XCS_WEB_MEMORY_LIMIT:-768m}
+    cpus: ${XCS_WEB_CPU_LIMIT:-1.0}
 
   indexer:
     <<: *runtime-hardening
@@ -187,38 +195,6 @@ services:
     networks: [edge, database]
     mem_limit: ${XCS_INDEXER_MEMORY_LIMIT:-768m}
     cpus: ${XCS_INDEXER_CPU_LIMIT:-1.0}
-
-  web:
-    <<: *runtime-hardening
-    profiles: ['site']
-    image: ${XCS_WEB_IMAGE:-xcs-web:local}
-    build:
-      <<: *node-build
-      args:
-        XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
-        XCS_PACKAGE: '@xcs-protocol/web'
-        XCS_REVISION: ${XCS_REVISION:-local}
-        XCS_VERSION: ${XCS_VERSION:-0.1.0-alpha.1}
-    command: ['node', '.output/server/index.mjs']
-    environment:
-      NUXT_HOST: 0.0.0.0
-      NUXT_PORT: 3000
-      NUXT_API_BASE_URL: http://api:3001
-      NUXT_API_INTERNAL_TOKEN: ${XCS_INTERNAL_API_TOKEN:-}
-      NUXT_TRUSTED_PROXY_CIDRS: ${XCS_TRUSTED_PROXY_CIDRS:-}
-      NUXT_PUBLIC_API_BASE_URL: ${XCS_PUBLIC_API_BASE_URL:-http://localhost:3001}
-      NUXT_PUBLIC_PROFILE_ID: ${XCS_PUBLIC_PROFILE_ID:-}
-      NUXT_PUBLIC_RPC_URL: ${XCS_PUBLIC_RPC_URL:-}
-      NUXT_PUBLIC_XAMAN_API_KEY: ${XCS_PUBLIC_XAMAN_API_KEY:-}
-      NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: ${XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID:-}
-    depends_on:
-      api:
-        condition: service_healthy
-    ports:
-      - '${XCS_BIND_ADDRESS:-127.0.0.1}:${XCS_WEB_PORT_PUBLISHED:-3000}:3000'
-    networks: [edge]
-    mem_limit: ${XCS_WEB_MEMORY_LIMIT:-512m}
-    cpus: ${XCS_WEB_CPU_LIMIT:-0.75}
 
   ipfs:
     image: ${XCS_IPFS_IMAGE:-ipfs/kubo:v0.35.0}
@@ -256,7 +232,7 @@ services:
       - xcs-prometheus:/prometheus
     secrets: [xcs_metrics_token]
     depends_on:
-      api:
+      web:
         condition: service_healthy
       postgres-exporter:
         condition: service_started

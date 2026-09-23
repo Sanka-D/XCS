@@ -357,27 +357,28 @@ XRPL WSS endpoint.
 Set:
 
 ```bash
-NUXT_API_BASE_URL=http://api:3001
-NUXT_API_INTERNAL_TOKEN=replace-with-the-private-api-token
-NUXT_TRUSTED_PROXY_CIDRS=10.42.0.2/32
-NUXT_PUBLIC_API_BASE_URL=https://xcs-api.example
+NUXT_DATABASE_URL=postgres://xcs_api:<password>@<managed-postgres>/xcs?sslmode=verify-full
+# Required only for optional publication/pinning; a distinct restricted role.
+NUXT_PAYLOAD_DATABASE_URL=postgres://xcs_payload_writer:<password>@<managed-postgres>/xcs?sslmode=verify-full
+XCS_TRUSTED_PROXY_CIDRS=10.42.0.2/32
+NUXT_PUBLIC_API_BASE_URL=
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
 NUXT_PUBLIC_XAMAN_API_KEY=optional-public-xaman-application-id
 NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=optional-public-reown-project-id
 ```
 
-`NUXT_API_BASE_URL` is the server-side/SSR endpoint; in Compose it is `http://api:3001`.
-`NUXT_API_INTERNAL_TOKEN` is private runtime configuration shared only with the API. Nuxt uses it
-to authenticate an opaque HMAC rate-limit key deterministically derived from the visitor network
-address on SSR requests, so visitors cannot mint or rotate arbitrary budgets. It must match
-`XCS_INTERNAL_API_TOKEN`, contain 32–256 URL-safe random characters, and must never be placed under
-`runtimeConfig.public` or a `NUXT_PUBLIC_*` variable. Forwarded addresses are ignored unless the
-immediate peer matches `NUXT_TRUSTED_PROXY_CIDRS`; configure only the narrow CIDRs of ingress
-proxies that overwrite client-supplied forwarding headers. With no trusted proxy, the direct socket
-address is used, which is safe but may collapse visitors behind an undeclared proxy.
-`NUXT_PUBLIC_API_BASE_URL` is exposed to the browser and must therefore be browser-reachable. The
-profile is fetched from the XCS API, parsed by the SDK, and matched against the RPC server's reported
+`NUXT_DATABASE_URL` and `NUXT_PAYLOAD_DATABASE_URL` are private server-only connections. The first
+uses the read-only `xcs_api` role; the second permits only hosting/pinning table writes. Never use
+an administrator or indexer URL for either pool. See [API surfaces](../../docs/api-surfaces.md).
+
+Nuxt serves `/v1/*` directly. SSR invokes the same handlers locally; there is no internal API
+token or private HTTP hop. Empty `NUXT_PUBLIC_API_BASE_URL` uses the site origin. A configured
+public API origin must be browser-reachable and route to the same reviewed Nuxt deployment.
+Forwarded addresses are ignored unless the immediate peer matches `XCS_TRUSTED_PROXY_CIDRS`;
+configure only narrow ingress CIDRs whose proxies replace client-supplied forwarding headers.
+With no trusted proxy the socket address is used, which safely shares the budget behind an
+undeclared proxy. The profile is fetched from the XCS API, parsed by the SDK, and matched against the RPC server's reported
 `network_id` before autofill and again before signing or recovery. This alpha rejects profiles other
 than XRPL Testnet (`networkId: 1`). If `NUXT_PUBLIC_PROFILE_ID` is omitted, exactly one Testnet
 profile must be returned by the API.

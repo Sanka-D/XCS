@@ -37,6 +37,7 @@ FROM ${XCS_NODE_IMAGE} AS runtime
 ARG XCS_PACKAGE
 ARG XCS_REVISION=unknown
 ARG XCS_VERSION=0.0.0
+ARG XCS_RUNTIME_MAIN=dist/main.js
 
 LABEL org.opencontainers.image.title="XCS ${XCS_PACKAGE}" \
       org.opencontainers.image.description="XCS production runtime" \
@@ -46,13 +47,14 @@ LABEL org.opencontainers.image.title="XCS ${XCS_PACKAGE}" \
       org.opencontainers.image.licenses="MIT"
 
 ENV NODE_ENV=production
+ENV XCS_RUNTIME_MAIN=${XCS_RUNTIME_MAIN}
 WORKDIR /workspace
 
 COPY --from=build --chown=node:node /runtime/ ./
 COPY --chmod=0555 docker/node-entrypoint.sh /usr/local/bin/xcs-entrypoint
 
 USER node
-EXPOSE 3001
+EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/xcs-entrypoint"]
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "exec node \"$XCS_RUNTIME_MAIN\""]

@@ -11,8 +11,7 @@ This repository is alpha software for XRPL Testnet. Do not use personal data or 
 - `packages/cli`: local schema, payload, Credential, verification, and submission commands.
 - `packages/db`: PostgreSQL migrations and projection storage. This package is maintained separately.
 - `apps/indexer`: validated-ledger ingestion and rebuildable projections.
-- `apps/api`: read and verification API over the projection.
-- `apps/web`: Nuxt Testnet explorer and issuer/subject workflows.
+- `apps/web`: Nuxt site, issuer/subject workflows and native Nitro API routes.
 
 There is one protocol implementation: TypeScript core. Cryptography, canonicalization, address validation, time conversion, CID handling, and JSON tokenization use maintained dependencies instead of local implementations.
 
@@ -24,7 +23,7 @@ There is one protocol implementation: TypeScript core. Cryptography, canonicaliz
 4. The issuer signs `CredentialCreate` in its wallet. The subject may later sign `CredentialAccept`.
 5. A verifier loads ledger evidence from the API, fetches the payload, checks its digest and schema, and reports each verification dimension separately.
 
-XRPL validated ledgers are the source of truth. PostgreSQL is a disposable query projection, not a credential authority or issuer data store. Signing keys stay in wallets.
+XRPL validated ledgers are the source of truth. PostgreSQL stores the rebuildable query projection, never credential authority. Optional public payload hosting stores off-chain bytes separately; those bytes require backups and cannot be recovered from XRPL. Signing keys stay in wallets.
 
 ## Development
 
@@ -35,7 +34,7 @@ pnpm install
 pnpm verify
 ```
 
-The API defaults to `http://localhost:3001` and the web app to `http://localhost:3000`. Running the complete stack requires a network profile, PostgreSQL, and two complete-history `rippled` WebSocket sources. See [deployment](./docs/runbooks/deployment.md) and [indexer operations](./docs/runbooks/indexer.md).
+The site and API share `http://localhost:3000`; `/v1/...` remains the public API contract. Running the complete stack requires a network profile, PostgreSQL, and two complete-history `rippled` WebSocket sources. See [deployment](./docs/runbooks/deployment.md) and [indexer operations](./docs/runbooks/indexer.md).
 
 For a browser-only Testnet demo, `XCS_LOCAL_PAYLOAD_STORE=1` enables a temporary local payload store. It is not public hosting and cannot be used for durable verification.
 

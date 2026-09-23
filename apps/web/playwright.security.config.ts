@@ -28,7 +28,7 @@ export default defineConfig({
       NODE_ENV: 'production',
       NITRO_HOST: '127.0.0.1',
       NITRO_PORT: '3101',
-      NUXT_API_INTERNAL_TOKEN: 'xcs-security-production-e2e-token-0001',
+      NUXT_DATABASE_URL: 'postgres://xcs_api@127.0.0.1:1/security-test',
       NUXT_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_PROFILE_ID: 'commons-testnet-xcs-v0.1-controlled-pilot',

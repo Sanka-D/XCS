@@ -1,6 +1,6 @@
 # Monitoring and recovery objectives
 
-The optional `monitoring` Compose profile collects authenticated XCS API metrics, PostgreSQL
+The optional `monitoring` Compose profile collects authenticated Nuxt API metrics, PostgreSQL
 exporter metrics and host capacity metrics. It provisions one Grafana dashboard and Prometheus alert
 rules. It does not configure an Alertmanager destination; routing notifications to the Commons
 on-call system remains a deployment-specific external step.
@@ -15,8 +15,8 @@ on-call system remains a deployment-specific external step.
   immutable activation boundary or last independently verified checkpoint and never skips,
   truncates or invents ledger evidence.
 
-The RPO applies to reconstructible protocol state, not optional pinning administration rows. Back up
-those rows separately if demo pinning is enabled. Meeting the RTO depends on retained complete
+The RPO applies to reconstructible protocol state, not hosted payload bytes, publication quotas or
+optional pinning administration rows. Back up that off-chain data separately whenever enabled. Meeting the RTO depends on retained complete
 ledger history, tested backups, image availability and named operator ownership; the repository
 cannot prove those external conditions by configuration alone.
 
@@ -29,12 +29,12 @@ Hosted monitoring requires Docker Compose `2.24.4` or newer and the production s
 - `XCS_INDEXER_DATABASE_PASSWORD_FILE`;
 - `XCS_API_DATABASE_PASSWORD_FILE`;
 - `XCS_MONITOR_DATABASE_PASSWORD_FILE`;
-- `XCS_INTERNAL_API_TOKEN_FILE`;
+- `XCS_PAYLOAD_DATABASE_PASSWORD_FILE`;
 - `XCS_METRICS_TOKEN_FILE`;
 - `XCS_RPC_URL_PRIMARY_FILE`;
 - `XCS_RPC_URL_SECONDARY_FILE`.
 
-The API and Prometheus read the same metrics-token file. PostgreSQL exporter authenticates as the
+Nuxt and Prometheus read the same metrics-token file. PostgreSQL exporter authenticates as the
 dedicated `xcs_monitor` role. Provisioning first requires the built-in `pg_monitor`,
 `pg_read_all_settings`, `pg_read_all_stats` and `pg_stat_scan_tables` attributes, exact membership
 graph and ACLs to match PostgreSQL's recorded installation baseline. Drift fails closed instead of
@@ -65,7 +65,8 @@ authenticated reverse proxy or an operator tunnel in a hosted environment. The e
 
 ## Signals and alerts
 
-Prometheus scrapes `GET /internal/metrics/prometheus` every 30 seconds with the metrics bearer token.
+Prometheus scrapes Nuxt at `web:3000/internal/metrics/prometheus` every 30 seconds with the metrics
+bearer token. The job name remains `xcs-api` to preserve existing rule/dashboard selectors.
 The public route is disabled unless metrics are enabled, bypasses public rate-limit accounting and
 must retain `Cache-Control: no-store`. The separate `/internal/metrics` JSON representation is for
 bounded operator diagnostics; Prometheus does not scrape it.
@@ -127,7 +128,7 @@ facts.
 
 `XCS_METRICS_RETENTION` defaults to 30 days, matching the readiness objective window. Retain incident
 records and drill evidence outside Prometheus according to Commons policy. To rotate the metrics
-token, update the API environment and token file atomically, then restart API and Prometheus; a
+token, update Nuxt's environment and token file atomically, then restart Nuxt and Prometheus; a
 partial rotation intentionally makes the scrape fail. Rotate the database and Grafana passwords
 through their normal secret procedures and rerun database bootstrap after a database
 password change.

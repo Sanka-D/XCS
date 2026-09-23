@@ -72,8 +72,10 @@ test('shows pending approval, prevents duplicate connections and then shows the 
   await page.locator('[data-client-ready="true"]').waitFor()
   const trigger = page.getByTestId('wallet-toggle')
   await trigger.click()
-  await page.clock.install()
-  await page.clock.pauseAt(new Date())
+  // Use one browser-clock timeline: host Date.now() can already be behind the
+  // installed clock by the time Playwright delivers pauseAt to the browser.
+  await page.clock.install({ time: new Date('2026-01-01T12:00:00Z') })
+  await page.clock.pauseAt(new Date('2026-01-01T12:01:00Z'))
   await page.evaluate(() => {
     ;(
       globalThis as typeof globalThis & { __xcsBrowserE2eWalletDiscoveryDelayMs?: number }

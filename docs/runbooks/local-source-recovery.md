@@ -1,5 +1,11 @@
 # Local source recovery — 2026-09-15
 
+Historical incident record for the deployments recovered on September 15–21, 2026. Commands,
+package names and grants below describe those revisions, not current deployment instructions.
+Issue #28 moved the API into Nuxt and split publication privileges into `xcs_payload_writer`.
+For current builds, rollout and rollback use [deployment](./deployment.md) and
+[ADR 0005](../adr/0005-nuxt-api-boundary.md).
+
 The running local HTTPS site was built from `/private/tmp/xcs-pr22-ready`, whose source files had
 expired. The top-level checkout is an older implementation and must not replace that deployment.
 
@@ -32,7 +38,7 @@ Hosted Testnet publication no longer rejects claims based on field names such as
 payloads are public, and accepting a field name does not establish that its value is non-personal.
 The separate demo-pinning and browser-local test-storage policies are unchanged.
 
-Rebuild from this durable checkout, not the older parent checkout:
+The following rebuild commands were used for that recovered revision only:
 
 ```sh
 pnpm install --frozen-lockfile

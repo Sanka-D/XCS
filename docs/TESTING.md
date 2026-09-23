@@ -7,7 +7,6 @@ pnpm --filter @xcs-protocol/core test
 pnpm --filter @xcs-protocol/sdk test
 pnpm --filter @xcs-protocol/cli test
 pnpm --filter @xcs-protocol/indexer test
-pnpm --filter @xcs-protocol/api test
 pnpm --filter @xcs-protocol/web test
 ```
 
@@ -32,7 +31,14 @@ Run the PostgreSQL suites with:
 
 ```bash
 pnpm test:postgres
+pnpm test:runtime
 ```
+
+Run these commands sequentially on a disposable PostgreSQL cluster: the suites provision
+cluster-wide runtime roles. `test:runtime` builds the production Nuxt server, starts it against
+real restricted database connections, and checks SSR, readiness and signed payload publication.
+Its ledger projection is synthetic and its signature is generated locally; it is not evidence
+of a live Testnet transaction or an extension-wallet approval.
 
 Install Chromium once and run browser flows with:
 
@@ -48,7 +54,7 @@ Unit and browser mocks prove application transitions; they do not prove a specif
 - Core tests cover accepted values and rejection boundaries, not private helper implementations.
 - SDK tests inspect the exact unsigned XRPL transaction and signed-blob submission checks.
 - Indexer tests prove source agreement, ordering, idempotency, and fail-closed projection behavior.
-- API tests prove snapshot consistency, bounded external fetches, and separate unavailable/tampered/invalid results.
+- API suites under `apps/web/test/api/` prove snapshot consistency, bounded external fetches, and separate unavailable/tampered/invalid results through the native Nitro transport.
 - Web tests prove user-visible workflow transitions and that signing remains in the wallet.
 
 If a required environment is unavailable, report the exact skipped command and do not describe it as passing.

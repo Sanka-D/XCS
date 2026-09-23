@@ -23,10 +23,11 @@ async function main(): Promise<void> {
       administratorPassword: databasePasswordFromUrl(databaseUrl),
       indexerPassword: requiredEnvironment('XCS_INDEXER_DATABASE_PASSWORD'),
       apiPassword: requiredEnvironment('XCS_API_DATABASE_PASSWORD'),
+      payloadWriterPassword: requiredEnvironment('XCS_PAYLOAD_DATABASE_PASSWORD'),
       monitorPassword: requiredEnvironment('XCS_MONITOR_DATABASE_PASSWORD'),
     })
     process.stdout.write(
-      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor'] })}\n`,
+      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer'] })}\n`,
     )
   } finally {
     await client.close()

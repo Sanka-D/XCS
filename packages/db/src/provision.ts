@@ -2,11 +2,13 @@ import type { DatabaseClient } from './client.js'
 
 export const XCS_INDEXER_DATABASE_ROLE = 'xcs_indexer' as const
 export const XCS_API_DATABASE_ROLE = 'xcs_api' as const
+export const XCS_PAYLOAD_WRITER_DATABASE_ROLE = 'xcs_payload_writer' as const
 export const XCS_MONITOR_DATABASE_ROLE = 'xcs_monitor' as const
 export const XCS_DATABASE_CLUSTER_SCOPE = 'dedicated' as const
 
 export const XCS_INDEXER_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_API_DATABASE_CONNECTION_LIMIT = 12
+export const XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_MONITOR_DATABASE_CONNECTION_LIMIT = 3
 
 const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u
@@ -18,6 +20,7 @@ export interface RuntimeDatabasePasswords {
   administratorPassword: string
   indexerPassword: string
   apiPassword: string
+  payloadWriterPassword: string
   monitorPassword: string
 }
 
@@ -65,6 +68,7 @@ function assertPasswords(passwords: RuntimeDatabasePasswords): void {
   assertPassword(passwords.administratorPassword, 'administratorPassword')
   assertPassword(passwords.indexerPassword, 'indexerPassword')
   assertPassword(passwords.apiPassword, 'apiPassword')
+  assertPassword(passwords.payloadWriterPassword, 'payloadWriterPassword')
   assertPassword(passwords.monitorPassword, 'monitorPassword')
 
   if (
@@ -72,8 +76,9 @@ function assertPasswords(passwords: RuntimeDatabasePasswords): void {
       passwords.administratorPassword,
       passwords.indexerPassword,
       passwords.apiPassword,
+      passwords.payloadWriterPassword,
       passwords.monitorPassword,
-    ]).size !== 4
+    ]).size !== 5
   ) {
     throw new Error('administrator and runtime database passwords must be pairwise distinct')
   }
@@ -91,6 +96,9 @@ const CREATE_ROLES_SQL = `
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_monitor') THEN
       CREATE ROLE xcs_monitor NOLOGIN;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_payload_writer') THEN
+      CREATE ROLE xcs_payload_writer NOLOGIN;
+    END IF;
   END
   $xcs_roles$;
 `
@@ -105,8 +113,8 @@ const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
       FROM pg_auth_members auth_membership
       JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
       JOIN pg_roles member_role ON member_role.oid = auth_membership.member
-      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
-         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
+         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
     LOOP
       IF membership.granted_role = 'pg_monitor' AND membership.member_role = 'xcs_monitor' THEN
         CONTINUE;
@@ -120,9 +128,11 @@ const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
 const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
   ALTER ROLE xcs_indexer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_INDEXER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
   ALTER ROLE xcs_api WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_payload_writer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
   ALTER ROLE xcs_monitor WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
   ALTER ROLE xcs_indexer RESET ALL;
   ALTER ROLE xcs_api RESET ALL;
+  ALTER ROLE xcs_payload_writer RESET ALL;
   ALTER ROLE xcs_monitor RESET ALL;
   ALTER ROLE xcs_indexer SET statement_timeout = '5min';
   ALTER ROLE xcs_indexer SET lock_timeout = '30s';
@@ -130,6 +140,9 @@ const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
   ALTER ROLE xcs_api SET statement_timeout = '30s';
   ALTER ROLE xcs_api SET lock_timeout = '15s';
   ALTER ROLE xcs_api SET idle_in_transaction_session_timeout = '30s';
+  ALTER ROLE xcs_payload_writer SET statement_timeout = '30s';
+  ALTER ROLE xcs_payload_writer SET lock_timeout = '15s';
+  ALTER ROLE xcs_payload_writer SET idle_in_transaction_session_timeout = '30s';
   ALTER ROLE xcs_monitor SET statement_timeout = '30s';
   ALTER ROLE xcs_monitor SET lock_timeout = '10s';
   ALTER ROLE xcs_monitor SET idle_in_transaction_session_timeout = '30s';
@@ -147,6 +160,10 @@ const SET_ROLE_PASSWORDS_SQL = `
       current_setting('xcs.api_password')
     );
     EXECUTE format(
+      'ALTER ROLE xcs_payload_writer PASSWORD %L',
+      current_setting('xcs.payload_writer_password')
+    );
+    EXECUTE format(
       'ALTER ROLE xcs_monitor PASSWORD %L',
       current_setting('xcs.monitor_password')
     );
@@ -155,21 +172,21 @@ const SET_ROLE_PASSWORDS_SQL = `
 `
 
 const REVOKE_CURRENT_DATABASE_ACCESS_SQL = `
-  REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor;
-  REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor;
-  REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor;
-  REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor;
+  REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
+  REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
+  REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
+  REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
   REVOKE CREATE ON SCHEMA public FROM PUBLIC;
   DO $xcs_database_grants$
   BEGIN
-    EXECUTE format('REVOKE ALL PRIVILEGES ON DATABASE %I FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor', current_database());
-    EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_indexer, xcs_api, xcs_monitor', current_database());
+    EXECUTE format('REVOKE ALL PRIVILEGES ON DATABASE %I FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer', current_database());
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer', current_database());
   END
   $xcs_database_grants$;
 `
 
 const GRANT_RUNTIME_ACCESS_SQL = `
-  GRANT USAGE ON SCHEMA public TO xcs_indexer, xcs_api;
+  GRANT USAGE ON SCHEMA public TO xcs_indexer, xcs_api, xcs_payload_writer;
   GRANT pg_monitor TO xcs_monitor WITH INHERIT TRUE, SET FALSE;
 
   GRANT SELECT, INSERT ON TABLE
@@ -189,8 +206,8 @@ const GRANT_RUNTIME_ACCESS_SQL = `
     network_profiles, ledger_checkpoints, indexer_status, indexer_incidents,
     schema_events, schemas, credential_generations, credential_events
   TO xcs_api;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_api;
-  GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_api;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_payload_writer;
+  GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_payload_writer;
 `
 
 export async function provisionRuntimeDatabaseRoles(
@@ -207,12 +224,13 @@ export async function provisionRuntimeDatabaseRoles(
     await sql`SELECT set_config('password_encryption', 'scram-sha-256', true)`
     await sql`SELECT set_config('xcs.indexer_password', ${passwords.indexerPassword}, true)`
     await sql`SELECT set_config('xcs.api_password', ${passwords.apiPassword}, true)`
+    await sql`SELECT set_config('xcs.payload_writer_password', ${passwords.payloadWriterPassword}, true)`
     await sql`SELECT set_config('xcs.monitor_password', ${passwords.monitorPassword}, true)`
     await sql.unsafe(SET_ROLE_PASSWORDS_SQL)
     await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
     await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
     await sql.unsafe(
-      'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN;',
+      'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN; ALTER ROLE xcs_payload_writer LOGIN;',
     )
   })
 }

@@ -1,11 +1,11 @@
 import type { NetworkProfile, ResolvedSchema, SchemaDefinition } from '@xcs-protocol/core'
+import type { FetchOptions } from 'ofetch'
 import type { VerificationDimensions } from '../utils/credentialReview'
 import {
   exactCredentialEventPath,
   exactCredentialPath,
   exactSchemaRegistrationPath,
 } from '../utils/transactions'
-import type { InternalSsrRateLimitContext } from '../utils/internalSsrRateLimit'
 import { parseSigningReadiness, type SigningReadiness } from '../utils/signingReadiness'
 
 export interface ApiSchemaSummary {
@@ -184,25 +184,19 @@ export interface HostedPayloadPublicationResponse {
 
 export function useXcsApi() {
   const config = useRuntimeConfig()
-  const baseURL = import.meta.server ? config.apiBaseUrl : config.public.apiBaseUrl
-  const internalSsrRequest = (() => {
-    if (!import.meta.server) return undefined
-    const event = useRequestEvent()
-    if (event === undefined) throw new Error('INTERNAL_SSR_REQUEST_CONTEXT_UNAVAILABLE')
-    const context = event.context as typeof event.context & {
-      xcsSsrRateLimit?: InternalSsrRateLimitContext
-    }
-    if (context.xcsSsrRateLimit === undefined) {
-      throw new Error('INTERNAL_SSR_RATE_LIMIT_CONTEXT_UNAVAILABLE')
-    }
-    return context.xcsSsrRateLimit
-  })()
-  const apiFetch =
-    internalSsrRequest === undefined
-      ? $fetch
-      : $fetch.create({
-          headers: internalSsrRequest.headers,
-        })
+  const baseURL = import.meta.server
+    ? import.meta.dev && config.public.browserE2eMode === 'enabled'
+      ? '/__e2e-api'
+      : ''
+    : config.public.apiBaseUrl
+  // Nitro dispatches relative SSR requests in process and carries server-owned
+  // request context, including the original client's quota identity.
+  // This REST boundary declares its response types below, rather than asking
+  // Nitro to infer them from the catch-all route's dynamic schema dispatcher.
+  type ApiFetch = <T>(url: string, options?: FetchOptions<'json'>) => Promise<T>
+  const apiFetch: ApiFetch = import.meta.server
+    ? (useRequestFetch() as unknown as ApiFetch)
+    : ($fetch as unknown as ApiFetch)
 
   function listNetworks() {
     return apiFetch<{ items: NetworkProfile[] }>('/v1/networks', { baseURL })

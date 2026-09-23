@@ -11,14 +11,31 @@ special_password_file="$fixture_directory/special-password"
 printf '%s' 'p@ss:/?#%with spaces' > "$special_password_file"
 
 XCS_DATABASE_PASSWORD_FILE="$special_password_file" \
-  XCS_DATABASE_URL_TARGET=XCS_DATABASE_URL \
+  XCS_DATABASE_URL_TARGET=NUXT_DATABASE_URL \
   XCS_DATABASE_USER=xcs_api \
+  XCS_PAYLOAD_DATABASE_PASSWORD_FILE="$special_password_file" \
   sh docker/node-entrypoint.sh node -e '
     const expected = "p@ss:/?#%with spaces"
-    const parsed = new URL(process.env.XCS_DATABASE_URL)
+    const parsed = new URL(process.env.NUXT_DATABASE_URL)
     if (decodeURIComponent(parsed.password) !== expected) process.exit(1)
     if (process.env.XCS_DATABASE_PASSWORD !== undefined) process.exit(1)
     if (process.env.XCS_DATABASE_PASSWORD_FILE !== undefined) process.exit(1)
+    const writer = new URL(process.env.NUXT_PAYLOAD_DATABASE_URL)
+    if (writer.username !== "xcs_payload_writer") process.exit(1)
+    if (decodeURIComponent(writer.password) !== expected) process.exit(1)
+    if (process.env.XCS_PAYLOAD_DATABASE_PASSWORD !== undefined) process.exit(1)
+    if (process.env.XCS_PAYLOAD_DATABASE_PASSWORD_FILE !== undefined) process.exit(1)
+  '
+
+database_url_file="$fixture_directory/database-url"
+printf '%s' 'postgres://xcs_api:fixture-password@database.example/xcs?sslmode=verify-full' > "$database_url_file"
+NUXT_DATABASE_URL_FILE="$database_url_file" \
+  sh docker/node-entrypoint.sh node -e '
+    const parsed = new URL(process.env.NUXT_DATABASE_URL)
+    if (parsed.username !== "xcs_api") process.exit(1)
+    if (parsed.searchParams.get("sslmode") !== "verify-full") process.exit(1)
+    if (process.env.NUXT_DATABASE_URL_FILE !== undefined) process.exit(1)
+    if (process.env.NUXT_PAYLOAD_DATABASE_URL !== undefined) process.exit(1)
   '
 
 XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE="$special_password_file" \

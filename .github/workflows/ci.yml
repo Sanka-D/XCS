@@ -60,6 +60,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:postgres
+      - name: Exercise production Nuxt with restricted PostgreSQL pools
+        run: pnpm test:runtime
 
   browser-e2e:
     runs-on: ubuntu-24.04

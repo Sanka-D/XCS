@@ -9,20 +9,24 @@
 2. Replace the example network profile with the audited profile for the current Testnet reset.
 3. Confirm both `rippled` sources expose every validated ledger from the activation ledger. Clio is
    not yet a supported source for this alpha.
-4. Bootstrap the fresh database, run the quorum preflight, then start the API and indexer:
+4. Bootstrap the fresh database, run the quorum preflight, then start Nuxt (site and API) and the indexer in separate terminals:
 
 ```sh
 pnpm --filter @xcs-protocol/db db:bootstrap
 pnpm --filter @xcs-protocol/indexer preflight
-pnpm --filter @xcs-protocol/api start
+pnpm --filter @xcs-protocol/web start
 pnpm --filter @xcs-protocol/indexer start
 ```
 
-The idempotent command applies the current generated baseline and then configures the three runtime
-roles without printing database URLs or passwords. Run it only on a dedicated cluster: PostgreSQL
-roles are cluster-wide even though the application grants are scoped to the selected database. This
-pre-production baseline is not an upgrader. After a schema change, recreate the disposable
-projection database and regenerate the baseline before bootstrapping it again.
+Build the selected packages and their workspace dependencies before using `start`. Nuxt requires
+`NUXT_DATABASE_URL` for the read-only `xcs_api` identity, plus the distinct
+`NUXT_PAYLOAD_DATABASE_URL` only when publication or demo pinning is enabled.
+
+The idempotent bootstrap applies the migration journal and configures four runtime roles without
+printing database URLs or passwords. Run it only on a dedicated cluster: PostgreSQL roles are
+cluster-wide even though application grants are scoped to the selected database. Apply reviewed
+forward migrations for schema changes; never reset a running projection or overwrite applied
+migration files simply to update the application.
 
 The preflight checks network ID, contiguous retained history, the amendment, activation ledger and
 selected registry policy on both sources. The default `blackholed` policy requires the complete

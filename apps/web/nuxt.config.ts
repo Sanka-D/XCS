@@ -18,9 +18,6 @@ if (localPayloadStoreInput === '1' && process.env.NODE_ENV === 'production') {
   throw new Error('XCS_LOCAL_PAYLOAD_STORE cannot be enabled in production.')
 }
 const localPayloadStoreMode = localPayloadStoreInput === '1' ? 'enabled' : 'disabled'
-const apiInternalToken =
-  process.env.NUXT_API_INTERNAL_TOKEN ??
-  (process.env.NODE_ENV === 'production' ? '' : 'xcs-development-internal-token-0001')
 const production = process.env.NODE_ENV === 'production'
 const cspConnectSources = ["'self'", 'https:', 'wss:', ...(production ? [] : ['http:', 'ws:'])]
 
@@ -114,13 +111,12 @@ export default defineNuxtConfig({
     langDir: 'locales',
   },
   runtimeConfig: {
-    apiBaseUrl: 'http://localhost:3001',
-    apiInternalToken,
-    trustedProxyCidrs: process.env.NUXT_TRUSTED_PROXY_CIDRS ?? '',
+    databaseUrl: '',
+    payloadDatabaseUrl: '',
     browserE2eMode,
     localPayloadStoreMode,
     public: {
-      apiBaseUrl: 'http://localhost:3001',
+      apiBaseUrl: '',
       payloadBaseUrl: '',
       profileId: '',
       rpcUrl: 'wss://s.altnet.rippletest.net:51233',
@@ -186,8 +182,8 @@ export default defineNuxtConfig({
         usb: ['self'],
       },
     },
-    // This slice adds response headers only. Existing API middleware and
-    // application logging remain the owners of these separate concerns.
+    // The native API boundary owns bounded body reads, explicit proxy trust,
+    // quotas and JSON errors. Do not add a second, header-based limiter here.
     requestSizeLimiter: false,
     rateLimiter: false,
     xssValidator: false,

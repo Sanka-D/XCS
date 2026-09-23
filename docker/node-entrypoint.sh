@@ -46,21 +46,22 @@ for secret_variable in \
   XCS_POSTGRES_ADMIN_PASSWORD \
   XCS_INDEXER_DATABASE_PASSWORD \
   XCS_API_DATABASE_PASSWORD \
+  XCS_PAYLOAD_DATABASE_PASSWORD \
   XCS_MONITOR_DATABASE_PASSWORD \
-  XCS_INTERNAL_API_TOKEN \
   XCS_METRICS_TOKEN \
   XCS_RPC_URL_PRIMARY \
   XCS_RPC_URL_SECONDARY \
   XCS_PINNING_IP_HASH_SECRET \
   XCS_PAYLOAD_STORAGE_IP_HASH_SECRET \
-  NUXT_API_INTERNAL_TOKEN
+  NUXT_DATABASE_URL \
+  NUXT_PAYLOAD_DATABASE_URL
 do
   load_secret "$secret_variable"
 done
 
 if [ -n "${XCS_DATABASE_URL_TARGET:-}" ]; then
   case "$XCS_DATABASE_URL_TARGET" in
-    XCS_BOOTSTRAP_DATABASE_URL | XCS_INDEXER_DATABASE_URL | XCS_DATABASE_URL) ;;
+    XCS_BOOTSTRAP_DATABASE_URL | XCS_INDEXER_DATABASE_URL | NUXT_DATABASE_URL) ;;
     *) fail 'XCS_DATABASE_URL_TARGET is not an allowed database URL variable' ;;
   esac
 
@@ -93,6 +94,33 @@ if [ -n "${XCS_DATABASE_URL_TARGET:-}" ]; then
     export "$XCS_DATABASE_URL_TARGET=$database_url"
   fi
   unset XCS_DATABASE_PASSWORD
+fi
+
+# Nuxt's optional publication pool uses a fixed, restricted identity. Never reuse
+# its projection-read credential or expose the bootstrap administrator to Nuxt.
+if [ "${XCS_DATABASE_URL_TARGET:-}" = NUXT_DATABASE_URL ] && \
+  [ -n "${XCS_PAYLOAD_DATABASE_PASSWORD:-}" ] && \
+  [ -z "${NUXT_PAYLOAD_DATABASE_URL:-}" ]; then
+  # The template literal below belongs to JavaScript, not the shell.
+  # shellcheck disable=SC2016
+  payload_database_url="$(
+    XCS_DATABASE_HOST="${XCS_DATABASE_HOST:-postgres}" \
+    XCS_DATABASE_PORT="${XCS_DATABASE_PORT:-5432}" \
+    XCS_DATABASE_NAME="${XCS_DATABASE_NAME:-xcs}" \
+      node -e '
+        const url = new URL("postgres://placeholder.invalid")
+        url.username = "xcs_payload_writer"
+        url.password = encodeURIComponent(process.env.XCS_PAYLOAD_DATABASE_PASSWORD)
+        url.hostname = process.env.XCS_DATABASE_HOST
+        url.port = process.env.XCS_DATABASE_PORT
+        url.pathname = `/${encodeURIComponent(process.env.XCS_DATABASE_NAME)}`
+        process.stdout.write(url.toString())
+      '
+  )"
+  export NUXT_PAYLOAD_DATABASE_URL="$payload_database_url"
+fi
+if [ "${XCS_DATABASE_URL_TARGET:-}" = NUXT_DATABASE_URL ]; then
+  unset XCS_PAYLOAD_DATABASE_PASSWORD
 fi
 
 exec "$@"
