@@ -29,6 +29,7 @@
     "bootstrap": "tsx src/bin/bootstrap.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:postgres": "XCS_REQUIRE_POSTGRES_TESTS=1 vitest run test/app-model.integration.test.ts",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

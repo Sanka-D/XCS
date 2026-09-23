@@ -22,6 +22,13 @@
       "when": 1788959680306,
       "tag": "0002_hosted_payload_locator_compatibility",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790192599816,
+      "tag": "0003_application_model",
+      "breakpoints": true
     }
   ]
 }

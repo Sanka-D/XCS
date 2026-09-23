@@ -111,7 +111,7 @@ describe('database schema', () => {
     expect(indexerStatuses.leaseExpiresAt.notNull).toBe(false)
   })
 
-  it('preserves the deployed baseline and additive hosted payload migrations', () => {
+  it('preserves deployed migrations and appends the application model', () => {
     const migrationFiles = readdirSync(DRIZZLE_DIRECTORY).filter((name) => name.endsWith('.sql'))
     const snapshotFiles = readdirSync(new URL('meta/', DRIZZLE_DIRECTORY)).filter((name) =>
       name.endsWith('_snapshot.json'),
@@ -120,11 +120,13 @@ describe('database schema', () => {
       '0000_baseline.sql',
       '0001_hosted_payloads.sql',
       '0002_hosted_payload_locator_compatibility.sql',
+      '0003_application_model.sql',
     ])
     expect(snapshotFiles).toEqual([
       '0000_snapshot.json',
       '0001_snapshot.json',
       '0002_snapshot.json',
+      '0003_snapshot.json',
     ])
 
     const baseline = readFileSync(new URL('0000_baseline.sql', DRIZZLE_DIRECTORY), 'utf8')
@@ -141,6 +143,20 @@ describe('database schema', () => {
       expect.objectContaining({ idx: 0, tag: '0000_baseline' }),
       expect.objectContaining({ idx: 1, tag: '0001_hosted_payloads' }),
       expect.objectContaining({ idx: 2, tag: '0002_hosted_payload_locator_compatibility' }),
+      expect.objectContaining({ idx: 3, tag: '0003_application_model' }),
     ])
+
+    const previous = JSON.parse(
+      readFileSync(new URL('meta/0002_snapshot.json', DRIZZLE_DIRECTORY), 'utf8'),
+    ) as { tables: Record<string, unknown> }
+    const current = JSON.parse(
+      readFileSync(new URL('meta/0003_snapshot.json', DRIZZLE_DIRECTORY), 'utf8'),
+    ) as { tables: Record<string, unknown> }
+    for (const [name, definition] of Object.entries(previous.tables)) {
+      expect(current.tables[name]).toEqual(definition)
+    }
+    expect(Object.keys(current.tables).filter((name) => !(name in previous.tables))).toHaveLength(
+      10,
+    )
   })
 })

@@ -8,6 +8,10 @@ integrators.
 
 ## Public product and discovery
 
+The statements below describe the current accountless beta. The accepted next-phase portal and
+private-claim access policy is recorded in [ADR 0004](adr/0004-role-based-application.md); accounts,
+approval gates and private sharing are not implemented yet. Existing public payloads remain public.
+
 - EAS and EASScan are UX references only. XCS uses native XRPL Credentials and does not reproduce
   the EAS contracts or attestation model.
 - Schema registration is permissionless. Every valid schema is public and discoverable, but neither
