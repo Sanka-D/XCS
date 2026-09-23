@@ -76,3 +76,21 @@ qualified external SMTP provider. Invitation signing exclusion is browser-profil
 devices require a future server-side reservation. Recipient inbox/acceptance and presentation
 workspaces remain #32/#33. The user subsequently requested committing and pushing this work into the consolidated PR #35.
 This publication does not deploy or enable a running service.
+
+## PR #35 consolidation follow-up
+
+Issuer commit `d8c5a2c` includes the completed issuer implementation, the restored auth testing
+section/runbook, the admin handoff note and the existing Playwright locale instruction from #27/#30.
+Merge `9a31c17` records both independent auth/admin histories without changing that validated tree.
+Commit `cb6c3d8` fixes the inherited plan formatting and builds the SDK before PostgreSQL tests.
+
+`pnpm verify` now passes in full, including global formatting and all 1,024 unit tests. A new checkout
+with no SDK build output also passes all 87 PostgreSQL tests with local SMTP enabled. The first
+repeat encountered cleanup dependencies left by our earlier Docker smoke database; removing only
+that recorded disposable database restored the isolated test boundary, with no product change.
+
+The 58 browser and four runtime results above still apply: consolidation changes only documentation,
+Git ancestry and the PostgreSQL validation command. Immutable Actions pinning (33 references) and
+actionlint v1.7.12 pass. The current license policy fails on three `Unknown` entries
+(`@gemwallet/api@3.8.0`, `@walletconnect/types@2.24.0`, `vaul-vue@0.4.1`) and `nodemailer@10.0.10`
+(`MIT-0`, not allowlisted). The policy is unchanged; keep the aggregate PR in draft for review.
