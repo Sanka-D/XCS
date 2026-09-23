@@ -42,6 +42,7 @@ export const appOrganizationApplications = pgTable(
       .notNull()
       .references(() => appOrganizations.id, { onDelete: 'restrict' }),
     role: text('role', { enum: ['issuer', 'verifier'] }).notNull(),
+    revision: integer('revision').notNull().default(0),
     status: text('status', { enum: ['pending', 'approved', 'rejected', 'suspended'] })
       .notNull()
       .default('pending'),
@@ -58,6 +59,7 @@ export const appOrganizationApplications = pgTable(
   (t) => [
     primaryKey({ columns: [t.organizationId, t.role] }),
     index('app_organization_applications_queue_idx').on(t.status, t.submittedAt),
+    check('app_organization_applications_revision', sql`${t.revision} >= 0`),
     check('app_organization_applications_role', sql`${t.role} IN ('issuer', 'verifier')`),
     check(
       'app_organization_applications_status',

@@ -62,3 +62,28 @@ Unit and browser mocks prove application transitions; they do not prove a specif
 - Web tests prove user-visible workflow transitions and that signing remains in the wallet.
 
 If a required environment is unavailable, report the exact skipped command and do not describe it as passing.
+
+## Administrator portal (#30)
+
+Use a disposable PostgreSQL cluster: provisioning changes cluster-wide runtime role credentials,
+so database integration suites must run sequentially. Do not reuse the running #27 cluster.
+
+```sh
+pnpm --filter @xcs-protocol/web exec vitest run test/admin-config.test.ts test/admin-documents.test.ts test/admin-notifications.test.ts
+# With XCS_TEST_DATABASE_URL configured privately:
+pnpm --filter @xcs-protocol/web exec vitest run test/admin-postgres.integration.test.ts
+# Also exercise actual SMTP receipt when local Mailpit is available:
+XCS_TEST_MAILPIT_URL=http://127.0.0.1:8025 XCS_TEST_SMTP_PORT=1025 \
+  pnpm --filter @xcs-protocol/web exec vitest run test/admin-postgres.integration.test.ts
+# Real compiled Nitro, PostgreSQL sessions and browser; no mocked admin endpoints:
+pnpm --filter '@xcs-protocol/web...' build
+XCS_ADMIN_RUNTIME_TEST=1 pnpm --filter @xcs-protocol/web exec vitest run test/admin-postgres.integration.test.ts
+# Deterministic UI failure states use intercepted API responses:
+XCS_E2E_PORT=3130 pnpm --filter @xcs-protocol/web exec playwright test e2e/admin.spec.ts
+```
+
+The runtime browser test creates a short-lived synthetic TLS certificate and trusts only its
+public-key fingerprint in the test Chromium process; no OS trust is changed. It inserts synthetic
+sessions using the same PostgreSQL repository as authentication, exercises direct protected
+navigation and a real persisted decision, and revokes the admin role. It does not perform a real
+XRP Identity login. The mockup's human usability sessions remain unperformed.

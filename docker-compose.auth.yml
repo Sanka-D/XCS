@@ -1,0 +1,29 @@
+# Optional authentication overlay. Use after docker-compose.secrets.yml.
+# The public-only stack does not mount or require identity/application secrets.
+services:
+  db-bootstrap:
+    environment:
+      XCS_APP_DATABASE_PASSWORD_FILE: /run/secrets/app_database_password
+    secrets: [app_database_password]
+
+  web:
+    environment:
+      XCS_AUTH_ENABLED: '1'
+      XCS_AUTH_ORIGIN: ${XCS_AUTH_ORIGIN:?Set the exact HTTPS site origin}
+      XCS_IDENTITY_ISSUER: ${XCS_IDENTITY_ISSUER:-https://account.xrpl.in}
+      XCS_IDENTITY_CLIENT_ID_FILE: /run/secrets/identity_client_id
+      XCS_IDENTITY_CLIENT_SECRET_FILE: /run/secrets/identity_client_secret
+      NUXT_APP_DATABASE_URL_FILE: /run/secrets/app_database_url
+      XCS_AUTH_IDLE_SECONDS: ${XCS_AUTH_IDLE_SECONDS:-1800}
+      XCS_AUTH_MAX_SECONDS: ${XCS_AUTH_MAX_SECONDS:-28800}
+    secrets: [identity_client_id, identity_client_secret, app_database_url]
+
+secrets:
+  app_database_password:
+    file: ${XCS_APP_DATABASE_PASSWORD_FILE:?Set XCS_APP_DATABASE_PASSWORD_FILE}
+  app_database_url:
+    file: ${NUXT_APP_DATABASE_URL_FILE:?Set NUXT_APP_DATABASE_URL_FILE}
+  identity_client_id:
+    file: ${XCS_IDENTITY_CLIENT_ID_FILE:?Set XCS_IDENTITY_CLIENT_ID_FILE}
+  identity_client_secret:
+    file: ${XCS_IDENTITY_CLIENT_SECRET_FILE:?Set XCS_IDENTITY_CLIENT_SECRET_FILE}

@@ -26,7 +26,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts src/schema/index.ts src/bootstrap.ts src/migrations.ts src/bin/bootstrap.ts src/bin/migrate.ts src/bin/status.ts --format esm --dts --clean",
+    "build": "tsup src/index.ts src/schema/index.ts src/bootstrap.ts src/migrations.ts src/bin/bootstrap.ts src/bin/migrate.ts src/bin/status.ts src/bin/admin-bootstrap.ts --format esm --dts --clean",
     "clean": "rm -rf dist coverage",
     "db:generate": "drizzle-kit generate",
     "db:bootstrap": "tsx src/bin/bootstrap.ts",
@@ -35,9 +35,10 @@
     "bootstrap": "tsx src/bin/bootstrap.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:postgres": "XCS_REQUIRE_POSTGRES_TESTS=1 vitest run test/migrations.integration.test.ts test/app-model.integration.test.ts",
+    "test:postgres": "XCS_REQUIRE_POSTGRES_TESTS=1 vitest run --no-file-parallelism test/migrations.integration.test.ts test/app-model.integration.test.ts test/auth.integration.test.ts test/admin.integration.test.ts",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "admin:bootstrap": "tsx src/bin/admin-bootstrap.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

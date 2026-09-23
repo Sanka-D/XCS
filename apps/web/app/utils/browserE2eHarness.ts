@@ -1,3 +1,4 @@
+import { sign as signMessageBytes } from 'ripple-keypairs'
 import { decode, hashes, Wallet, type Client, type SubmittableTransaction } from 'xrpl'
 import type {
   AccountInfo,
@@ -21,6 +22,7 @@ interface BrowserE2eEffects {
 }
 
 interface BrowserE2eControls {
+  __xcsBrowserE2eAuthWallet?: boolean
   __xcsBrowserE2eWalletDiscoveryDelayMs?: number
   __xcsBrowserE2eCredentialObjects?: Record<string, unknown>[]
 }
@@ -93,6 +95,15 @@ class BrowserE2eWalletAdapter implements WalletAdapter {
     private readonly address: string,
   ) {
     this.staleOriginPermission = id === BROWSER_E2E_OTSU_WALLET_ID
+    if (
+      id === BROWSER_E2E_GEMWALLET_ID &&
+      (globalThis as typeof globalThis & BrowserE2eControls).__xcsBrowserE2eAuthWallet
+    ) {
+      const signer = Wallet.fromEntropy(Uint8Array.from({ length: 16 }, (_, i) => 31 - i))
+      this.address = signer.classicAddress
+      BROWSER_E2E_SIGNERS.set(this.address, signer)
+      this.capabilities.signMessage = true
+    }
   }
 
   public async isAvailable(): Promise<boolean> {
@@ -171,8 +182,19 @@ class BrowserE2eWalletAdapter implements WalletAdapter {
     throw new Error('BROWSER_E2E_SIGN_AND_SUBMIT_FORBIDDEN')
   }
 
-  public async signMessage(): Promise<never> {
-    throw new Error('BROWSER_E2E_SIGN_MESSAGE_UNSUPPORTED')
+  public async signMessage(message: string) {
+    if (!this.capabilities.signMessage || !this.currentAccount)
+      throw new Error('BROWSER_E2E_SIGN_MESSAGE_UNSUPPORTED')
+    const signer = BROWSER_E2E_SIGNERS.get(this.currentAccount.address)!
+    const bytes = Array.from(new TextEncoder().encode(message), (b) =>
+      b.toString(16).padStart(2, '0'),
+    ).join('')
+    return {
+      message,
+      signature: signMessageBytes(bytes, signer.privateKey),
+      publicKey: signer.publicKey,
+      signerAddress: this.currentAccount.address,
+    }
   }
 
   private cloneCurrentAccount(): AccountInfo | null {

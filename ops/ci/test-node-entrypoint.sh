@@ -51,6 +51,18 @@ XCS_BOOTSTRAP_DATABASE_URL_FILE="$database_url_file" \
     if (process.env.XCS_BOOTSTRAP_DATABASE_URL_FILE !== undefined) process.exit(1)
   '
 
+XCS_IDENTITY_CLIENT_ID_FILE="$special_password_file" \
+  XCS_IDENTITY_CLIENT_SECRET_FILE="$special_password_file" \
+  NUXT_APP_DATABASE_URL_FILE="$database_url_file" \
+  XCS_APP_DATABASE_PASSWORD_FILE="$special_password_file" \
+  sh docker/node-entrypoint.sh node -e '
+    if (!process.env.XCS_IDENTITY_CLIENT_ID || !process.env.XCS_IDENTITY_CLIENT_SECRET) process.exit(1)
+    if (!process.env.XCS_APP_DATABASE_PASSWORD || !process.env.NUXT_APP_DATABASE_URL) process.exit(1)
+    for (const name of ["XCS_IDENTITY_CLIENT_ID", "XCS_IDENTITY_CLIENT_SECRET", "XCS_APP_DATABASE_PASSWORD", "NUXT_APP_DATABASE_URL"]) {
+      if (process.env[`${name}_FILE`] !== undefined) process.exit(1)
+    }
+  '
+
 conflict_output=''
 if conflict_output="$(
   XCS_DATABASE_PASSWORD=never-print-this-value \

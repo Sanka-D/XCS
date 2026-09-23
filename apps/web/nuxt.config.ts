@@ -139,7 +139,7 @@ export default defineNuxtConfig({
         'base-uri': ["'none'"],
         'connect-src': cspConnectSources,
         'font-src': ["'self'"],
-        'form-action': ["'self'"],
+        'form-action': ["'self'", 'https://account.xrpl.in'],
         'frame-ancestors': ["'none'"],
         'frame-src': ["'none'"],
         'img-src': ["'self'", 'data:'],

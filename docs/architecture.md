@@ -50,3 +50,19 @@ The indexer is the only normal writer to protocol projections. Checkpoint, event
 
 The controlled Testnet pilot is disposable. It must not be promoted to Mainnet or presented as a neutral permanent registry. See [ADR 0003](./adr/0003-disposable-controlled-testnet-registry.md).
 An unavailable payload is distinct from a tampered payload. A cryptographically valid Credential does not prove that the issuer is trustworthy.
+
+## Optional administration
+
+The role-based portal adds durable application data alongside the rebuildable ledger projection.
+`/api/admin` reuses the PostgreSQL session, current admin-role check and CSRF guard from `/api/auth`.
+Its isolated `xcs_admin_app` pool can review organization/role applications and insert immutable
+access decisions; it cannot read private credential metadata or write ledger projections.
+Application revision, decision audit and one logical notification are committed together.
+Administrative approval remains available independently of indexer readiness and is not an XRPL
+transaction, endorsement, or private-claims grant (ADR 0004).
+
+Review documents live on a private read-only volume for the web process, behind five-minute,
+session-bound links and a fresh role check. The separate `xcs_notifier` worker processes a persistent
+outbox through local Mailpit. Uncertain SMTP outcomes require investigation before any resend.
+Application records, audits, notifications and review documents require retention/backups and
+must not be dropped during an application rollback. See the [admin runbook](runbooks/admin.md).

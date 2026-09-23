@@ -32,6 +32,13 @@ RUN --mount=type=cache,id=xcs-pnpm-store,target=/pnpm/store \
     pnpm --filter "$XCS_PACKAGE" --prod deploy --legacy /runtime && \
     rm -rf /runtime/src /runtime/test /runtime/coverage /runtime/.turbo
 
+# pnpm deploy packages files through a tar manifest that drops Nitro's traced
+# dependency symlinks (notably coexisting versions under node_modules/.nitro).
+# Preserve Nitro's standalone output verbatim after deploying workspace packages.
+RUN if [ "$XCS_PACKAGE" = '@xcs-protocol/web' ]; then \
+      rm -rf /runtime/.output && cp -a /workspace/apps/web/.output /runtime/.output; \
+    fi
+
 FROM ${XCS_NODE_IMAGE} AS runtime
 
 ARG XCS_PACKAGE

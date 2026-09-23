@@ -4,12 +4,16 @@ export const XCS_INDEXER_DATABASE_ROLE = 'xcs_indexer' as const
 export const XCS_API_DATABASE_ROLE = 'xcs_api' as const
 export const XCS_PAYLOAD_WRITER_DATABASE_ROLE = 'xcs_payload_writer' as const
 export const XCS_MONITOR_DATABASE_ROLE = 'xcs_monitor' as const
+export const XCS_APP_DATABASE_ROLE = 'xcs_app' as const
+export const XCS_ADMIN_APP_DATABASE_ROLE = 'xcs_admin_app' as const
+export const XCS_NOTIFIER_DATABASE_ROLE = 'xcs_notifier' as const
 export const XCS_DATABASE_CLUSTER_SCOPE = 'dedicated' as const
 
 export const XCS_INDEXER_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_API_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_MONITOR_DATABASE_CONNECTION_LIMIT = 3
+export const XCS_APP_DATABASE_CONNECTION_LIMIT = 12
 
 const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u
 const PROVISION_LOCK_CLASS_ID = 1_480_807_217
@@ -22,6 +26,9 @@ export interface RuntimeDatabasePasswords {
   apiPassword: string
   payloadWriterPassword: string
   monitorPassword: string
+  applicationPassword?: string
+  adminApplicationPassword?: string
+  notifierPassword?: string
 }
 
 export function parseDatabaseClusterScope(
@@ -70,16 +77,26 @@ export function assertRuntimeDatabasePasswords(passwords: RuntimeDatabasePasswor
   assertPassword(passwords.apiPassword, 'apiPassword')
   assertPassword(passwords.payloadWriterPassword, 'payloadWriterPassword')
   assertPassword(passwords.monitorPassword, 'monitorPassword')
+  for (const name of [
+    'applicationPassword',
+    'adminApplicationPassword',
+    'notifierPassword',
+  ] as const) {
+    const password = passwords[name]
+    if (password !== undefined) assertPassword(password, name)
+  }
 
-  if (
-    new Set([
-      passwords.administratorPassword,
-      passwords.indexerPassword,
-      passwords.apiPassword,
-      passwords.payloadWriterPassword,
-      passwords.monitorPassword,
-    ]).size !== 5
-  ) {
+  const values = [
+    passwords.administratorPassword,
+    passwords.indexerPassword,
+    passwords.apiPassword,
+    passwords.payloadWriterPassword,
+    passwords.monitorPassword,
+    passwords.applicationPassword,
+    passwords.adminApplicationPassword,
+    passwords.notifierPassword,
+  ].filter((value): value is string => value !== undefined)
+  if (new Set(values).size !== values.length) {
     throw new Error('administrator and runtime database passwords must be pairwise distinct')
   }
 }
@@ -99,6 +116,15 @@ const CREATE_ROLES_SQL = `
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_payload_writer') THEN
       CREATE ROLE xcs_payload_writer NOLOGIN;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_admin_app') THEN
+      CREATE ROLE xcs_admin_app NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_notifier') THEN
+      CREATE ROLE xcs_notifier NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_app') THEN
+      CREATE ROLE xcs_app NOLOGIN;
+    END IF;
   END
   $xcs_roles$;
 `
@@ -113,8 +139,8 @@ const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
       FROM pg_auth_members auth_membership
       JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
       JOIN pg_roles member_role ON member_role.oid = auth_membership.member
-      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
-         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
+      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', 'xcs_app', 'xcs_admin_app', 'xcs_notifier')
+         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', 'xcs_app', 'xcs_admin_app', 'xcs_notifier')
     LOOP
       IF membership.granted_role = 'pg_monitor' AND membership.member_role = 'xcs_monitor' THEN
         CONTINUE;
@@ -130,10 +156,22 @@ const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
   ALTER ROLE xcs_api WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
   ALTER ROLE xcs_payload_writer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
   ALTER ROLE xcs_monitor WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_app WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_APP_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity' PASSWORD NULL;
   ALTER ROLE xcs_indexer RESET ALL;
   ALTER ROLE xcs_api RESET ALL;
   ALTER ROLE xcs_payload_writer RESET ALL;
   ALTER ROLE xcs_monitor RESET ALL;
+  ALTER ROLE xcs_app RESET ALL;
+  ALTER ROLE xcs_admin_app WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_notifier WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 3 VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_admin_app RESET ALL;
+  ALTER ROLE xcs_notifier RESET ALL;
+  ALTER ROLE xcs_admin_app SET statement_timeout = '30s';
+  ALTER ROLE xcs_admin_app SET lock_timeout = '15s';
+  ALTER ROLE xcs_admin_app SET idle_in_transaction_session_timeout = '30s';
+  ALTER ROLE xcs_notifier SET statement_timeout = '30s';
+  ALTER ROLE xcs_notifier SET lock_timeout = '15s';
+  ALTER ROLE xcs_notifier SET idle_in_transaction_session_timeout = '30s';
   ALTER ROLE xcs_indexer SET statement_timeout = '5min';
   ALTER ROLE xcs_indexer SET lock_timeout = '30s';
   ALTER ROLE xcs_indexer SET idle_in_transaction_session_timeout = '30s';
@@ -146,6 +184,9 @@ const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
   ALTER ROLE xcs_monitor SET statement_timeout = '30s';
   ALTER ROLE xcs_monitor SET lock_timeout = '10s';
   ALTER ROLE xcs_monitor SET idle_in_transaction_session_timeout = '30s';
+  ALTER ROLE xcs_app SET statement_timeout = '30s';
+  ALTER ROLE xcs_app SET lock_timeout = '15s';
+  ALTER ROLE xcs_app SET idle_in_transaction_session_timeout = '30s';
 `
 
 const SET_ROLE_PASSWORDS_SQL = `
@@ -172,17 +213,80 @@ const SET_ROLE_PASSWORDS_SQL = `
 `
 
 const REVOKE_CURRENT_DATABASE_ACCESS_SQL = `
-  REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
-  REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
-  REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
-  REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer;
+  REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer, xcs_app, xcs_admin_app, xcs_notifier;
+  REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer, xcs_app, xcs_admin_app, xcs_notifier;
+  REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer, xcs_app, xcs_admin_app, xcs_notifier;
+  REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer, xcs_app, xcs_admin_app, xcs_notifier;
   REVOKE CREATE ON SCHEMA public FROM PUBLIC;
   DO $xcs_database_grants$
   BEGIN
-    EXECUTE format('REVOKE ALL PRIVILEGES ON DATABASE %I FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer', current_database());
+    EXECUTE format('REVOKE ALL PRIVILEGES ON DATABASE %I FROM PUBLIC, xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer, xcs_app, xcs_admin_app, xcs_notifier', current_database());
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_indexer, xcs_api, xcs_monitor, xcs_payload_writer', current_database());
   END
   $xcs_database_grants$;
+`
+
+// Table-level REVOKE does not remove column grants. Normalize these even when auth
+// is disabled so prior application releases cannot retain additional privileges.
+const REVOKE_APPLICATION_COLUMNS_SQL = `
+  DO $xcs_app_columns$
+  DECLARE relation record;
+  BEGIN
+    FOR relation IN
+      SELECT table_name, string_agg(format('%I', column_name), ', ' ORDER BY ordinal_position) AS columns
+      FROM information_schema.columns WHERE table_schema = 'public' GROUP BY table_name
+    LOOP
+      EXECUTE format('REVOKE SELECT (%2$s), INSERT (%2$s), UPDATE (%2$s), REFERENCES (%2$s) ON TABLE public.%1$I FROM xcs_app, xcs_admin_app, xcs_notifier', relation.table_name, relation.columns);
+    END LOOP;
+  END
+  $xcs_app_columns$;
+`
+
+const GRANT_APPLICATION_ACCESS_SQL = `
+  GRANT USAGE ON SCHEMA public TO xcs_app;
+  DO $xcs_app_connect$
+  BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_app', current_database());
+    EXECUTE format('ALTER ROLE xcs_app PASSWORD %L', current_setting('xcs.application_password'));
+  END
+  $xcs_app_connect$;
+  GRANT SELECT ON TABLE app_users, app_user_roles, app_wallets TO xcs_app;
+  GRANT SELECT (id, responsible_user_id, name, status) ON TABLE app_organizations TO xcs_app;
+  GRANT SELECT (organization_id, role, status) ON TABLE app_organization_applications TO xcs_app;
+  GRANT INSERT (identity_issuer, identity_subject, email, email_verified_at, display_name) ON TABLE app_users TO xcs_app;
+  GRANT UPDATE (email, email_verified_at, display_name) ON TABLE app_users TO xcs_app;
+  GRANT INSERT (user_id) ON TABLE app_user_roles TO xcs_app;
+  GRANT INSERT (user_id, network_id, address, verified_at) ON TABLE app_wallets TO xcs_app;
+  GRANT UPDATE (verified_at, revoked_at) ON TABLE app_wallets TO xcs_app;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE app_sessions, app_auth_transactions, app_wallet_challenges TO xcs_app;
+  ALTER ROLE xcs_app LOGIN;
+`
+
+// The portal administrator pool is separate from the bootstrap superuser xcs_admin.
+const GRANT_ADMIN_ACCESS_SQL = `
+  GRANT USAGE ON SCHEMA public TO xcs_admin_app;
+  DO $xcs_admin_connect$ BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_admin_app', current_database());
+    EXECUTE format('ALTER ROLE xcs_admin_app PASSWORD %L', current_setting('xcs.admin_application_password'));
+  END $xcs_admin_connect$;
+  GRANT SELECT (id, email, email_verified_at, display_name, status) ON app_users TO xcs_admin_app;
+  GRANT SELECT ON app_user_roles, app_sessions, app_organizations, app_organization_applications, app_documents, app_wallets TO xcs_admin_app;
+  GRANT SELECT, INSERT ON app_admin_decisions, app_admin_notifications TO xcs_admin_app;
+  GRANT UPDATE (status, reviewed_by, reviewed_at, review_reason, revision) ON app_organization_applications TO xcs_admin_app;
+  GRANT UPDATE (status, recipient_email, attempt_id, claimed_at, error_code) ON app_admin_notifications TO xcs_admin_app;
+  ALTER ROLE xcs_admin_app LOGIN;
+`
+const GRANT_NOTIFIER_ACCESS_SQL = `
+  GRANT USAGE ON SCHEMA public TO xcs_notifier;
+  DO $xcs_notifier_connect$ BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO xcs_notifier', current_database());
+    EXECUTE format('ALTER ROLE xcs_notifier PASSWORD %L', current_setting('xcs.notifier_password'));
+  END $xcs_notifier_connect$;
+  GRANT SELECT ON app_admin_notifications, app_admin_decisions TO xcs_notifier;
+  GRANT SELECT (id, name) ON app_organizations TO xcs_notifier;
+  GRANT SELECT (id, email, email_verified_at, status) ON app_users TO xcs_notifier;
+  GRANT UPDATE (status, attempts, attempt_id, claimed_at, sent_at, error_code, recipient_email) ON app_admin_notifications TO xcs_notifier;
+  ALTER ROLE xcs_notifier LOGIN;
 `
 
 const GRANT_RUNTIME_ACCESS_SQL = `
@@ -228,7 +332,20 @@ export async function provisionRuntimeDatabaseRoles(
     await sql`SELECT set_config('xcs.monitor_password', ${passwords.monitorPassword}, true)`
     await sql.unsafe(SET_ROLE_PASSWORDS_SQL)
     await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
+    await sql.unsafe(REVOKE_APPLICATION_COLUMNS_SQL)
     await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
+    if (passwords.applicationPassword !== undefined) {
+      await sql`SELECT set_config('xcs.application_password', ${passwords.applicationPassword}, true)`
+      await sql.unsafe(GRANT_APPLICATION_ACCESS_SQL)
+    }
+    if (passwords.adminApplicationPassword !== undefined) {
+      await sql`SELECT set_config('xcs.admin_application_password', ${passwords.adminApplicationPassword}, true)`
+      await sql.unsafe(GRANT_ADMIN_ACCESS_SQL)
+    }
+    if (passwords.notifierPassword !== undefined) {
+      await sql`SELECT set_config('xcs.notifier_password', ${passwords.notifierPassword}, true)`
+      await sql.unsafe(GRANT_NOTIFIER_ACCESS_SQL)
+    }
     await sql.unsafe(
       'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN; ALTER ROLE xcs_payload_writer LOGIN;',
     )

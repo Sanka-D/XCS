@@ -1,0 +1,106 @@
+# Local administration overlay, after secrets and authentication overlays.
+# Do not attach the notifier or Mailpit to the edge network.
+services:
+  db-bootstrap:
+    environment:
+      XCS_ADMIN_DATABASE_PASSWORD_FILE: /run/secrets/admin_database_password
+      XCS_NOTIFIER_DATABASE_PASSWORD_FILE: /run/secrets/notifier_database_password
+    secrets: [admin_database_password, notifier_database_password]
+
+  web:
+    environment:
+      XCS_ADMIN_ENABLED: '1'
+      NUXT_ADMIN_DATABASE_URL_FILE: /run/secrets/admin_database_url
+      XCS_ADMIN_DOCUMENT_KEY_FILE: /run/secrets/admin_document_key
+      XCS_ADMIN_DOCUMENT_DIRECTORY: /var/lib/xcs-review
+    secrets: [admin_database_url, admin_document_key]
+    volumes:
+      - xcs-admin-documents:/var/lib/xcs-review:ro
+
+  admin-notifier:
+    image: ${XCS_WEB_IMAGE:-xcs-web:local}
+    command: ['node', 'dist/admin/admin-notifier.js']
+    user: node
+    environment:
+      XCS_NOTIFIER_DATABASE_URL_FILE: /run/secrets/notifier_database_url
+      XCS_SMTP_HOST: mailpit
+      XCS_SMTP_PORT: '1025'
+    secrets: [notifier_database_url]
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    networks: [database, admin-mail]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=64m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 100
+    # Longer than the worker's 60-second bound: finish the in-flight attempt.
+    stop_grace_period: 75s
+    restart: unless-stopped
+    mem_limit: ${XCS_NOTIFIER_MEMORY_LIMIT:-256m}
+    cpus: ${XCS_NOTIFIER_CPU_LIMIT:-0.25}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+  mailpit:
+    image: axllent/mailpit:v1.29.2
+    user: '1000:1000'
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_DISABLE_VERSION_CHECK: 'true'
+      MP_SMTP_DISABLE_RDNS: 'true'
+      # Keep decision mail until the operator resolves ambiguous deliveries.
+      MP_MAX_MESSAGES: '0'
+    ports:
+      - '127.0.0.1:${XCS_MAILPIT_PORT:-8025}:8025'
+    expose: ['1025']
+    volumes:
+      - xcs-admin-mailpit:/data
+    networks: [admin-mail, admin-mail-ui]
+    init: true
+    read_only: true
+    tmpfs:
+      - '/tmp:rw,noexec,nosuid,size=32m'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    pids_limit: 100
+    stop_grace_period: 30s
+    restart: unless-stopped
+    mem_limit: ${XCS_MAILPIT_MEMORY_LIMIT:-256m}
+    cpus: ${XCS_MAILPIT_CPU_LIMIT:-0.25}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${XCS_LOG_MAX_SIZE:-10m}
+        max-file: ${XCS_LOG_MAX_FILES:-5}
+
+networks:
+  admin-mail:
+    internal: true
+  # Docker cannot publish the UI port from an exclusively internal network.
+  # This bridge belongs to Mailpit only; the notifier stays on internal networks.
+  admin-mail-ui:
+
+volumes:
+  xcs-admin-documents:
+  xcs-admin-mailpit:
+
+secrets:
+  admin_database_password:
+    file: ${XCS_ADMIN_DATABASE_PASSWORD_FILE:?Set XCS_ADMIN_DATABASE_PASSWORD_FILE}
+  notifier_database_password:
+    file: ${XCS_NOTIFIER_DATABASE_PASSWORD_FILE:?Set XCS_NOTIFIER_DATABASE_PASSWORD_FILE}
+  admin_database_url:
+    file: ${NUXT_ADMIN_DATABASE_URL_FILE:?Set NUXT_ADMIN_DATABASE_URL_FILE}
+  notifier_database_url:
+    file: ${XCS_NOTIFIER_DATABASE_URL_FILE:?Set XCS_NOTIFIER_DATABASE_URL_FILE}
+  admin_document_key:
+    file: ${XCS_ADMIN_DOCUMENT_KEY_FILE:?Set XCS_ADMIN_DOCUMENT_KEY_FILE}
