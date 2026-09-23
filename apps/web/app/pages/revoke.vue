@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { rippleTimeToIso } from '@xcs-protocol/core'
+import { decodeHexUtf8, rippleTimeToIso } from '@xcs-protocol/core'
 import { buildCredentialDelete } from '@xcs-protocol/sdk'
 import type { CredentialDelete } from 'xrpl'
 import type { WalletSubmissionResult } from '~/composables/useWallet'
@@ -16,8 +16,7 @@ import {
   buildCredentialPermalink,
   singleRouteQueryValue,
 } from '~/utils/operationLinks'
-import { parseWalletCredentialTransactionError } from '~/utils/walletCompatibility'
-import { decodeHexUtf8 } from '~/utils/serialization'
+import { walletTransactionErrorMessage } from '~/utils/walletCompatibility'
 
 const route = useRoute()
 const localePath = useLocalePath()
@@ -37,13 +36,7 @@ const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const messageDisplay = computed(() => {
-  const walletTransactionError = parseWalletCredentialTransactionError(message.value)
-  return walletTransactionError
-    ? t('wallet.errors.credentialUnsupported', {
-        wallet: walletTransactionError.walletName,
-        transactionType: walletTransactionError.transactionType,
-      })
-    : message.value
+  return walletTransactionErrorMessage(message.value, t) ?? message.value
 })
 const messageIsLocalized = computed(
   () => message.value.length > 0 && messageDisplay.value !== message.value,

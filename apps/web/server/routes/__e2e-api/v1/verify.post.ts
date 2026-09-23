@@ -1,7 +1,6 @@
-import type { JsonValue } from '@xcs-protocol/core'
+import { canonicalJson, type JsonValue } from '@xcs-protocol/core'
 
 import { assertBrowserE2eServerMode } from '../../../../app/utils/browserE2eMode'
-import { canonicalJson } from '../../../../app/utils/serialization'
 
 const PROFILE_ID = 'xrpl-testnet-xcs-browser-e2e'
 const ISSUER = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'

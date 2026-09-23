@@ -59,6 +59,8 @@ export type OperationBusinessContext =
       readonly credentialUri?: string | undefined
       readonly payloadDigestHex?: string | undefined
       readonly expiration?: string | undefined
+      /** Links consented hosted-payload bytes to this exact signed operation. */
+      readonly publicationJobId?: string | undefined
     }
   | {
       readonly action:
@@ -82,6 +84,7 @@ export interface StoredOperation extends OperationSeed {
   readonly message?: string | undefined
   readonly businessConfirmation?: BusinessConfirmation | undefined
   readonly businessEvidence?: BusinessEvidence | undefined
+  readonly publicationCompleted?: boolean | undefined
 }
 
 export interface SignedOperationRecord {
@@ -119,6 +122,7 @@ const CREDENTIAL_ACTIONS = new Set([
   'credential-revoke',
 ])
 const TRANSACTION_HASH = /^[0-9a-f]{64}$/i
+const PUBLICATION_JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const REASON_CODE = /^[A-Z0-9_]{1,128}$/
 const BUSINESS_DELETION_CAUSES = new Set<BusinessDeletionCause>([
   'issuer_revoked',
@@ -214,6 +218,13 @@ export function validateOperationBusinessContext(input: unknown): OperationBusin
       }
     }
     const expiration = optionalExpiration(candidate.expiration)
+    const publicationJobId = candidate.publicationJobId
+    if (
+      publicationJobId !== undefined &&
+      (typeof publicationJobId !== 'string' || !PUBLICATION_JOB_ID.test(publicationJobId))
+    ) {
+      throw new Error('OPERATION_PUBLICATION_JOB_ID_INVALID')
+    }
     return {
       action,
       issuer: candidate.issuer,
@@ -222,6 +233,9 @@ export function validateOperationBusinessContext(input: unknown): OperationBusin
       ...(typeof credentialUri === 'string' ? { credentialUri } : {}),
       ...(payloadDigestHex ? { payloadDigestHex } : {}),
       ...(expiration ? { expiration } : {}),
+      ...(typeof publicationJobId === 'string'
+        ? { publicationJobId: publicationJobId.toLowerCase() }
+        : {}),
     }
   }
   return {
@@ -521,16 +535,41 @@ export function applyJournalEntry(
 ): StoredOperation {
   if (['validated', 'expired', 'failed'].includes(operation.stage)) return operation
   const terminal = ['validated', 'expired', 'failed'].includes(entry.stage)
+  const publicationPending =
+    operation.business?.action === 'credential-issue' &&
+    operation.business.publicationJobId !== undefined &&
+    operation.publicationCompleted !== true
   return {
     ...operation,
     updatedAt: entry.at,
     stage: entry.stage,
     txHash: entry.txHash ?? operation.txHash,
-    txBlob: terminal ? undefined : operation.txBlob,
+    txBlob: terminal && !publicationPending ? undefined : operation.txBlob,
     lastLedgerSequence: entry.lastLedgerSequence ?? operation.lastLedgerSequence,
     engineResult: entry.engineResult ?? operation.engineResult,
     ledgerIndex: entry.ledgerIndex ?? operation.ledgerIndex,
     message: entry.message,
+  }
+}
+
+/** Publication verification and ledger reconciliation can finish in either order. */
+export function completeOperationPublication(
+  operation: StoredOperation,
+  jobId: string,
+): StoredOperation {
+  if (!PUBLICATION_JOB_ID.test(jobId)) throw new Error('OPERATION_PUBLICATION_JOB_ID_INVALID')
+  if (
+    operation.business?.action !== 'credential-issue' ||
+    operation.business.publicationJobId !== jobId.toLowerCase()
+  )
+    return operation
+  return {
+    ...operation,
+    publicationCompleted: true,
+    // Keep nonterminal recovery until the SDK reconciles its final ledger state.
+    txBlob: ['validated', 'expired', 'failed'].includes(operation.stage)
+      ? undefined
+      : operation.txBlob,
   }
 }
 
@@ -807,6 +846,23 @@ export class IndexedDbOperationJournal implements OperationJournal {
       if (!existing) throw new Error('OPERATION_NOT_FOUND')
       return applyJournalEntry(existing, entry)
     })
+  }
+
+  /** Call only after both the hosted receipt and public payload bytes are verified. */
+  public async completePublication(jobId: string): Promise<void> {
+    if (!PUBLICATION_JOB_ID.test(jobId)) throw new Error('OPERATION_PUBLICATION_JOB_ID_INVALID')
+    const operations = await this.list()
+    for (const operation of operations) {
+      if (
+        operation.business?.action !== 'credential-issue' ||
+        operation.business.publicationJobId !== jobId.toLowerCase()
+      )
+        continue
+      await this.#mutate(operation.operationId, (existing) => {
+        if (!existing) throw new Error('OPERATION_NOT_FOUND')
+        return completeOperationPublication(existing, jobId)
+      })
+    }
   }
 
   public async list(): Promise<StoredOperation[]> {

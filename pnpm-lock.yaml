@@ -9,9 +9,9 @@ overrides:
   svgo@>=4.0.0 <4.1.0: '>=4.1.0'
 
 patchedDependencies:
-  xrpl-connect@1.0.0-rc.0:
-    hash: e2ed5ff5b3a2c073307e088b37dc70382b07d407935c719d8be11a4a04332989
-    path: patches/xrpl-connect@1.0.0-rc.0.patch
+  xrpl-connect@1.0.0-rc.2:
+    hash: fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a
+    path: patches/xrpl-connect@1.0.0-rc.2.patch
 
 importers:
 
@@ -65,6 +65,9 @@ importers:
       '@xcs-protocol/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@xcs-protocol/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -116,6 +119,9 @@ importers:
       '@xcs-protocol/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@xrpl-commons/xrpl-connect-vue':
+        specifier: 1.0.0-rc.2
+        version: 1.0.0-rc.2(vue@3.5.41(typescript@5.9.3))(xrpl-connect@1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)))(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
       ipaddr.js:
         specifier: ^2.2.0
         version: 2.5.0
@@ -135,8 +141,8 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       xrpl-connect:
-        specifier: 1.0.0-rc.0
-        version: 1.0.0-rc.0(patch_hash=e2ed5ff5b3a2c073307e088b37dc70382b07d407935c719d8be11a4a04332989)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
+        specifier: 1.0.0-rc.2
+        version: 1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
     devDependencies:
       '@nuxt/eslint':
         specifier: ^1.17.0
@@ -500,11 +506,9 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -3227,6 +3231,14 @@ packages:
   '@walletconnect/types@2.24.0':
     resolution: {integrity: sha512-N1i7/BTyK317gfuxSVK7G0WwF4QrNgKR6BeRTXM9NLglXGZ/U1Vw5K5YycWfXzzBZak8LvHqlLB3gexxDAz/tg==}
 
+  '@xrpl-commons/xrpl-connect-vue@1.0.0-rc.2':
+    resolution: {integrity: sha512-NmCndkBmkLTIVovXolcE5WqRXSXyGFE1fA1Uw4SQJpPKZd2xdWT3wNhcgiLmgIc5qMCKjuSR2Pg8+Zuxp32MjA==}
+    engines: {node: ^20.19.0 || ^22.18.0 || >=24.11.0}
+    peerDependencies:
+      vue: ^3.5.0
+      xrpl: ^3.0.0 || ^4.0.0
+      xrpl-connect: ^1.0.0-rc.2
+
   '@xrplf/isomorphic@1.0.2':
     resolution: {integrity: sha512-ncZUdMXr6VlSXtdoiDi0jTH+gBrgGxwVeEidhoegII3PmyErbQsyj6e+j7acmR4LW/lvBkPkzb9QzRfJH0n3rA==}
     engines: {node: '>=18.0.0'}
@@ -3759,7 +3771,6 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
-    deprecated: Active development of CryptoJS has been discontinued. This library is no longer maintained.
 
   css-select@6.0.0:
     resolution: {integrity: sha512-rZZVSLle8v0+EY8QAkDWrKhpgt6SA5OtHsgBnsj6ZaLb5dmDVOWUDtQitd9ydxxvEjhewNudS6eTVU7uOyzvXw==}
@@ -4646,7 +4657,6 @@ packages:
 
   glob@10.5.0:
     resolution: {integrity: sha512-DfXN8DfhJ7NH3Oe7cFmu3NCu1wKbkReJ8TorzSAFbSKrlNaQSKfIzqYqVY8zlbs2NLBbWpRiU52GX2PbaBVNkg==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
     hasBin: true
 
   glob@13.0.6:
@@ -7322,8 +7332,8 @@ packages:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
 
-  xrpl-connect@1.0.0-rc.0:
-    resolution: {integrity: sha512-mhJUGtrryTQ7ZT3KfS6sWSavsI2yEKVzCuE7f5mlQdZ36VK6ZU/v7M9chFWd7aelnL0GRplnFr1NrFmeeFyE1A==}
+  xrpl-connect@1.0.0-rc.2:
+    resolution: {integrity: sha512-QxtpbEgBjMFk2f7zjzaNYViNCUXSDDg1oALXpLeqy5PKh/yjQALXH/gD+3X+Rn7oiBYP7MzrlqT7melVEfxNFg==}
     engines: {node: ^20.19.0 || ^22.18.0 || >=24.11.0}
     peerDependencies:
       xrpl: ^3.0.0 || ^4.0.0
@@ -7367,7 +7377,6 @@ packages:
   yaeti@0.0.6:
     resolution: {integrity: sha512-MvQa//+KcZCUkBTIC9blM+CU9J2GzuTytsOUwf2lidtvkx/6gnEp1QvJv34t9vdjhFmha/mUiNDbN0D0mJWdug==}
     engines: {node: '>=0.10.32'}
-    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
@@ -10732,6 +10741,12 @@ snapshots:
       - db0
       - ioredis
       - uploadthing
+
+  '@xrpl-commons/xrpl-connect-vue@1.0.0-rc.2(vue@3.5.41(typescript@5.9.3))(xrpl-connect@1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)))(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))':
+    dependencies:
+      vue: 3.5.41(typescript@5.9.3)
+      xrpl: 5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      xrpl-connect: 1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
 
   '@xrplf/isomorphic@1.0.2(bufferutil@4.1.0)(utf-8-validate@5.0.10)':
     dependencies:
@@ -15307,7 +15322,7 @@ snapshots:
 
   xml-name-validator@5.0.0: {}
 
-  xrpl-connect@1.0.0-rc.0(patch_hash=e2ed5ff5b3a2c073307e088b37dc70382b07d407935c719d8be11a4a04332989)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)):
+  xrpl-connect@1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.2(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.0.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)):
     dependencies:
       '@crossmarkio/typings': 0.0.6(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       '@gemwallet/api': 3.8.0

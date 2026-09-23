@@ -1,12 +1,11 @@
 import {
+  decodeHexUtf8,
   parseCredentialPayload,
   parsePayloadUri,
   rippleTimeToIso,
   type CredentialPayload,
   type ResolvedSchema,
 } from '@xcs-protocol/core'
-
-import { decodeHexUtf8 } from './serialization'
 
 import {
   inspectPilotHttpsPayloadHost,

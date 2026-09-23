@@ -84,7 +84,7 @@ test('runs the privacy-explicit exact-generation quickstart and shows four dimen
     }
   })
 
-  await page.goto('/en/developers')
+  await page.goto('/developers')
   await page.locator('[data-client-ready="true"]').waitFor()
   await expect(page.getByTestId('developer-api-base')).toContainText(API_PREFIX)
   await expect(page.getByTestId('developer-profile-id')).toHaveText(PROFILE_ID)
@@ -153,7 +153,7 @@ test('never restores a stale report when the payload changes during verification
     await route.continue()
   })
 
-  await page.goto('/en/developers')
+  await page.goto('/developers')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('developer-generation-input').fill(GENERATION_ID)
   await page.getByTestId('developer-load-generation').click()
@@ -182,7 +182,7 @@ test('keeps a generation without a URI metadata-only', async ({ page }) => {
     }
   })
 
-  await page.goto('/en/developers')
+  await page.goto('/developers')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('developer-generation-input').fill(NO_URI_GENERATION_ID)
   await page.getByTestId('developer-load-generation').click()
@@ -207,7 +207,7 @@ test('fails closed before payload input when an exact generation was replaced', 
     }
   })
 
-  await page.goto('/en/developers')
+  await page.goto('/developers')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('developer-generation-input').fill(HISTORICAL_GENERATION_ID)
   await page.getByTestId('developer-load-generation').click()

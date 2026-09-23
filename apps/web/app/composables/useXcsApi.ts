@@ -174,6 +174,14 @@ export interface ApiTransactionDetail {
 
 export type VerificationResponse = VerificationDimensions
 
+export interface HostedPayloadPublicationResponse {
+  readonly uri: string
+  readonly fetchUrl: string
+  readonly digestHex: string
+  readonly byteLength: number
+  readonly transactionHash: string
+}
+
 export function useXcsApi() {
   const config = useRuntimeConfig()
   const baseURL = import.meta.server ? config.apiBaseUrl : config.public.apiBaseUrl
@@ -417,6 +425,28 @@ export function useXcsApi() {
     })
   }
 
+  async function publishHostedPayload(input: {
+    network: string
+    locator: string
+    payloadBase64: string
+    signedTransactionBlob: string
+  }): Promise<HostedPayloadPublicationResponse> {
+    return apiFetch<HostedPayloadPublicationResponse>(
+      `/v1/payloads/${encodeURIComponent(input.locator)}`,
+      {
+        baseURL,
+        method: 'POST',
+        body: {
+          network: input.network,
+          payloadBase64: input.payloadBase64,
+          signedTransactionBlob: input.signedTransactionBlob,
+        },
+        retry: 0,
+        timeout: 15_000,
+      },
+    )
+  }
+
   return {
     listNetworks,
     getActiveNetworkProfile,
@@ -432,6 +462,7 @@ export function useXcsApi() {
     getCredential,
     getCredentialEventByTransaction,
     getSchemaRegistrationByTransaction,
+    publishHostedPayload,
     verify,
   }
 }

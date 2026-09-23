@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import {
   createHttpsPayloadUri,
-  createIpfsPayloadUri,
   encodeCredentialPayload,
+  parseJson,
+  payloadDigest,
 } from '@xcs-protocol/core'
 import { buildCredentialCreate } from '@xcs-protocol/sdk'
 import type { CredentialCreate } from 'xrpl'
 import type { WalletSubmissionResult } from '~/composables/useWallet'
-import { LocalPayloadPiiFieldError, type LocalPayloadPublication } from '~/utils/localPayloadStore'
 import {
   claimsObjectToGuidedClaims,
   guidedClaimsToJson,
@@ -20,16 +20,23 @@ import {
   verifyHttpsPayloadPublication,
   type PayloadPublicationProof,
 } from '~/utils/payloadPublication'
-import { parseWalletCredentialTransactionError } from '~/utils/walletCompatibility'
-import { parseJson } from '~/utils/serialization'
+import {
+  assertHostedPayloadReachable,
+  assertHostedPayloadSize,
+  createHostedPayloadLocation,
+  type PendingHostedPayload,
+} from '~/utils/hostedPayload'
+import { createHostedPublicationQueue } from '~/utils/hostedPublicationQueue'
+import { IndexedDbOperationJournal } from '~/utils/operationJournal'
+import { walletTransactionErrorMessage } from '~/utils/walletCompatibility'
 
 const route = useRoute()
 const localePath = useLocalePath()
 const { t } = useI18n()
+const config = useRuntimeConfig()
 const { account, busy, prepare, signAndSubmit } = useWallet()
-const { getActiveNetworkProfile, getSchema } = useXcsApi()
-const localPayloadStore = useLocalPayloadStore()
-const localPayloadStoreEnabled = localPayloadStore.enabled
+const { getActiveNetworkProfile, getSchema, publishHostedPayload } = useXcsApi()
+const hostedPayloadsEnabled = computed(() => config.public.payloadBaseUrl.trim().length > 0)
 
 const schemaUid = ref(typeof route.query.schema === 'string' ? route.query.schema : '')
 const subject = ref('')
@@ -40,11 +47,8 @@ const loadedSchemaUid = ref('')
 const loadedSchemaName = ref('')
 const schemaLoadBusy = ref(false)
 const claimsText = ref('{}')
-const storageMode = ref<'https' | 'local-test'>('https')
-const localStoreAcknowledged = ref(false)
-const localStoreNotice = ref('')
-const localPublication = shallowRef<LocalPayloadPublication | null>(null)
 const httpsUrl = ref('')
+const publicStoreAcknowledged = ref(false)
 const expiration = ref('')
 const publicationProof = ref<PayloadPublicationProof | null>(null)
 const publicationCheckBusy = ref(false)
@@ -54,24 +58,29 @@ const credentialUri = ref('')
 const transaction = shallowRef<CredentialCreate | null>(null)
 const preparedProfileId = ref('')
 const formError = ref('')
-const rejectedPiiFieldPath = ref('')
+const payloadLocator = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
+const pendingPublication = shallowRef<PendingHostedPayload | null>(null)
+const publicationJobId = ref('')
 const issuedLinkInputs = shallowRef<{
   profileId: string
   issuer: string
   subject: string
   schemaUid: string
 } | null>(null)
-const submissionBusy = computed(() => busy.value || flowBusy.value)
+const submissionBusy = computed(
+  () => busy.value || flowBusy.value || pendingPublication.value !== null,
+)
 let previewRevision = 0
 
 const formErrorMessage = computed(() => {
-  const walletTransactionError = parseWalletCredentialTransactionError(formError.value)
-  if (walletTransactionError) {
-    return t('wallet.errors.credentialUnsupported', {
-      wallet: walletTransactionError.walletName,
-      transactionType: walletTransactionError.transactionType,
-    })
+  const walletError = walletTransactionErrorMessage(formError.value, t)
+  if (walletError) return walletError
+  if (formError.value === 'PAYLOAD_FETCH_FAILED') {
+    return t('issue.errors.payloadFetchFailed')
+  }
+  if (formError.value === 'PAYLOAD_HOST_UNREACHABLE_BEFORE_SIGNING') {
+    return t('issue.errors.hostedBeforeSigning')
   }
   if (formError.value === 'PAYLOAD_HTTPS_URL_REQUIRED') {
     return t('issue.errors.httpsUrlRequired')
@@ -79,41 +88,34 @@ const formErrorMessage = computed(() => {
   if (formError.value === 'PAYLOAD_HTTPS_URL_PLACEHOLDER') {
     return t('issue.errors.httpsUrlPlaceholder')
   }
-  if (formError.value === 'PAYLOAD_FETCH_FAILED') {
-    return t('issue.errors.payloadFetchFailed')
+  if (formError.value === 'HOSTED_PAYLOAD_CONSENT_REQUIRED') {
+    return t('issue.errors.hostedConsent')
   }
-  if (formError.value === 'LOCAL_PAYLOAD_STORE_ACK_REQUIRED') {
-    return t('issue.localStore.errors.ackRequired')
-  }
-  if (formError.value === 'LOCAL_PAYLOAD_PII_FIELD_REJECTED') {
-    return t('issue.localStore.errors.pii', { field: rejectedPiiFieldPath.value })
-  }
-  if (formError.value === 'LOCAL_PAYLOAD_STORE_QUOTA_EXCEEDED') {
-    return t('issue.localStore.errors.quota')
-  }
-  if (formError.value === 'LOCAL_PAYLOAD_SIZE_INVALID') {
-    return t('issue.localStore.errors.size')
-  }
+  if (formError.value === 'PAYLOAD_SIZE_INVALID') return t('issue.errors.hostedSize')
+  if (formError.value.startsWith('PAYLOAD_RECOVERY_')) return t('issue.hosted.recoveryUnavailable')
   if (
-    formError.value === 'LOCAL_PAYLOAD_STORE_DISABLED' ||
-    formError.value === 'LOCAL_PAYLOAD_STORE_UNAVAILABLE' ||
-    formError.value === 'LOCAL_PAYLOAD_STORE_WRITE_FAILED'
+    formError.value === 'PAYLOAD_SERVICE_NOT_CONFIGURED' ||
+    formError.value === 'PAYLOAD_SERVICE_HTTPS_REQUIRED' ||
+    formError.value === 'PAYLOAD_STORAGE_UNAVAILABLE'
   ) {
-    return t('issue.localStore.errors.unavailable')
+    return t('issue.errors.hostedUnavailable')
   }
   if (
-    formError.value === 'LOCAL_PAYLOAD_STORE_RECORD_INVALID' ||
-    formError.value === 'LOCAL_PAYLOAD_DIGEST_MISMATCH' ||
-    formError.value === 'LOCAL_PAYLOAD_BYTES_MISMATCH' ||
+    formError.value === 'PAYLOAD_SERVICE_URL_TOO_LONG' ||
+    formError.value === 'SIGNED_TRANSACTION_PAYLOAD_MISMATCH' ||
+    formError.value === 'PAYLOAD_LOCATOR_MISMATCH' ||
     formError.value === 'PUBLISHED_PAYLOAD_BYTES_MISMATCH'
   ) {
-    return t('issue.localStore.errors.integrity')
+    return t('issue.errors.hostedIntegrity')
   }
-  if (
-    formError.value === 'LOCAL_PAYLOAD_NOT_FOUND' ||
-    formError.value === 'LOCAL_PAYLOAD_EXPIRED'
-  ) {
-    return t('issue.localStore.errors.missing')
+  if (formError.value === 'HOSTED_PAYLOAD_PII_FIELD_FORBIDDEN') {
+    return t('issue.errors.hostedPii')
+  }
+  if (formError.value === 'PAYLOAD_PUBLICATION_QUOTA_EXCEEDED') {
+    return t('issue.errors.hostedQuota')
+  }
+  if (formError.value === 'SIGNED_TRANSACTION_NOT_INDEXED') {
+    return t('issue.errors.hostedNotIndexed')
   }
   return formError.value
 })
@@ -139,11 +141,11 @@ function assertPayloadHttpsUrlIsConfigured(value: string): void {
 
 function invalidatePreview() {
   previewRevision += 1
+  publicStoreAcknowledged.value = false
   publicationProof.value = null
-  localPublication.value = null
-  localStoreNotice.value = ''
   canonicalPayload.value = ''
   credentialUri.value = ''
+  payloadLocator.value = ''
   transaction.value = null
   preparedProfileId.value = ''
   result.value = null
@@ -152,7 +154,6 @@ function invalidatePreview() {
 
 watch([schemaUid, subject, claimsText, httpsUrl, expiration], invalidatePreview)
 watch(claimsEditorMode, invalidatePreview)
-watch([storageMode, localStoreAcknowledged], invalidatePreview)
 watch(
   [() => account.value?.address ?? '', () => account.value?.network.id ?? ''],
   invalidatePreview,
@@ -244,21 +245,9 @@ function downloadPayload() {
   URL.revokeObjectURL(url)
 }
 
-function clearLocalPayloadStore() {
-  formError.value = ''
-  try {
-    const removed = localPayloadStore.clear()
-    invalidatePreview()
-    localStoreNotice.value = t('issue.localStore.cleared', { count: removed })
-  } catch (error) {
-    formError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
 async function buildPreview() {
   invalidatePreview()
   formError.value = ''
-  rejectedPiiFieldPath.value = ''
   result.value = null
   if (!account.value) return void (formError.value = 'WALLET_NOT_CONNECTED')
   const revision = previewRevision
@@ -266,23 +255,13 @@ async function buildPreview() {
   const normalizedSchemaUid = schemaUid.value.toLowerCase()
   const subjectAddress = subject.value
   let claimsInput = claimsText.value
-  const payloadUrl = httpsUrl.value
   const expirationInput = expiration.value
-  const selectedStorageMode = storageMode.value
-  const localStoreConsent = localStoreAcknowledged.value
   try {
     if (claimsEditorMode.value === 'guided') {
       if (loadedSchemaUid.value !== normalizedSchemaUid) {
         throw new Error('GUIDED_CLAIMS_SCHEMA_REQUIRED')
       }
       claimsInput = guidedClaimsToJson(guidedClaims.value)
-      claimsText.value = claimsInput
-    }
-    if (selectedStorageMode === 'https') {
-      assertPayloadHttpsUrlIsConfigured(payloadUrl)
-    } else {
-      if (!localPayloadStore.enabled.value) throw new Error('LOCAL_PAYLOAD_STORE_DISABLED')
-      if (!localStoreConsent) throw new Error('LOCAL_PAYLOAD_STORE_ACK_REQUIRED')
     }
     const profile = await getActiveNetworkProfile()
     const schema = await getSchema(normalizedSchemaUid, profile.profileId)
@@ -295,10 +274,15 @@ async function buildPreview() {
       fields: schema.resolved.fields,
     }).json
     canonicalPayload.value = canonical
-    credentialUri.value =
-      selectedStorageMode === 'local-test'
-        ? createIpfsPayloadUri(canonical)
-        : createHttpsPayloadUri(payloadUrl, canonical)
+    if (hostedPayloadsEnabled.value) {
+      const hosted = createHostedPayloadLocation(config.public.payloadBaseUrl, canonical)
+      credentialUri.value = hosted.credentialUri
+      payloadLocator.value = hosted.locator
+    } else {
+      assertPayloadHttpsUrlIsConfigured(httpsUrl.value)
+      credentialUri.value = createHttpsPayloadUri(httpsUrl.value, canonical)
+      payloadLocator.value = 'issuer-hosted'
+    }
     const raw = buildCredentialCreate({
       issuer: issuerAddress,
       subject: subjectAddress,
@@ -308,27 +292,16 @@ async function buildPreview() {
     })
     const prepared = (await prepare(raw, profile)) as CredentialCreate
     if (revision !== previewRevision) throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_BUILD')
-    if (selectedStorageMode === 'local-test') {
-      const stored = localPayloadStore.publish(canonical, {
-        nonPersonalTestDataAcknowledged: localStoreConsent,
-      })
-      if (stored.credentialUri !== credentialUri.value) {
-        throw new Error('LOCAL_PAYLOAD_DIGEST_MISMATCH')
-      }
-      localPublication.value = stored
-    }
     transaction.value = prepared
     preparedProfileId.value = profile.profileId
   } catch (error) {
     transaction.value = null
-    if (error instanceof LocalPayloadPiiFieldError) {
-      rejectedPiiFieldPath.value = error.fieldPath
-    }
     formError.value = error instanceof Error ? error.message : String(error)
   }
 }
 
 async function submit() {
+  if (pendingPublication.value || flowBusy.value) return
   const preparedTransaction = transaction.value
   const expectedPayload = canonicalPayload.value
   const expectedUri = credentialUri.value
@@ -338,26 +311,38 @@ async function submit() {
   const expectedClaims = claimsText.value
   const expectedClaimsEditorMode = claimsEditorMode.value
   const expectedGuidedClaims = JSON.stringify(guidedClaims.value)
-  const expectedHttpsUrl = httpsUrl.value
-  const expectedStorageMode = storageMode.value
-  const expectedLocalStoreAcknowledged = localStoreAcknowledged.value
-  const expectedLocalPublication = localPublication.value
+  const expectedLocator = payloadLocator.value
+  const expectedPublicStoreAcknowledged = publicStoreAcknowledged.value
   const expectedExpiration = expiration.value
   const expectedProfileId = preparedProfileId.value
   const expectedRevision = previewRevision
+  if (hostedPayloadsEnabled.value && !expectedPublicStoreAcknowledged) {
+    formError.value = 'HOSTED_PAYLOAD_CONSENT_REQUIRED'
+    return
+  }
   if (
     !preparedTransaction ||
     !expectedPayload ||
     !expectedUri ||
     !expectedIssuer ||
+    !expectedLocator ||
     !expectedProfileId
   ) {
     formError.value = 'TRANSACTION_PREVIEW_REQUIRED'
     return
   }
+  if (hostedPayloadsEnabled.value) {
+    const exactPublicationConfirmed = window.confirm(
+      t('issue.hosted.confirmExactPublication', {
+        url: expectedUri.split('#')[0],
+        payload: expectedPayload,
+      }),
+    )
+    if (!exactPublicationConfirmed) return
+  }
 
   flowBusy.value = true
-  publicationCheckBusy.value = true
+  publicationCheckBusy.value = !hostedPayloadsEnabled.value
   publicationProof.value = null
   formError.value = ''
   try {
@@ -373,29 +358,33 @@ async function submit() {
         claimsText.value !== expectedClaims ||
         claimsEditorMode.value !== expectedClaimsEditorMode ||
         JSON.stringify(guidedClaims.value) !== expectedGuidedClaims ||
-        httpsUrl.value !== expectedHttpsUrl ||
-        storageMode.value !== expectedStorageMode ||
-        localStoreAcknowledged.value !== expectedLocalStoreAcknowledged ||
-        localPublication.value !== expectedLocalPublication ||
+        payloadLocator.value !== expectedLocator ||
+        publicStoreAcknowledged.value !== expectedPublicStoreAcknowledged ||
         expiration.value !== expectedExpiration ||
         preparedProfileId.value !== expectedProfileId
       ) {
         throw new Error('ISSUANCE_PREVIEW_CHANGED_DURING_PUBLICATION_CHECK')
       }
     }
-    const proof =
-      expectedStorageMode === 'local-test'
-        ? await localPayloadStore.verifyPublication({
-            canonicalPayload: expectedPayload,
-            credentialUri: expectedUri,
-          })
-        : await verifyHttpsPayloadPublication({
-            canonicalPayload: expectedPayload,
-            credentialUri: expectedUri,
-          })
+    if (hostedPayloadsEnabled.value) {
+      assertHostedPayloadSize(expectedPayload)
+      await assertHostedPayloadReachable(expectedUri)
+    } else {
+      publicationProof.value = await verifyHttpsPayloadPublication({
+        canonicalPayload: expectedPayload,
+        credentialUri: expectedUri,
+      })
+    }
     assertCurrent()
-    publicationProof.value = proof
     publicationCheckBusy.value = false
+    if (hostedPayloadsEnabled.value) {
+      publicationJobId.value = createHostedPublicationQueue(localStorage).begin({
+        network: expectedProfileId,
+        locator: expectedLocator,
+        canonicalPayload: expectedPayload,
+        credentialUri: expectedUri,
+      }).id
+    }
     const normalizedExpiration = expectedExpiration
       ? new Date(expectedExpiration).toISOString()
       : undefined
@@ -407,11 +396,19 @@ async function submit() {
         subject: expectedSubject,
         schemaUid: expectedSchemaUid,
         credentialUri: expectedUri,
-        payloadDigestHex: proof.digestHex,
+        payloadDigestHex: payloadDigest(expectedPayload),
+        ...(publicationJobId.value ? { publicationJobId: publicationJobId.value } : {}),
         ...(normalizedExpiration ? { expiration: normalizedExpiration } : {}),
       },
       assertCurrent,
-      undefined,
+      (signature) => {
+        if (publicationJobId.value) {
+          pendingPublication.value = createHostedPublicationQueue(localStorage).signed(
+            publicationJobId.value,
+            signature,
+          ).payload
+        }
+      },
       (validated) => {
         issuedLinkInputs.value = {
           profileId: expectedProfileId,
@@ -420,14 +417,59 @@ async function submit() {
           schemaUid: expectedSchemaUid,
         }
         result.value = { ...validated }
+        // Ledger success is irreversible. Keep publication retryable even if
+        // waiting for the indexer fails, and never offer to issue it again.
+        transaction.value = null
       },
     )
     result.value = response
     transaction.value = null
+    await publishPendingPayload()
   } catch (error) {
     formError.value = error instanceof Error ? error.message : String(error)
   } finally {
+    // An interrupted/failed signing attempt without a returned signature stays
+    // recoverable after reload. Never silently delete the only saved payload.
+    if (!pendingPublication.value) publicationJobId.value = ''
     publicationCheckBusy.value = false
+    flowBusy.value = false
+  }
+}
+
+async function publishPendingPayload() {
+  const pending = pendingPublication.value
+  if (!pending) return
+  publicationCheckBusy.value = true
+  try {
+    const completedJobId = publicationJobId.value
+    publicationProof.value = await createHostedPublicationQueue(localStorage).publish(
+      completedJobId,
+      publishHostedPayload,
+    )
+    pendingPublication.value = null
+    publicationJobId.value = ''
+    transaction.value = null
+    try {
+      await new IndexedDbOperationJournal().completePublication(completedJobId)
+    } catch {
+      // Publication is already verified. A cleanup failure must not offer an
+      // impossible publication retry or imply that the credential was not issued.
+      formError.value = t('issue.hosted.journalCleanupFailed')
+    }
+  } finally {
+    publicationCheckBusy.value = false
+  }
+}
+
+async function retryPublication() {
+  if (flowBusy.value || busy.value) return
+  flowBusy.value = true
+  formError.value = ''
+  try {
+    await publishPendingPayload()
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : String(error)
+  } finally {
     flowBusy.value = false
   }
 }
@@ -436,6 +478,8 @@ const acceptLink = computed(() => {
   const generationId = result.value?.businessEvidence?.generationId
   if (
     result.value?.businessConfirmation !== 'confirmed' ||
+    !publicationProof.value ||
+    pendingPublication.value !== null ||
     !generationId ||
     !issuedLinkInputs.value
   ) {
@@ -468,6 +512,7 @@ const credentialLink = computed(() => {
       :lead="$t('issue.description')"
     />
     <StatusBox tone="warning">{{ $t('issue.noPii') }}</StatusBox>
+    <HostedPublicationRecovery :exclude-id="publicationJobId" />
 
     <UCard class="mb-6">
       <div class="grid gap-5">
@@ -576,57 +621,10 @@ const credentialLink = computed(() => {
           </UFormField>
         </template>
 
-        <template v-if="localPayloadStoreEnabled">
-          <!-- Native select: the pilot suite drives this control with selectOption(). -->
-          <div class="grid gap-1.5">
-            <label for="payload-storage-mode" class="text-sm font-semibold text-default">
-              {{ $t('issue.storage') }}
-            </label>
-            <select
-              id="payload-storage-mode"
-              v-model="storageMode"
-              :disabled="submissionBusy"
-              class="w-full rounded-[0.5rem] bg-default px-3 py-2 text-sm ring-1 ring-accented focus:outline-2 focus:outline-offset-2 focus:outline-primary disabled:opacity-60"
-            >
-              <option value="https">{{ $t('issue.localStore.httpsMode') }}</option>
-              <option value="local-test">{{ $t('issue.localStore.mode') }}</option>
-            </select>
-          </div>
-          <StatusBox
-            v-if="storageMode === 'local-test'"
-            tone="warning"
-            data-testid="local-payload-store-controls"
-            :title="$t('issue.localStore.title')"
-          >
-            <p>{{ $t('issue.localStore.warning') }}</p>
-            <UCheckbox
-              v-model="localStoreAcknowledged"
-              :disabled="submissionBusy"
-              :label="$t('issue.localStore.acknowledgement')"
-            />
-            <div>
-              <UButton
-                size="sm"
-                color="neutral"
-                variant="outline"
-                type="button"
-                :disabled="submissionBusy"
-                @click="clearLocalPayloadStore"
-              >
-                {{ $t('issue.localStore.clear') }}
-              </UButton>
-            </div>
-            <p v-if="localStoreNotice" class="text-sm text-muted" data-testid="local-store-notice">
-              {{ localStoreNotice }}
-            </p>
-          </StatusBox>
-        </template>
-
-        <UFormField
-          v-if="storageMode === 'https'"
-          :label="$t('issue.httpsUrlLabel')"
-          :help="$t('issue.httpsProof')"
-        >
+        <StatusBox v-if="hostedPayloadsEnabled" tone="notice" :title="$t('issue.hosted.title')">
+          {{ $t('issue.hosted.description', { origin: config.public.payloadBaseUrl }) }}
+        </StatusBox>
+        <UFormField v-else :label="$t('issue.httpsUrlLabel')" :help="$t('issue.httpsProof')">
           <UInput
             id="https-url"
             v-model.trim="httpsUrl"
@@ -637,7 +635,6 @@ const credentialLink = computed(() => {
             :disabled="submissionBusy"
           />
         </UFormField>
-        <p v-else class="text-sm text-muted">{{ $t('issue.localStore.flow') }}</p>
 
         <UFormField :label="$t('issue.expiration')">
           <UInput
@@ -675,31 +672,44 @@ const credentialLink = computed(() => {
       <p class="text-sm break-all">
         <code>{{ credentialUri }}</code>
       </p>
+      <UCheckbox
+        v-if="hostedPayloadsEnabled"
+        v-model="publicStoreAcknowledged"
+        :disabled="submissionBusy"
+        :label="$t('issue.hosted.consent', { url: credentialUri.split('#')[0] })"
+      />
       <div class="my-4">
         <UButton color="neutral" variant="outline" type="button" @click="downloadPayload">
           {{ $t('issue.download') }}
         </UButton>
       </div>
-      <p v-if="storageMode === 'https'" class="text-sm break-words text-muted">
+      <p v-if="hostedPayloadsEnabled" class="text-sm text-muted">
+        {{ $t('issue.hosted.publishAfterSignature') }}
+      </p>
+      <p v-else class="text-sm break-words text-muted">
         {{ $t('issue.publishBeforeSigning', { url: httpsUrl }) }}
       </p>
-      <StatusBox v-else-if="localPublication" tone="success" data-testid="local-payload-stored">
-        {{ $t('issue.localStore.stored', { expiresAt: localPublication.expiresAt }) }}
-      </StatusBox>
       <StatusBox v-if="publicationCheckBusy" tone="notice">{{ $t('issue.checking') }}</StatusBox>
       <StatusBox v-else-if="publicationProof" tone="success">
         <p class="break-all">
-          {{
-            $t(storageMode === 'local-test' ? 'issue.localStore.checked' : 'issue.checked', {
-              bytes: publicationProof.byteLength,
-            })
-          }}
+          {{ $t('issue.checked', { bytes: publicationProof.byteLength }) }}
           <code>{{ publicationProof.digestHex }}</code>
         </p>
       </StatusBox>
     </UCard>
 
     <TransactionPreview :transaction="transaction" :busy="submissionBusy" @confirm="submit" />
+    <StatusBox v-if="pendingPublication" tone="notice" role="status">
+      <p>{{ $t('issue.hosted.publicationPending') }}</p>
+      <UButton
+        type="button"
+        :disabled="flowBusy || busy"
+        data-testid="retry-hosted-publication"
+        @click="retryPublication"
+      >
+        {{ $t('issue.hosted.retryPublication') }}
+      </UButton>
+    </StatusBox>
     <BusinessFinality
       v-if="result"
       :tx-hash="result.txHash"

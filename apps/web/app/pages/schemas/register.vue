@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { encodeUtf8, parseJson, sha256Hex, utf8ByteLength, XcsError } from '@xcs-protocol/core'
 import { buildSchemaRegistrationPayment } from '@xcs-protocol/sdk'
 import type { Payment } from 'xrpl'
 import type { WalletSubmissionResult } from '~/composables/useWallet'
+import { walletTransactionErrorMessage } from '~/utils/walletCompatibility'
 import {
   GUIDED_SCHEMA_FIELD_TYPES,
   createCourseCompletionDraft,
@@ -11,9 +13,9 @@ import {
   schemaDefinitionToGuidedDraft,
   type GuidedSchemaDraft,
 } from '~/utils/schemaAuthoring'
-import { encodeUtf8, parseJson, sha256Hex } from '~/utils/serialization'
 
 const { account, busy, prepare, signAndSubmit } = useWallet()
+const { t } = useI18n()
 const { getActiveNetworkProfile } = useXcsApi()
 const editorMode = ref<'guided' | 'json'>('guided')
 const guidedDraft = ref<GuidedSchemaDraft>(createCourseCompletionDraft())
@@ -27,7 +29,21 @@ const formError = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const submitting = ref(false)
 const pageBusy = computed(() => busy.value || submitting.value)
+const nameBytes = computed(() => utf8ByteLength(guidedDraft.value.name))
+const descriptionBytes = computed(() => utf8ByteLength(guidedDraft.value.description))
+const formErrorMessage = computed(
+  () => walletTransactionErrorMessage(formError.value, t) ?? formError.value,
+)
 let previewRevision = 0
+
+function schemaErrorMessage(error: unknown): string {
+  if (error instanceof XcsError) {
+    if (error.path === '$.description') return t('register.descriptionInvalid')
+    if (error.path === '$.name') return t('register.nameInvalid')
+    return error.path ? `${error.path}: ${error.message}` : error.message
+  }
+  return error instanceof Error ? error.message : String(error)
+}
 
 function invalidatePreview() {
   previewRevision += 1
@@ -48,11 +64,12 @@ watch(
   (draft) => {
     if (editorMode.value !== 'guided') return
     invalidatePreview()
+    formError.value = ''
     try {
       schemaText.value = guidedSchemaToJson(draft)
       guidedError.value = ''
     } catch (error) {
-      guidedError.value = error instanceof Error ? error.message : String(error)
+      guidedError.value = schemaErrorMessage(error)
     }
   },
   { deep: true },
@@ -93,7 +110,7 @@ function selectEditorMode(mode: 'guided' | 'json') {
     editorMode.value = mode
     guidedError.value = ''
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : String(error)
+    formError.value = schemaErrorMessage(error)
   }
 }
 
@@ -126,7 +143,7 @@ async function buildPreview() {
     memoByteLength.value = built.memoByteLength
     transaction.value = prepared
   } catch (error) {
-    formError.value = error instanceof Error ? error.message : String(error)
+    formError.value = schemaErrorMessage(error)
     transaction.value = null
   }
 }
@@ -247,16 +264,33 @@ async function submit() {
             </UButton>
           </div>
 
-          <UFormField :label="$t('register.schemaName')">
-            <UInput id="schema-name" v-model="guidedDraft.name" :disabled="pageBusy" />
+          <UFormField :label="$t('register.schemaName')" :error="nameBytes === 0 || nameBytes > 64">
+            <UInput
+              id="schema-name"
+              v-model="guidedDraft.name"
+              :disabled="pageBusy"
+              required
+              aria-describedby="schema-name-hint"
+            />
+            <p id="schema-name-hint" class="text-sm text-muted">
+              {{ $t('register.textBytes', { count: nameBytes, max: 64 }) }}
+            </p>
           </UFormField>
-          <UFormField :label="$t('register.schemaDescription')">
+          <UFormField
+            :label="$t('register.schemaDescription')"
+            :error="descriptionBytes === 0 || descriptionBytes > 256"
+          >
             <UTextarea
               id="schema-description"
               v-model="guidedDraft.description"
+              required
+              aria-describedby="schema-description-hint"
               :rows="3"
               :disabled="pageBusy"
             />
+            <p id="schema-description-hint" class="text-sm text-muted">
+              {{ $t('register.textBytes', { count: descriptionBytes, max: 256 }) }}
+            </p>
           </UFormField>
 
           <fieldset class="grid gap-3 rounded-[0.8rem] p-4 ring-1 ring-default">
@@ -307,7 +341,7 @@ async function submit() {
             </div>
           </fieldset>
           <p class="text-sm text-muted">{{ $t('register.advancedHint') }}</p>
-          <StatusBox v-if="guidedError" tone="error">{{ guidedError }}</StatusBox>
+          <StatusBox v-if="guidedError" tone="error" role="alert">{{ guidedError }}</StatusBox>
         </template>
 
         <template v-else>
@@ -331,7 +365,11 @@ async function submit() {
       </div>
     </UCard>
 
-    <StatusBox v-if="formError" tone="error">{{ formError }}</StatusBox>
+    <StatusBox v-if="formError" tone="error" role="alert" :title="formErrorMessage">
+      <p v-if="formErrorMessage !== formError">
+        <code>{{ formError }}</code>
+      </p>
+    </StatusBox>
 
     <UCard v-if="canonicalSchema" class="mb-6">
       <template #header>

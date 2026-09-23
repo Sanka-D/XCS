@@ -6,4 +6,4 @@ onlyBuiltDependencies:
   - esbuild
   - unrs-resolver
 patchedDependencies:
-  xrpl-connect@1.0.0-rc.0: patches/xrpl-connect@1.0.0-rc.0.patch
+  xrpl-connect@1.0.0-rc.2: patches/xrpl-connect@1.0.0-rc.2.patch

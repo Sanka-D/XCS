@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const { locale, locales, setLocale, t } = useI18n()
 const localePath = useLocalePath()
+const { account } = useWallet()
 const clientReady = ref(false)
 
 const localeItems = computed(() =>
@@ -15,6 +16,15 @@ const navigation = computed(() => [
   { label: t('nav.explorer'), to: localePath('/schemas') },
   { label: t('nav.create'), to: localePath('/studio') },
   { label: t('nav.verify'), to: localePath('/verify') },
+  ...(account.value
+    ? [
+        {
+          label: t('nav.wallet'),
+          to: localePath('/credentials'),
+          'data-testid': 'wallet-space-link',
+        },
+      ]
+    : []),
   { label: t('nav.docs'), to: localePath('/developers') },
 ])
 

@@ -88,6 +88,27 @@ describe('exact credential review', () => {
     expect(credentialActionBlockReason(review, 'accept')).toBeUndefined()
   })
 
+  it('blocks acceptance when a payload review error remains alongside previously loaded claims', async () => {
+    const review = await loadCredentialReview({
+      credential,
+      report,
+      issuer: ISSUER,
+      subject: SUBJECT,
+      schemaUid: UID,
+      schema,
+      fetchPayload: true,
+      fetchImpl: async () =>
+        new Response(canonical, { headers: { 'content-type': 'application/json' } }),
+    })
+    const failedReview = { ...review, payloadReviewError: 'PAYLOAD_FETCH_FAILED' }
+
+    expect(failedReview.claims).toEqual(payload.claims)
+    expect(credentialActionBlockReason(failedReview, 'accept')).toBe(
+      'CREDENTIAL_PAYLOAD_REVIEW_FAILED',
+    )
+    expect(credentialActionBlockReason(failedReview, 'reject')).toBeUndefined()
+  })
+
   it('blocks acceptance unless every gate is valid and trusted', async () => {
     const review = await loadCredentialReview({
       credential,

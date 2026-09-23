@@ -31,18 +31,27 @@ the public submission RPC or the diagnostic status DTO.
 All valid permissionless schemas are public and discoverable. Credential verification is
 deliberately exact: callers share a generation ID, transaction hash or the complete
 issuer/subject/schema tuple. The site has no subject feed, account-wide Credential enumeration or
-claims search, and it displays no Commons issuer badge or universal trust result. Aggregate
-statistics contain only ledger-derived metadata. See
+claims search served by Commons, and it displays no Commons issuer badge or universal trust result.
+The connected-wallet `/credentials` page is a local self-view: the browser reads raw Credential
+objects directly from the configured public XRPL RPC, then reconciles each XCS-shaped tuple through
+the existing exact API route. It does not fetch claims or add a Commons-served account-wide
+Credential list. The RPC provider can observe the queried address and browser network metadata.
+Aggregate statistics contain only ledger-derived metadata. See
 [`ADR 0002`](../../docs/adr/0002-public-product-and-discovery.md).
 
 ## Implemented site map
+
+English is the default, unprefixed locale. French remains available under `/fr` from the language
+selector.
 
 The current application organizes the existing workflows as follows:
 
 - **Landing and Explorer:** `/` presents the editorial Testnet landing page, aggregate checkpoint
   statistics and exact search. `/schemas` and `/schemas/:uid` provide paginated schema discovery,
   `/activity` shows schema registrations only, `/credentials/:generationId` and
-  `/transactions/:hash` expose exact evidence, and `/status` shows the indexer/network view;
+  `/transactions/:hash` expose exact evidence, `/credentials` lists unaccepted credentials for the
+  currently connected wallet through direct XRPL discovery, and `/status` shows the indexer/network
+  view;
 - **Create:** `/studio` is the single creation hub. It emphasizes schema registration and
   single-credential issuance, then links acceptance, revocation and local operation recovery.
   Schema registration has a guided scalar-field editor, course-completion and diploma templates,
@@ -64,15 +73,55 @@ invited to turn shared coordinates into a secondary public directory.
 
 ## Wallet support
 
-The web app pins `xrpl-connect@1.0.0-rc.0` and registers its eight official adapters: Xaman,
-Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap. Crossmark, GemWallet,
-Ledger, Xyra, Otsu and MetaMask Snap are registered without deployment-specific configuration.
-Xaman is added only when `NUXT_PUBLIC_XAMAN_API_KEY` is set, and WalletConnect only when
-`NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` is set. Both values identify a public application to its
-wallet provider; they are browser-visible identifiers, not secrets. One Xaman application key is
-used by every visitor of that XCS deployment. Register the deployment origin with a trailing slash
-as an exact redirect URI in the Xaman Developer Console. XCS uses that stable root callback from
-every page; it never uses the current route as the OAuth callback.
+The chooser shows the pending wallet name while approval and network confirmation are outstanding.
+Connection errors stay at the top of the scrollable chooser. If the wallet reports another
+network, select XRP Ledger Testnet and retry; an existing app permission in the extension does not
+by itself establish the site's current session. Reloading the page requires connecting again
+because automatic reconnection is disabled.
+A connection must finish within 90 seconds; **Cancel connection** invalidates the attempt immediately,
+so a late extension response cannot reconnect it. Once approved, the header shows the wallet name,
+address, network and an explicit **Disconnect** action. Rejection and timeout errors remain visible.
+The open chooser updates when Crossmark emits its real provider-detection event; it does not require
+closing and reopening the menu. Account refresh before preparation/signing has a 10-second deadline.
+A timeout invalidates the session immediately, even if extension teardown hangs; late replies cannot
+restore the old account.
+
+The rc.2 Crossmark adapter does not forward session-change events. XCS listens to the official
+Crossmark SDK's `signout`, `user-change` and `network-change` events. Signout clears the connection;
+user/network notifications trigger an authoritative account refresh. Duplicate initialization
+notifications retain the approved session when its account and network are unchanged. Changed or
+unverifiable sessions are disconnected with an explanation. Pending sign-in events and other wallets
+are left alone. This does not replace the account/network and signature checks at submission.
+
+`pnpm exec playwright test --config playwright.crossmark.config.ts` checks the full production
+connection path against `https://localhost:3443` (override with `XCS_WALLET_TEST_URL`). The test uses
+an isolated browser with a fixture of Crossmark's extension messages, including response envelopes
+and duplicate initialization notifications; it does not replace SDK methods or modify the deployed
+site. Set `XCS_BROWSER_EXECUTABLE` to Brave's executable when using the macOS-trusted local CA.
+Actual wallet approval still requires a manual extension test.
+
+The web app pins `xrpl-connect@1.0.0-rc.2` and
+`@xrpl-commons/xrpl-connect-vue@1.0.0-rc.2`. The official Vue plugin owns the application-scoped
+`WalletManager` and reactive account state. XCS uses its documented headless `connect()` API from a
+small CSP-compatible chooser: the packaged `<WalletConnector>` loads Google Fonts and inline styles,
+which do not satisfy XCS's current browser policy. XCS does not subclass wallet adapters.
+One versioned pnpm patch fixes the rc.2 ESM Crossmark adapter used by this application:
+it validates the network returned with the fresh SignIn approval instead of discarding it
+and reading Crossmark's separately hydrated background replica. Older responses that omit
+the network still require the live query. A present but incomplete network is rejected;
+Mainnet never becomes Testnet. Account refresh and pre-signature checks validate the documented
+SDK session network, updated by approval and network-change events. The raw background getter
+is stale in Crossmark 0.2.19; it is not used as a second network gate. Missing/malformed session
+data still fails closed, without falling back to the adapter's previous network. See
+[`patches/README.md`](../../patches/README.md) for scope and removal criteria.
+It registers Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and MetaMask Snap. Xaman is added only when `NUXT_PUBLIC_XAMAN_API_KEY` is set, and
+WalletConnect only when `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` is set. Both values identify a
+public application to its wallet provider; they are browser-visible identifiers, not secrets.
+
+For local testing, keep Otsu and Crossmark in separate browser profiles. The inspected Otsu
+unpacked extension locks `window.xrpl` and `window.crossmark`; Crossmark 0.2.19 also writes
+those globals. Co-installation can prevent Crossmark's provider from initializing. This is
+an extension collision, not something the application should hide by faking availability.
 
 Public deployment is additionally blocked on third-party license review. The RC bundle contains
 WalletConnect code under the WalletConnect Community License, and its GemWallet dependency requires
@@ -82,23 +131,24 @@ dependencies would only hide the same bundled code from the license scanner; it 
 workaround. The upstream adapter packages are not yet published separately, so there is currently no
 npm-supported way to retain all eight adapters while excluding only those two integrations.
 
-The workspace applies `patches/xrpl-connect@1.0.0-rc.0.patch` while that release candidate is
-pinned. Xaman's OAuth provider serializes `network_id` as a decimal string and may omit optional
-network metadata from a later `ping()`, whereas the published adapter requires a complete
-string/number pair. The patch accepts only canonical safe-integer IDs, preserves missing optional
-metadata and rejects a network that contradicts the explicit transaction target. Because Xaman's
-public browser SDK does not expose its supported OAuth `force_network` parameter, the XCS adapter
-adds `force_network=TESTNET` only to the official Xaman authorization URL and evicts an older cached
-XCS OAuth session when it cannot prove Testnet. The patch also accepts an absent or empty
-`multisign_account` in a valid single-signature response: Xaman uses both forms for that
-inapplicable field, while the release candidate incorrectly requires an explicit `null`. Every
-signing payload separately carries `force_network: TESTNET`, and the adapter validates the resolved
-signing network. The patch also retries the authoritative resolved-payload read for sign-only
-requests: Xaman can report the signature before that payload is immediately readable, and the RC
-otherwise abandons the operation before XCS can validate and submit the blob. Remove these
-compatibility measures only after equivalent behavior ships in the pinned dependency.
-After a sign request resolves, the XCS adapter closes the script-opened Xaman window when browser
-policy allows it and restores focus to the application so submission progress remains visible.
+`autoConnect` is disabled: an explicit selection in the XCS chooser is the only connection trigger,
+so a cached Xaman session is never presented as a fresh user action. Xaman may replace
+`LastLedgerSequence` during signing; XCS omits that volatile field from the Xaman request, then
+cryptographically checks the complete returned blob and permits only the SDK's explicit
+`LastLedgerSequence` refresh rule. The initial wallet network, active XCS profile and configured
+XRPL RPC are all required to resolve to Testnet before submission. XCS does not use Xaman's later
+optional `ping()` metadata as a second network gate.
+
+Otsu stores dApp permissions by origin and otherwise resolves a later `connect()` from the stored
+address without presenting the wallet approval again. Before an explicit Otsu selection, XCS calls
+the adapter's public `disconnect()` method to revoke that stale origin permission, then delegates the
+new connection to XRPL Connect. This keeps the selected account bound to a fresh user-approved Otsu
+session instead of silently reusing an older address. Otsu's extension service worker can retain the
+public account while its signing key is locked. XRPL Connect rc.2 currently mislabels the resulting
+Otsu `Account not found` failure as an uninstalled wallet. XCS rechecks the adapter's public
+availability, reports the signing-account failure accurately and closes that unusable session. The
+user must unlock Otsu and explicitly reconnect before retrying; XCS never accesses wallet keys or
+repeats a rejected signing request automatically.
 
 XCS filters this surface to adapters that expose `sign()` and never calls `signAndSubmit`. A wallet
 may return a `tx_blob` or signed `tx_json`; the application normalizes the artifact, derives and
@@ -109,9 +159,19 @@ before persistence or relay.
 
 Wallet capability is transaction-specific. GemWallet 3.8.x embeds an XRPL validator from before
 native XLS-70 Credentials: it can sign the `Payment` used for schema registration but rejects
-`CredentialCreate`, `CredentialAccept` and `CredentialDelete` before signing. XCS therefore keeps
-GemWallet available for schemas while blocking those three transactions early with
-`WALLET_CREDENTIAL_TRANSACTION_UNSUPPORTED`. Xaman has native Credential handling in its current
+`CredentialCreate`, `CredentialAccept` and `CredentialDelete` before signing. For these three types,
+XCS offers an explicit raw-signing path. The full reviewed transaction remains visible, and a new
+acknowledgement is required for every attempt: GemWallet displays a hex message, not decoded fields.
+This is a transaction authorization, not a login signature. XCS uses `GemWalletAPI.signMessage(hex,
+true)`, exported by XRPL Connect, because rc.2's generic message adapter discards the hex flag.
+`xrpl.js` validates and serializes the exact prepared transaction, binds its public key to the
+connected Testnet account, assembles the returned signature and verifies it through the same SDK
+boundary before journaling or submission. No keys enter XCS, no automatic fallback follows a
+rejection, and schema Payments still use the normal adapter. Raw signing currently supports master
+keys only; delegated regular keys and multisigning are rejected rather than guessed.
+See [the real GemWallet Testnet qualification](../../docs/runbooks/gemwallet-raw-signing.md) for
+validated create/accept/delete transactions, popup limitations and local rollback.
+Xaman has native Credential handling in its current
 source and is the preferred candidate when its public application identifier is configured, but it
 still requires the real-wallet Testnet gate below. Unknown adapters remain visible as unvalidated;
 if one emits the exact legacy `Invalid field TransactionType` error, XCS converts it to the same
@@ -192,6 +252,51 @@ Private and public runtime switches must match exactly, and both the Nitro start
 plugin reject the mode outside a development bundle. `nuxt.config.ts` also rejects
 `XCS_BROWSER_E2E=1` when `NODE_ENV=production`.
 
+## Schema text fields
+
+Schema names (1–64 UTF-8 bytes) and descriptions (1–256 UTF-8 bytes) are required
+single-line protocol fields. The guided editor uses single-line inputs with byte
+counters and field-specific validation messages. Accents and emoji can use several
+bytes; the UI does not truncate or replace the submitted text. JSON mode uses the
+same protocol checks and identifies the failing field instead of discarding its
+error path.
+
+## Hosted HTTPS payloads
+
+Set `NUXT_PUBLIC_PAYLOAD_BASE_URL` to the API's exact public HTTPS payload origin and
+`XCS_LOCAL_PAYLOAD_STORE=0`. Hosted issuance requires explicit public-storage consent.
+Canonical payloads larger than **64 KiB of UTF-8 bytes** are rejected before preparation and again
+before signing, matching the hosted API limit. External issuer-managed storage keeps its own limit.
+The page builds the immutable URI, signs and submits `CredentialCreate`, waits for
+ledger/indexer confirmation, then publishes the canonical bytes with the validated
+signed blob. It checks the publication receipt and reads the HTTPS bytes back.
+Before signing, a credential-specific HEAD request checks that the public host is
+reachable. A 404 is expected before first publication; network/CORS failures or
+server errors block signing. This does not prove future availability or successful
+publication. Sharing/acceptance links appear only after exact-byte publication
+verification succeeds, never just because the ledger transaction was validated.
+Issuer-managed external HTTPS hosting still requires publication before signing.
+
+The consented public payload is saved in a per-job browser recovery queue before opening the wallet.
+The validated signature is persisted before submission and linked to the operation journal. This
+link also recovers an interrupted second storage write. Storage/quota failures block submission;
+pending copies are never silently evicted. Up to 20 pending copies are retained until successful
+publication or explicit removal. Do not clear browser data while recovery is needed.
+
+After a reload, **Issue** and **Operations** show pending publications. **Retry payload publication**
+only uploads the same payload and signed transaction; it never signs or submits another credential.
+The API still requires validated, indexed evidence. If submission timed out, reconcile the original
+operation in Operations, then retry publication. Recovery is removed only after the receipt and
+HTTPS bytes verify; terminal journal signatures are then purged. Damaged records are isolated and
+can be explicitly removed without blocking valid jobs. An interrupted wallet approval with no
+recorded signature requires checking the wallet/Operations first, not blindly issuing again.
+Download the payload copy before removing an unfinished recovery record. Recovery is local to this
+browser profile and origin, not a backup across devices; it uses no test payload-serving fallback.
+
+Do not use a rotating tunnel domain for durable credentials: the URI on XRPL cannot
+follow a domain change. A tunnel can prove a disposable Testnet flow, but production
+requires a fixed domain and persistent, backed-up storage.
+
 ## Local browser payload store
 
 For manual Testnet flows without an issuer-controlled HTTPS host, start the development site with:
@@ -259,7 +364,6 @@ NUXT_PUBLIC_API_BASE_URL=https://xcs-api.example
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
 NUXT_PUBLIC_XAMAN_API_KEY=optional-public-xaman-application-id
-NUXT_PUBLIC_XAMAN_REDIRECT_URL=https://xcs.example/
 NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=optional-public-reown-project-id
 ```
 
@@ -281,12 +385,8 @@ profile must be returned by the API.
 `NUXT_PUBLIC_XAMAN_API_KEY` and `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` are optional public
 application identifiers. Omitting either variable removes only that adapter; it does not prevent the
 other six adapters from loading. Do not put a Xaman secret, WalletConnect relay secret, wallet key or
-other credential in either value. `NUXT_PUBLIC_XAMAN_REDIRECT_URL` is optional and otherwise
-defaults to the current application origin with a trailing slash. When set, it must be that exact
-same-origin root URL; non-loopback deployments require HTTPS. Add the same exact URL to the Xaman
-application's redirect allowlist. In Compose, set the corresponding operator variables
-`XCS_PUBLIC_XAMAN_API_KEY`, `XCS_PUBLIC_XAMAN_REDIRECT_URL` and
-`XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`.
+other credential in either value. In Compose, set the corresponding operator variables
+`XCS_PUBLIC_XAMAN_API_KEY` and `XCS_PUBLIC_WALLET_CONNECT_PROJECT_ID`.
 
 Each independently hosted XCS deployment needs its own Xaman public application key and registered
 origin. The Commons key is not a universal credential for arbitrary self-hosted domains. Follow
@@ -308,12 +408,18 @@ public endpoint rather than either private indexer source.
 
 ## Pilot payload publication
 
-The deployed Commons beta issuance and acceptance flows support issuer-hosted public HTTPS payloads
-only; the loopback development aid documented above is intentionally not deployable. Commons does
-not store, cache or search credential claims. The issuer payload host must
+The deployed Commons beta issuance and acceptance flows support public HTTPS payloads,
+whether issuer-hosted or published through the configured hosted service. The loopback
+development aid documented above is intentionally not deployable. The payload host must
 allow the web origin through CORS and return `application/json` (or a `+json` media type). Acceptance
-first displays only indexed metadata, the URI and its host. The subject must explicitly consent
-before the browser contacts that host. Consent stays in memory and is bound to the displayed
+first displays the issuer, recipient, schema name and status. URI, hashes and ledger
+diagnostics are collapsed under **Technical details**. Checking **Load and verify these
+details** grants consent and immediately starts verification, with loading/error feedback
+and a retry action; it never opens the wallet. For an unknown issuer, the acknowledgement
+becomes available after the content loads. Checking it prepares the transaction and shows
+**Accept in wallet** next to the review; only clicking that button requests a signature.
+Raw transaction fields remain available in a collapsed preview. The subject must explicitly
+consent before the browser contacts the displayed host. Consent stays in memory and is bound to the displayed
 generation, exact URI and hostname; metadata is re-read and must still match before every payload
 request. Issuer trust remains a separate decision: an explicitly `untrusted` issuer is blocked, a
 `trusted` issuer needs no additional action, and the Commons-default `unknown` result requires a

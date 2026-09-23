@@ -1,6 +1,4 @@
-import type { JsonValue } from '@xcs-protocol/core'
-
-import { parseJson } from './serialization'
+import { parseJson, type JsonValue } from '@xcs-protocol/core'
 
 const GENERATION_ID_PATTERN = /^[0-9a-f]{64}$/u
 const PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/u

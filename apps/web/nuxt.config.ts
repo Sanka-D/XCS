@@ -90,20 +90,26 @@ export default defineNuxtConfig({
       // pre-bundle on each server start so rebuilt package code cannot be
       // replaced by Nuxt's persistent dependency cache.
       force: true,
-      // `xrpl` and `xrpl-connect` are pulled in lazily by the wallet adapters, so
-      // Vite only discovers them after the first page load and re-optimizes mid-run,
-      // which 504s the in-flight module requests. Pre-bundle them up front.
-      include: ['@xcs-protocol/core', '@xcs-protocol/sdk', 'xrpl', 'xrpl-connect'],
+      // Include the wallet boundary up front as well. Discovering it after the
+      // first page load can invalidate a shared optimizer chunk while the
+      // browser is still requesting that chunk.
+      include: [
+        '@xcs-protocol/core',
+        '@xcs-protocol/sdk',
+        '@xrpl-commons/xrpl-connect-vue',
+        'xrpl',
+        'xrpl-connect',
+      ],
       // Served unbundled so the CSS-injection strip above also runs in dev.
       exclude: ['vaul-vue'],
     },
   },
   i18n: {
-    defaultLocale: 'fr',
+    defaultLocale: 'en',
     strategy: 'prefix_except_default',
     locales: [
-      { code: 'fr', language: 'fr-FR', name: 'Français', file: 'fr.json' },
       { code: 'en', language: 'en-US', name: 'English', file: 'en.json' },
+      { code: 'fr', language: 'fr-FR', name: 'Français', file: 'fr.json' },
     ],
     langDir: 'locales',
   },
@@ -115,10 +121,10 @@ export default defineNuxtConfig({
     localPayloadStoreMode,
     public: {
       apiBaseUrl: 'http://localhost:3001',
+      payloadBaseUrl: '',
       profileId: '',
       rpcUrl: 'wss://s.altnet.rippletest.net:51233',
       xamanApiKey: '',
-      xamanRedirectUrl: '',
       walletConnectProjectId: '',
       browserE2eMode,
       localPayloadStoreMode,

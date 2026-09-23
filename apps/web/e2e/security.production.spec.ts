@@ -58,5 +58,16 @@ test('serves production assets without applying an HTML CSP to them', async ({ r
     expect(asset.status(), assetPath).toBe(200)
     expectNonHtmlDefensiveHeaders(asset)
     expect(asset.headers()['cache-control'], assetPath).toBe('public, max-age=31536000, immutable')
+    if (assetPath.endsWith('.js')) {
+      expect(await asset.text(), assetPath).not.toContain('xcs-browser-e2e')
+    }
   }
+})
+
+test('keeps deterministic browser fixtures unavailable in production', async ({ request }) => {
+  const response = await request.get('/__e2e-api/v1/networks')
+  expect(response.status()).toBe(404)
+  expect(response.headers()['content-type']).toContain('text/html')
+  expectStrictReportOnlyPolicy(response, await response.text(), 'production')
+  expectHtmlDefensiveHeaders(response)
 })

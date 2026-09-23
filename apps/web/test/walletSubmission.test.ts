@@ -28,9 +28,11 @@ import {
   applyJournalEntry,
   canAbandonOperation,
   canRetryOperation,
+  completeOperationPublication,
   operationBusinessKey,
   serializeOperationReceipts,
   toSanitizedOperationReceipt,
+  validateOperationBusinessContext,
   type StoredOperation,
 } from '../app/utils/operationJournal'
 import {
@@ -347,6 +349,36 @@ describe('wallet sign-only normalization', () => {
     ])
   })
 
+  it('retains publication recovery before a volatile submission guard rejects the signed operation', async () => {
+    const { transaction, signed } = signedPayment()
+    const events: string[] = []
+    const persistPublication = vi.fn(async () => {
+      events.push('publication:persisted')
+    })
+    const submit = vi.fn()
+    await expect(
+      signPreparedAndSubmit(
+        { isConnected: () => true, submit } as unknown as Client,
+        transaction,
+        createWalletSigner({ sign: async () => ({ hash: '', tx_blob: signed.tx_blob }) }),
+        {
+          journal: { append: async () => {} },
+          onValidatedSignature: async (signature) => {
+            events.push('signed:persisted')
+            expect(signature.lastLedgerSequence).toBe(transaction.LastLedgerSequence)
+            await persistPublication()
+          },
+          beforeSubmit: async () => {
+            events.push('guard:rejected')
+            throw new Error('READINESS_UNAVAILABLE')
+          },
+        },
+      ),
+    ).rejects.toThrow('READINESS_UNAVAILABLE')
+    expect(events).toEqual(['signed:persisted', 'publication:persisted', 'guard:rejected'])
+    expect(submit).not.toHaveBeenCalled()
+  })
+
   it('never persists or submits when issuer trust changes during the wallet dialog', async () => {
     const { transaction, signed } = signedPayment()
     const issuer = 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh'
@@ -581,6 +613,78 @@ describe('reliable submission outcome', () => {
 })
 
 describe('operation journal state', () => {
+  const publicationJobId = '12345678-1234-4234-8234-123456789abc'
+  const hostedBusiness = {
+    action: 'credential-issue' as const,
+    issuer: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+    subject: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+    schemaUid: '12'.repeat(32),
+    publicationJobId,
+  }
+
+  it('validates and preserves the publication link in stored and portable business context', () => {
+    expect(validateOperationBusinessContext(hostedBusiness)).toEqual(hostedBusiness)
+    expect(
+      toSanitizedOperationReceipt(storedOperation({ business: hostedBusiness })).business,
+    ).toEqual(hostedBusiness)
+    expect(() =>
+      validateOperationBusinessContext({ ...hostedBusiness, publicationJobId: '../invalid' }),
+    ).toThrow('OPERATION_PUBLICATION_JOB_ID_INVALID')
+  })
+
+  it.each(['validated', 'expired', 'failed'] as const)(
+    'retains a hosted signature after %s until explicit publication verification',
+    (stage) => {
+      const operation = storedOperation({
+        stage: 'pending',
+        business: hostedBusiness,
+        txBlob: 'SIGNED_BLOB',
+      })
+      const terminal = applyJournalEntry(operation, {
+        operationId: operation.operationId,
+        at: '2026-09-21T12:00:00.000Z',
+        stage,
+      })
+      expect(terminal.txBlob).toBe('SIGNED_BLOB')
+      expect(canRetryOperation(terminal)).toBe(false)
+      toSanitizedOperationReceipt(terminal)
+      expect(terminal.txBlob).toBe('SIGNED_BLOB')
+      const completed = completeOperationPublication(terminal, publicationJobId)
+      expect(completed.txBlob).toBeUndefined()
+      expect(completed.publicationCompleted).toBe(true)
+      expect(completeOperationPublication(completed, publicationJobId)).toEqual(completed)
+    },
+  )
+
+  it('keeps pending ledger recovery when publication verification finishes first', () => {
+    const pending = storedOperation({
+      stage: 'pending',
+      business: hostedBusiness,
+      txBlob: 'SIGNED_BLOB',
+    })
+    const published = completeOperationPublication(pending, publicationJobId)
+    expect(published.publicationCompleted).toBe(true)
+    expect(published.txBlob).toBe('SIGNED_BLOB')
+    expect(canRetryOperation(published)).toBe(true)
+    const validated = applyJournalEntry(published, {
+      operationId: pending.operationId,
+      at: '2026-09-21T12:00:00.000Z',
+      stage: 'validated',
+    })
+    expect(validated.txBlob).toBeUndefined()
+  })
+
+  it('does not purge an unrelated publication', () => {
+    const operation = storedOperation({
+      stage: 'validated',
+      business: hostedBusiness,
+      txBlob: 'SIGNED_BLOB',
+    })
+    expect(completeOperationPublication(operation, '87654321-1234-4234-8234-123456789abc')).toBe(
+      operation,
+    )
+  })
+
   it('uses action-independent business locks for one credential generation', () => {
     const profileId = 'xrpl-testnet-xcs-v0.1'
     const tuple = {
