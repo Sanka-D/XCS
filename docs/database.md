@@ -15,7 +15,7 @@ The Drizzle bookkeeping table in the internal `drizzle` schema is not part of th
 
 The diagram shows foreign-key relationships and the columns that are most useful when navigating the
 model. It deliberately omits secondary indexes, timestamps, and some payload columns; the generated
-baseline remains the complete DDL.
+migration journal remains the complete DDL history.
 
 ```mermaid
 erDiagram
@@ -187,11 +187,19 @@ The Drizzle source is split by domain:
 - [`credentials.ts`](../packages/db/src/schema/credentials.ts): Credential history and current state.
 - [`pinning.ts`](../packages/db/src/schema/pinning.ts): optional demo-pinning administration.
 
-[`0000_baseline.sql`](../packages/db/drizzle/0000_baseline.sql) is generated from those modules and
-creates the entire schema for an empty database. [`bootstrap.ts`](../packages/db/src/bootstrap.ts)
-applies that baseline and then normalizes the fixed runtime roles and grants. Both operations are
-idempotent, so starting the stack again is safe.
+[`0000_baseline.sql`](../packages/db/drizzle/0000_baseline.sql) creates the initial projection;
+`0001_hosted_payloads.sql` and `0002_hosted_payload_locator_compatibility.sql` add compatible public
+payload storage. Every applied SQL file and journal timestamp is immutable, including before
+production. Change the schema source, run `db:generate`, and review a new forward migration.
 
-Until the first production release, schema changes regenerate the baseline and disposable databases
-are recreated. The baseline freezes at production launch; later schema changes must use forward
-migrations rather than rewriting deployed history.
+[`migrations.ts`](../packages/db/src/migrations.ts) reads Drizzle artifacts, checks that the recorded
+hashes/timestamps form an exact prefix, and applies pending statements plus journal records in one
+locked transaction. `db:status` reports applied/pending names without creating database objects;
+`db:migrate` advances the schema without changing role passwords. A concurrent migration fails
+closed and can be retried after the first administrative job completes.
+
+[`bootstrap.ts`](../packages/db/src/bootstrap.ts) validates credentials first, calls the same
+migration runner, then normalizes runtime roles in a separate transaction. If role provisioning
+fails, the schema may already be advanced; rerun bootstrap with corrected configuration, never
+rewrite the journal. Existing projection and hosted-payload data are preserved on a compatible
+upgrade. See [Migrate and recover](./runbooks/deployment.md#migrate) for backup, fencing and recovery.

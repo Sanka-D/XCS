@@ -42,6 +42,7 @@ load_secret() {
 # This is an explicit allowlist: arbitrary *_FILE environment variables are not
 # interpreted, and secret values are never included in diagnostics.
 for secret_variable in \
+  XCS_BOOTSTRAP_DATABASE_URL \
   XCS_DATABASE_PASSWORD \
   XCS_POSTGRES_ADMIN_PASSWORD \
   XCS_INDEXER_DATABASE_PASSWORD \

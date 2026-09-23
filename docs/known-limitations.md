@@ -55,20 +55,20 @@ approval gates and private sharing are not implemented yet. Existing public payl
 - CI replays one deterministic synthetic ledger bundle through two PostgreSQL projections and pins
   their complete digest, but this proves the harness rather than Testnet history. A reviewed public
   Testnet capture from two demonstrably independent providers remains release evidence.
-- Discovery indexes are part of the single generated baseline; this pre-production package does not
-  support applying them to an already populated deployment.
+- Discovery indexes are in the immutable initial baseline. The migration runner upgrades compatible
+  journaled XCS databases; it cannot adopt unrelated or manually altered legacy schemas.
 - PostgreSQL is a self-hostable, rebuildable reference projection, not a Commons authority and not a
   protocol requirement for third-party implementations. A MongoDB adapter would need to reproduce
   atomic checkpoints, single-writer fencing, snapshots, constraints, and deterministic replay.
-- The reference bootstrap supports only a fresh database on a dedicated cluster. It creates
+- The reference bootstrap supports fresh and compatible journaled XCS databases on a dedicated cluster. It creates
   cluster-wide fixed roles, applies current-database grants and forces SCRAM-SHA-256 verifiers, but
-  it is not a shared-cluster bootstrapper, forward-compatible upgrader or anti-administrator
+  it is not a shared-cluster bootstrapper, arbitrary legacy upgrader or anti-administrator
   attestation. The administrator and reviewed baseline remain trusted; transport security and an
   explicit SCRAM `pg_hba.conf` policy remain operator responsibilities.
-- There is intentionally no pre-production upgrade history. Every current constraint and index is
-  created by `0000_baseline.sql`; a schema change requires regenerating the baseline and recreating
-  the projection database. The baseline must freeze before production, after which changes require
-  reviewed forward migrations.
+- Applied migration SQL and timestamps are immutable. `db:status` and `db:migrate` validate the
+  Drizzle history; unknown or changed applied migrations block upgrades. Migrations serialize in one
+  transaction, but runtime-role provisioning is a separate bootstrap transaction. Back up first,
+  stop/fence affected writers and use reviewed forward fixes; do not recreate a running database.
 - Signed PostgreSQL `integer` coordinate columns, including transaction and node indexes, still
   represent at most `2147483647`, not the full abstract uint32 range. The schema enforces their
   non-negative boundary but does not widen them.

@@ -63,7 +63,7 @@ function assertPassword(value: string, name: string): void {
   }
 }
 
-function assertPasswords(passwords: RuntimeDatabasePasswords): void {
+export function assertRuntimeDatabasePasswords(passwords: RuntimeDatabasePasswords): void {
   parseDatabaseClusterScope(passwords.clusterScope)
   assertPassword(passwords.administratorPassword, 'administratorPassword')
   assertPassword(passwords.indexerPassword, 'indexerPassword')
@@ -214,7 +214,7 @@ export async function provisionRuntimeDatabaseRoles(
   client: DatabaseClient,
   passwords: RuntimeDatabasePasswords,
 ): Promise<void> {
-  assertPasswords(passwords)
+  assertRuntimeDatabasePasswords(passwords)
 
   await client.sql.begin(async (sql) => {
     await sql`SELECT pg_advisory_xact_lock(${PROVISION_LOCK_CLASS_ID}, ${PROVISION_LOCK_OBJECT_ID})`

@@ -1,7 +1,10 @@
 # Self-hosted Testnet deployment
 
-The Compose stack is an alpha deployment template. It binds every published port to loopback by
-default and refuses to index with the placeholder network profile.
+Production uses two application services, Nuxt and the indexer, with externally provisioned managed
+PostgreSQL. The Compose PostgreSQL/bootstrap/migration services below are local development tools,
+not a production database provisioning mechanism. Compose binds published ports to loopback and
+refuses to index with the placeholder network profile. See [Migrate](#migrate) for the external-URL
+production procedure.
 
 A hosted deployment requires Docker Compose `2.24.4` or newer because the production overlay uses
 `!reset` to remove direct secret values before mounting files. All unqualified `docker compose`
@@ -203,8 +206,8 @@ On a new or recreated database, run the idempotent bootstrap before starting run
 pnpm --filter @xcs-protocol/db db:bootstrap
 ```
 
-The command applies the generated migration journal with Drizzle and then configures runtime roles in
-one administrative transaction. A second run is a no-op for schema creation and reapplies the same
+The command validates credentials, applies the Drizzle migration journal in one transaction, and
+then configures runtime roles in a separate administrative transaction. A second run is a no-op for schema creation and reapplies the same
 role attributes, passwords and grants. Applied migrations remain immutable. Review forward migrations against the existing schema; never
 recreate a running database merely to update application grants.
 
@@ -240,9 +243,102 @@ can authenticate only to the XCS database, with `scram-sha-256` on each allow en
 - `credential_generations_stats_idx` supports aggregate lifecycle counts.
 
 Applied migration files are immutable, including before production. Change `src/schema/`, generate
-and review a forward migration, back up the database and run `db:bootstrap` with the administrative
-identity. Evaluate locks, compatibility and rollback for each change. Never reset a running
+and review a forward migration, back up the database and run `db:migrate` with the administrative
+identity. New tables require reviewed explicit grants in the migration or an updated bootstrap;
+`db:migrate` never grants broad access or rotates passwords. Evaluate locks, compatibility and recovery for each change. Never reset a running
 projection or discard off-chain payload rows merely to redeploy the applications.
+
+## Migrate
+
+### External managed PostgreSQL
+
+Provision PostgreSQL externally. Supply the provider's verified TLS connection URL through
+`XCS_BOOTSTRAP_DATABASE_URL` or `XCS_BOOTSTRAP_DATABASE_URL_FILE` (one line, at most 16 KiB); never
+set both, print it, or give it to Nuxt/indexer runtime processes. The CLI does not load `.env`
+implicitly. Inject values with the deployment secret manager or export the secret-file path.
+Provider role restrictions must be qualified before rollout; the existing dedicated-cluster and
+least-privilege requirements still apply.
+
+On first installation, supply the four distinct runtime passwords (direct values or matching
+`_FILE` paths), set `XCS_DATABASE_CLUSTER_SCOPE=dedicated`, then run:
+
+```sh
+pnpm --filter @xcs-protocol/db db:bootstrap
+pnpm --filter @xcs-protocol/db db:status
+```
+
+Bootstrap installs pending migrations and provisions `xcs_indexer`, `xcs_api`, `xcs_payload_writer`
+and `xcs_monitor`. Later schema-only releases use the admin URL without runtime-password secrets:
+
+```sh
+pnpm --filter @xcs-protocol/db db:status
+pnpm --filter @xcs-protocol/db db:migrate
+pnpm --filter @xcs-protocol/db db:migrate
+pnpm --filter @xcs-protocol/db db:status
+```
+
+The second migrate run is deliberately a no-op. Output is JSON with `ok`, `applied` and `pending`
+migration names. `db:status` does no DDL, including on an empty database; pending files are not an
+error, so release automation must check that `pending` is empty before starting the new services.
+Failures exit nonzero with a stable diagnostic code, without connection strings or SQL details.
+For production images, equivalent commands are `node dist/bin/bootstrap.js`,
+`node dist/bin/migrate.js` and `node dist/bin/status.js` in the database image; tsx is not shipped.
+
+### Fencing, compatibility and rollout order
+
+1. Review the exact SQL, estimated table locks/duration and old/new application compatibility.
+   Record a restore point and take a full managed snapshot or `pg_dump` backup, including the
+   `drizzle` journal and off-ledger hosted payloads. Verify restore into a separate database before
+   production migration. Never rely on ledger replay to reconstruct payload bytes.
+2. For projection changes, stop the indexer and Nuxt, including its publication writers, and prevent
+   orchestration from restarting old replicas. Alternatively use a reviewed deployment fencing
+   procedure that revokes writer access and drains in-flight writes. A short-lived indexer lease
+   in `packages/db/src/indexer-fencing.ts` is not enough by itself: a running process can reacquire
+   a lease. Check all replicas are stopped/fenced before DDL.
+3. Run status and migration once per administrative release job. The transaction advisory lock
+   rejects concurrent migrators; it does not stop runtime services. Wait for the owning job before
+   retrying. SQL errors roll back every pending statement and journal insert from that run.
+4. Confirm `pending: []`, expected schema and grants, then deploy the compatible indexer and Nuxt.
+   Check liveness/readiness and ledger catch-up. If grants changed, rerun reviewed bootstrap with
+   the unchanged runtime secrets before restart; migrations alone never widen grants.
+
+An altered/missing applied hash, timestamp or unknown newer migration blocks the operation. Use the
+correct reviewed release artifact; do not delete journal rows or edit applied SQL to bypass it.
+Current migrations are transactional; statements such as `CREATE INDEX CONCURRENTLY` cannot be
+added to this runner without a separately reviewed execution strategy.
+
+### Local Compose
+
+Use the same database image for both jobs. `db-migrate` is opt-in through the `maintenance` profile
+and receives only the admin secret; it never provisions runtime passwords. For an existing local
+stack, with the secret overlay configured as above:
+
+```sh
+docker compose stop web indexer
+docker compose --profile maintenance run --rm db-migrate node dist/bin/status.js
+docker compose --profile maintenance run --rm db-migrate
+docker compose --profile maintenance run --rm db-migrate
+docker compose --profile maintenance run --rm db-migrate node dist/bin/status.js
+docker compose up -d web indexer
+```
+
+An empty local database needs `db-bootstrap` before runtime roles can log in. A migration does not
+restart services, drop volumes or recreate the database. Mounted secret files must be readable by
+the database image's unprivileged `node` user; protect their parent directory and mount only the
+specific files needed by each job.
+
+### Recovery
+
+Use forward fixes after a migration has committed; never rewrite an applied migration or its
+journal timestamp. If pending SQL failed, its transaction was rolled back: correct the unapplied
+release artifact, review it, and retry. If bootstrap grant provisioning failed after successful
+migration, correct provisioning and rerun bootstrap; the migration history remains applied.
+
+For an incompatible committed change, keep writers stopped, restore the verified pre-migration
+backup into a **separate** database, validate its journal/data/permissions, point the matching old
+application release at it and validate service readiness before reopening traffic. Preserve the
+failed database for diagnosis. Account for writes after the backup through a reviewed recovery
+plan; do not silently discard them or replay ledger state over irreplaceable hosted payload data.
 
 ### Deployment configuration
 
@@ -502,7 +598,8 @@ reviewed migrations and runtime grants. Check the managed provider supports the 
 operations before rollout. Use the provider's TLS CA and verified TLS connection URLs, never
 `rejectUnauthorized: false`. Restrict database ingress to Nuxt, the indexer and administrative jobs.
 
-1. Run bootstrap as an administrative job with all four distinct runtime passwords. Never give its
+1. On first installation run bootstrap as an administrative job with all four distinct runtime passwords;
+   for later schema releases follow [Migrate](#migrate) before deploying either service. Never give its
    administrator URL to either application service.
 2. Set Nuxt's `NUXT_DATABASE_URL` to `xcs_api`; set `NUXT_PAYLOAD_DATABASE_URL` to
    `xcs_payload_writer` only when hosting or demo pinning is enabled. Set the independent worker's
@@ -597,9 +694,9 @@ routes: keep reads available for existing credentials when rolling back write fu
   while their source payload still exists.
 - Monitor checkpoint age, rejected registrations, ledger continuity failures, pin-store failures,
   and disk usage.
-- Roll back application images only to a version compatible with the current baseline. Before
-  production, rebuild and replay the database for an incompatible schema change; never skip a
-  ledger.
+- Roll back application images only to a version compatible with the applied migration history.
+  Follow [Migrate](#migrate) for forward fixes or backup restoration; never reset the active database,
+  discard hosted payloads or skip a ledger to repair an incompatible schema change.
 - Rerun `db-bootstrap` after runtime-password rotation, then restart clients with the matching
   credentials. Keep `xcs_admin` credentials out of runtime containers and logs.
 - Retain a `pg_hba.conf` role-to-database allowlist as defense in depth.

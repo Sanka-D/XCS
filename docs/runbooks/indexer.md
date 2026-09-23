@@ -185,8 +185,10 @@ bundle directory.
 
 ## Rollback
 
-Application containers can roll back only to an image compatible with the current baseline. Before
-production, a database-schema rollback means recreating and replaying the projection. After the
-baseline freezes for production, forward migrations require an explicit tested rollback strategy.
+Application containers can roll back only to an image compatible with the applied migration history.
+Applied migrations are immutable, including before production. Prefer a forward fix; if restoring
+is necessary, use a verified full backup in a separate database and the matching application
+version. A projection replay cannot restore hosted payloads. Follow the
+[migration and recovery procedure](./deployment.md#migrate); never reset the active database.
 On-ledger registrations cannot be removed; a normative error requires a new protocol
 profile/version.

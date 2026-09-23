@@ -1,11 +1,10 @@
-import { fileURLToPath } from 'node:url'
-
-import { migrate } from 'drizzle-orm/postgres-js/migrator'
-
 import type { DatabaseClient } from './client.js'
-import { provisionRuntimeDatabaseRoles, type RuntimeDatabasePasswords } from './provision.js'
-
-const BASELINE_FOLDER = fileURLToPath(new URL('../drizzle', import.meta.url))
+import { migrateDatabase } from './migrations.js'
+import {
+  assertRuntimeDatabasePasswords,
+  provisionRuntimeDatabaseRoles,
+  type RuntimeDatabasePasswords,
+} from './provision.js'
 
 export {
   databasePasswordFromUrl,
@@ -24,13 +23,14 @@ export {
 } from './provision.js'
 
 export async function initializeDatabase(client: DatabaseClient): Promise<void> {
-  await migrate(client.db, { migrationsFolder: BASELINE_FOLDER })
+  await migrateDatabase(client)
 }
 
 export async function bootstrapDatabase(
   client: DatabaseClient,
   passwords: RuntimeDatabasePasswords,
 ): Promise<void> {
+  assertRuntimeDatabasePasswords(passwords)
   await initializeDatabase(client)
   await provisionRuntimeDatabaseRoles(client, passwords)
 }

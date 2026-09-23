@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  bootstrapDatabase,
   databasePasswordFromUrl,
   parseDatabaseClusterScope,
   provisionRuntimeDatabaseRoles,
@@ -19,6 +20,20 @@ function client(): DatabaseClient {
 }
 
 describe('runtime database role provisioning', () => {
+  it('rejects invalid bootstrap configuration before reserving a connection or applying DDL', async () => {
+    const database = client()
+    await expect(
+      bootstrapDatabase(database, {
+        clusterScope: 'dedicated',
+        administratorPassword: 'd'.repeat(32),
+        indexerPassword: 'd'.repeat(32),
+        apiPassword: 'a'.repeat(32),
+        payloadWriterPassword: 'p'.repeat(32),
+        monitorPassword: 'm'.repeat(32),
+      }),
+    ).rejects.toThrow('pairwise distinct')
+    expect(database.sql.begin).not.toHaveBeenCalled()
+  })
   it('requires an explicit dedicated-cluster acknowledgement', async () => {
     expect(parseDatabaseClusterScope('dedicated')).toBe('dedicated')
     expect(() => parseDatabaseClusterScope(undefined)).toThrow('must be dedicated')

@@ -1,5 +1,7 @@
 # Repository Codex Instructions
 
+- Before reading paths from an earlier architecture or another XCS checkout, resolve them with `rg --files` in the active worktree; source and deployment layouts differ between worktrees.
+
 - Before pushing Compose changes, render the exact overlays with every referenced profile and, when a Docker engine is available, run the production image build plus secret-file startup under the configured unprivileged users; configuration rendering alone does not validate build context or bind-mounted secret readability.
 - When cryptographically checking an XRPL transaction returned by `tx`, request `binary: true` and verify the canonical `tx_blob`; API v2 `tx_json` can rename serialized fields (for example, `Amount` is exposed as `DeliverMax`) and is not the canonical object to re-encode for signature verification.
 - For Playwright smoke assertions, inspect the rendered semantics and use a unique role, test ID, or explicitly scoped locator; scope navigation links to the named main-navigation region because the footer is also a navigation region and repeats them. Do not assume localized headings or repeated public identifiers resolve to exactly one element in strict mode. For wallet buttons whose CSS changes letter case, use an anchored case-insensitive accessible-name match after inspecting the current screen, not the casing returned by textContent.

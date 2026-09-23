@@ -80,7 +80,7 @@ services:
   db-bootstrap:
     <<: *one-shot-hardening
     image: ${XCS_DB_IMAGE:-xcs-db:local}
-    build:
+    build: &database-build
       <<: *node-build
       args:
         XCS_NODE_IMAGE: ${XCS_NODE_IMAGE:-node:24-alpine}
@@ -97,6 +97,23 @@ services:
       XCS_API_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
       XCS_PAYLOAD_DATABASE_PASSWORD: ${XCS_PAYLOAD_DATABASE_PASSWORD:-}
       XCS_MONITOR_DATABASE_PASSWORD: ${XCS_MONITOR_DATABASE_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [database]
+    mem_limit: ${XCS_JOB_MEMORY_LIMIT:-512m}
+    cpus: ${XCS_JOB_CPU_LIMIT:-0.5}
+
+  db-migrate:
+    <<: *one-shot-hardening
+    profiles: ['maintenance']
+    image: ${XCS_DB_IMAGE:-xcs-db:local}
+    build: *database-build
+    command: ['node', 'dist/bin/migrate.js']
+    environment:
+      XCS_DATABASE_URL_TARGET: XCS_BOOTSTRAP_DATABASE_URL
+      XCS_DATABASE_USER: xcs_admin
+      XCS_DATABASE_PASSWORD: ${XCS_POSTGRES_ADMIN_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -22,7 +22,8 @@ pnpm build
 
 ## Integration tiers
 
-1. Unit tests need no network or database.
+1. Unit tests need no network or database. The database migration integration file is skipped
+   without `XCS_TEST_DATABASE_URL`; `test:postgres` makes that variable mandatory.
 2. PostgreSQL integration tests require an isolated PostgreSQL 18 admin URL in `XCS_TEST_DATABASE_URL`.
 3. Browser tests use Playwright and deterministic fake ledger/wallet boundaries.
 4. Real Testnet acceptance requires externally controlled funded wallets, a published network profile, two complete-history sources, and a running PostgreSQL projection.
@@ -35,7 +36,10 @@ pnpm test:runtime
 ```
 
 Run these commands sequentially on a disposable PostgreSQL cluster: the suites provision
-cluster-wide runtime roles. `test:runtime` builds the production Nuxt server, starts it against
+cluster-wide runtime roles. `test:postgres` first exercises fresh/repeated migrations, legacy upgrade,
+history mismatch, concurrency, rollback and restricted-role rejection, then indexer and API suites.
+Its URL may point to an isolated PostgreSQL 18 outside Compose; never use a running pilot or production
+cluster. `test:runtime` builds the production Nuxt server, starts it against
 real restricted database connections, and checks SSR, readiness and signed payload publication.
 Its ledger projection is synthetic and its signature is generated locally; it is not evidence
 of a live Testnet transaction or an extension-wallet approval.

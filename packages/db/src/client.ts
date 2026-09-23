@@ -11,7 +11,10 @@ export interface DatabaseClient {
   close: () => Promise<void>
 }
 
-export function createDatabaseClient(databaseUrl: string): DatabaseClient {
+export function createDatabaseClient(
+  databaseUrl: string,
+  options: { onNotice?: () => void } = {},
+): DatabaseClient {
   if (databaseUrl.trim().length === 0) {
     throw new Error('DATABASE_URL must not be empty')
   }
@@ -21,6 +24,7 @@ export function createDatabaseClient(databaseUrl: string): DatabaseClient {
     idle_timeout: 20,
     connect_timeout: 10,
     prepare: false,
+    ...(options.onNotice ? { onnotice: options.onNotice } : {}),
   })
 
   return {

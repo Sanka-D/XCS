@@ -24,10 +24,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
-      - name: Verify generated database baseline is committed
+      - name: Verify migration generation produces no diff or untracked files
         run: |
           pnpm --filter @xcs-protocol/db db:generate
           git diff --exit-code -- packages/db/drizzle
+          test -z "$(git ls-files --others --exclude-standard -- packages/db/drizzle)"
 
   postgres:
     runs-on: ubuntu-24.04

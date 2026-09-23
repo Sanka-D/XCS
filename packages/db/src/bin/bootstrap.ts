@@ -4,18 +4,11 @@ import {
   parseDatabaseClusterScope,
 } from '../bootstrap.js'
 import { createDatabaseClient } from '../client.js'
-
-function requiredEnvironment(name: string): string {
-  const value = process.env[name]
-  if (value === undefined || value.trim().length === 0) {
-    throw new Error(`${name} is required`)
-  }
-  return value
-}
+import { requiredEnvironment } from './environment.js'
 
 async function main(): Promise<void> {
   const databaseUrl = requiredEnvironment('XCS_BOOTSTRAP_DATABASE_URL')
-  const client = createDatabaseClient(databaseUrl)
+  const client = createDatabaseClient(databaseUrl, { onNotice: () => undefined })
 
   try {
     await bootstrapDatabase(client, {

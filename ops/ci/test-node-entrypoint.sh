@@ -44,6 +44,13 @@ XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE="$special_password_file" \
     if (process.env.XCS_PAYLOAD_STORAGE_IP_HASH_SECRET_FILE !== undefined) process.exit(1)
   '
 
+XCS_BOOTSTRAP_DATABASE_URL_FILE="$database_url_file" \
+  sh docker/node-entrypoint.sh node -e '
+    const parsed = new URL(process.env.XCS_BOOTSTRAP_DATABASE_URL)
+    if (parsed.searchParams.get("sslmode") !== "verify-full") process.exit(1)
+    if (process.env.XCS_BOOTSTRAP_DATABASE_URL_FILE !== undefined) process.exit(1)
+  '
+
 conflict_output=''
 if conflict_output="$(
   XCS_DATABASE_PASSWORD=never-print-this-value \
