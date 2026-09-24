@@ -3,6 +3,10 @@ import type { RecipientCredential } from '../../../server/xcs/recipient/types'
 
 definePageMeta({ middleware: ['auth'] })
 const { t, locale } = useI18n()
+const auth = useAuth()
+const hasLinkedWallet = computed(
+  () => auth.user.value?.wallets.some((wallet) => wallet.networkId === 1) === true,
+)
 const localePath = useLocalePath()
 const { data, error, status, refresh } = useRecipientWorkspace()
 const groups = computed(() => [
@@ -37,9 +41,12 @@ useSeoMeta({ title: () => `${t('recipient.title')} — XCS`, robots: 'noindex,no
   <UContainer class="max-w-5xl py-10">
     <PageHeader :title="$t('recipient.title')" :lead="$t('recipient.intro')">
       <template #actions>
-        <UButton :to="localePath('/account')" color="neutral" variant="outline">{{
-          $t('auth.linkCurrentWallet')
-        }}</UButton>
+        <UButton
+          :to="{ path: localePath('/account'), query: { returnTo: localePath('/recipient') } }"
+          color="neutral"
+          variant="outline"
+          >{{ $t('roleJourney.prepareWallet') }}</UButton
+        >
         <UButton :loading="status === 'pending'" @click="refresh()">{{
           $t('recipient.refresh')
         }}</UButton>
@@ -83,7 +90,13 @@ useSeoMeta({ title: () => `${t('recipient.title')} — XCS`, robots: 'noindex,no
               <p class="mt-1">{{ invite.organizationName }}</p>
               <p class="mt-3 text-sm text-muted">
                 {{
-                  $t(invite.revokedAt ? 'recipient.invitationInactive' : 'recipient.waitingHelp')
+                  $t(
+                    invite.revokedAt
+                      ? 'recipient.invitationInactive'
+                      : hasLinkedWallet
+                        ? 'recipient.waitingHelp'
+                        : 'roleJourney.walletRequiredBeforeIssuance',
+                  )
                 }}
               </p>
             </UCard>

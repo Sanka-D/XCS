@@ -670,3 +670,10 @@ notification status is separate from successful ledger recording and cannot undo
 See the [recipient/verifier runbook](../../docs/runbooks/recipient-verifier.md) for routes, grants,
 login handoff and upgrade order. These workspaces reuse the restricted issuer pool; they add no new
 connection URL. Presentation scope and current approval are checked server-side on each disclosure.
+
+The guided role journey now returns recipients to their inbox after wallet linking and shows
+issuers whether the actual claimant has a verified wallet ready for issuance. Every new presentation
+requires a separate wallet message signature bound to that exact credential, disclosure and audience.
+The verifier opens only the shared link: current organization admission, recipient address/ledger
+state and dated holder proof are displayed without manual URI input. Master-key proof limitations,
+legacy unsigned links and additive migration 0008 are described in the recipient/verifier runbook.

@@ -1,10 +1,20 @@
 import { sql } from 'drizzle-orm'
-import { check, foreignKey, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import {
+  check,
+  foreignKey,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core'
 
 import { HASH_PATTERN } from '../common.js'
 import { appCredentialMetadata } from './issuance.js'
 import { appOrganizations } from './organizations.js'
 import { appUsers } from './identity.js'
+import { appSessions } from './auth.js'
 
 export const appPresentations = pgTable(
   'app_presentations',
@@ -88,5 +98,78 @@ export const appVerifierHistory = pgTable(
       'app_verifier_history_trust',
       sql`${t.issuerTrust} IN ('trusted', 'untrusted', 'unknown')`,
     ),
+  ],
+)
+
+// A separate purpose prevents a presentation signature from being consumed as a wallet link.
+export const appPresentationChallenges = pgTable(
+  'app_presentation_challenges',
+  {
+    id: uuid('id').primaryKey(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => appSessions.id, { onDelete: 'cascade' }),
+    presentationId: uuid('presentation_id').notNull().unique(),
+    request: jsonb('request').$type<PresentationProofRequest>().notNull(),
+    message: text('message').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index('app_presentation_challenges_session_idx').on(t.sessionId),
+    index('app_presentation_challenges_expiry_idx').on(t.expiresAt),
+    check('app_presentation_challenges_request', sql`jsonb_typeof(${t.request}) = 'object'`),
+    check(
+      'app_presentation_challenges_message',
+      sql`octet_length(${t.message}) BETWEEN 1 AND 8192`,
+    ),
+    check(
+      'app_presentation_challenges_dates',
+      sql`${t.expiresAt} > ${t.createdAt} AND ${t.expiresAt} <= ${t.createdAt} + interval '5 minutes' AND isfinite(${t.expiresAt})`,
+    ),
+  ],
+)
+
+export interface PresentationProofRequest {
+  version: 1
+  origin: string
+  challengeId: string
+  presentationId: string
+  nonce: string
+  issuedAt: string
+  expiresAt: string
+  profileId: string
+  networkId: number
+  generationId: string
+  issuerAddress: string
+  subjectAddress: string
+  schemaUid: string
+  payloadDigest: string | null
+  visibility: 'public' | 'private'
+  publicFields: string[]
+  scope: 'public' | 'full'
+  verifierOrganizationId: string | null
+}
+
+// Public signature evidence only; share tokens remain hashed in app_presentations.
+export const appPresentationProofs = pgTable(
+  'app_presentation_proofs',
+  {
+    presentationId: uuid('presentation_id')
+      .primaryKey()
+      .references(() => appPresentations.id, { onDelete: 'restrict' }),
+    request: jsonb('request').$type<PresentationProofRequest>().notNull(),
+    message: text('message').notNull(),
+    signature: text('signature').notNull(),
+    publicKey: text('public_key').notNull(),
+    scheme: text('scheme', { enum: ['ripple', 'otsu'] }).notNull(),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('app_presentation_proofs_request', sql`jsonb_typeof(${t.request}) = 'object'`),
+    check('app_presentation_proofs_message', sql`octet_length(${t.message}) BETWEEN 1 AND 8192`),
+    check('app_presentation_proofs_signature', sql`${t.signature} ~ '^[0-9A-Fa-f]{128,144}$'`),
+    check('app_presentation_proofs_key', sql`${t.publicKey} ~ '^(02|03|ED|ed)[0-9A-Fa-f]{64}$'`),
+    check('app_presentation_proofs_scheme', sql`${t.scheme} IN ('ripple', 'otsu')`),
   ],
 )

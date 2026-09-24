@@ -4,6 +4,7 @@ import { CrossmarkSDK, isWalletError, WalletErrorCode } from 'xrpl-connect'
 import { bindCrossmarkSession } from '~/utils/crossmarkSession'
 import { walletCredentialSupport } from '~/utils/walletCompatibility'
 import { observeWalletAvailability } from '~/utils/walletDiscovery'
+import { supportsWalletLinkProof } from '~/utils/roleJourney'
 import {
   connectWallet,
   WALLET_CONNECTION_CANCELLED,
@@ -16,6 +17,13 @@ interface WalletChoice {
   readonly url?: string | undefined
   readonly available: boolean
 }
+
+const props = withDefaults(defineProps<{ proofOnly?: boolean; testIdPrefix?: string }>(), {
+  proofOnly: false,
+  testIdPrefix: 'wallet',
+})
+// Callers give local pickers a distinct prefix; avoid consuming SSR IDs in this client component.
+const menuId = `${props.testIdPrefix}-menu`
 
 const walletConnection = useXrplConnectWallet()
 const { connecting, disconnect, manager } = walletConnection
@@ -35,20 +43,22 @@ const busy = computed(
     pendingWallet.value !== null || connecting.value || operationBusy.value || discovering.value,
 )
 const error = computed(() => localError.value ?? operationError.value)
-const unbindCrossmark = bindCrossmarkSession({
-  events: CrossmarkSDK.default,
-  manager,
-  disconnect,
-  onError: (cause) => {
-    const message = cause instanceof Error ? cause.message : String(cause)
-    localError.value =
-      message === 'CROSSMARK_SESSION_CHANGED'
-        ? t('wallet.sessionChanged')
-        : message.startsWith('CROSSMARK_SESSION_REFRESH_')
-          ? t('wallet.sessionRefreshFailed')
-          : message
-  },
-})
+const unbindCrossmark = props.proofOnly
+  ? () => {}
+  : bindCrossmarkSession({
+      events: CrossmarkSDK.default,
+      manager,
+      disconnect,
+      onError: (cause) => {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        localError.value =
+          message === 'CROSSMARK_SESSION_CHANGED'
+            ? t('wallet.sessionChanged')
+            : message.startsWith('CROSSMARK_SESSION_REFRESH_')
+              ? t('wallet.sessionRefreshFailed')
+              : message
+      },
+    })
 
 async function closeWalletMenu() {
   discoveryRun += 1
@@ -88,12 +98,14 @@ async function toggle() {
     onChange: (availableWallets) => {
       if (run !== discoveryRun) return
       const available = new Set(availableWallets.map((wallet) => wallet.id))
-      wallets.value = manager.wallets.map((wallet) => ({
-        id: wallet.id,
-        name: wallet.name,
-        ...(wallet.url ? { url: wallet.url } : {}),
-        available: available.has(wallet.id),
-      }))
+      wallets.value = manager.wallets
+        .filter((wallet) => !props.proofOnly || supportsWalletLinkProof(wallet.id))
+        .map((wallet) => ({
+          id: wallet.id,
+          name: wallet.name,
+          ...(wallet.url ? { url: wallet.url } : {}),
+          available: available.has(wallet.id),
+        }))
       open.value = true
       discovering.value = false
     },
@@ -122,6 +134,7 @@ onBeforeUnmount(() => {
 
 async function chooseWallet(walletId: string) {
   if (busy.value) return
+  if (props.proofOnly && !supportsWalletLinkProof(walletId)) return
   localError.value = null
   const attempt = new AbortController()
   connectionAttempt = attempt
@@ -177,12 +190,12 @@ function shortAddress(address: string) {
         :variant="account ? 'outline' : 'solid'"
         size="sm"
         class="max-w-full px-2 sm:px-3 [&_span]:truncate"
-        data-testid="wallet-toggle"
+        :data-testid="`${testIdPrefix}-toggle`"
         :disabled="busy"
         :aria-busy="busy"
         :title="account ? $t('wallet.disconnect') : undefined"
         :aria-expanded="account ? undefined : open || pendingWallet !== null"
-        :aria-controls="account ? undefined : 'wallet-menu'"
+        :aria-controls="account ? undefined : menuId"
         type="button"
       >
         <span class="truncate">{{
@@ -190,23 +203,26 @@ function shortAddress(address: string) {
             ? $t('wallet.connecting', { wallet: pendingWallet })
             : account
               ? `${manager.wallet?.name} · ${shortAddress(account.address)}`
-              : $t('wallet.connect')
+              : $t(proofOnly ? 'roleJourney.chooseCompatibleWallet' : 'wallet.connect')
         }}</span>
       </UButton>
       <template #content>
         <div
           v-if="!account"
-          id="wallet-menu"
+          :id="menuId"
+          :data-testid="`${testIdPrefix}-menu`"
           class="max-h-[min(36rem,80vh)] w-[min(22rem,calc(100vw-1rem))] space-y-3 overflow-y-auto p-4"
         >
           <StatusBox v-if="error" tone="error">{{ error }}</StatusBox>
-          <div v-if="pendingWallet" role="status" data-testid="wallet-pending">
+          <div v-if="pendingWallet" role="status" :data-testid="`${testIdPrefix}-pending`">
             <p>{{ $t('wallet.approvalPending', { wallet: pendingWallet }) }}</p>
             <UButton color="neutral" variant="link" @click="connectionAttempt?.abort()">
               {{ $t('wallet.cancelConnection') }}
             </UButton>
           </div>
-          <strong>{{ $t('wallet.choose') }}</strong>
+          <strong>{{
+            $t(proofOnly ? 'roleJourney.chooseCompatibleWallet' : 'wallet.choose')
+          }}</strong>
           <div
             v-for="wallet in wallets"
             :key="wallet.id"
@@ -262,7 +278,7 @@ function shortAddress(address: string) {
       v-if="account"
       class="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted"
       role="status"
-      data-testid="wallet-status"
+      :data-testid="`${testIdPrefix}-status`"
     >
       {{ $t('wallet.connected') }} · {{ account.network.name }}
       <UButton

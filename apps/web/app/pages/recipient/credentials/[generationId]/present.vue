@@ -6,6 +6,9 @@ import type {
 } from '../../../../../server/xcs/recipient/types'
 import { presentationLink, recipientCredentialPath } from '~/utils/presentationView'
 import { singleRouteQueryValue } from '~/utils/operationLinks'
+import { useWallet as useXrplConnectWallet } from '@xrpl-commons/xrpl-connect-vue'
+import { signWalletLinkChallenge } from '~/utils/walletLinkProof'
+import { supportsWalletLinkProof } from '~/utils/roleJourney'
 
 definePageMeta({ middleware: ['auth'] })
 const route = useRoute()
@@ -13,12 +16,14 @@ const auth = useAuth()
 const { t, locale } = useI18n()
 const localePath = useLocalePath()
 const request = useRequestFetch()
+const wallet = import.meta.client ? useXrplConnectWallet() : undefined
+const { account } = useWallet()
 const generationId = computed(() => String(route.params.generationId))
 const profileId = computed(() => singleRouteQueryValue(route.query.profile))
 const scope = ref<'public' | 'full'>('public')
 const verifierOrganizationId = ref('')
 const busy = ref(false)
-const mutationError = ref<'limit' | 'failed' | null>(null)
+const mutationError = ref<'limit' | 'failed' | 'proof' | null>(null)
 const created = shallowRef<{ id: string; url: string } | null>(null)
 const { data, error, status, refresh } = useAsyncData(
   () => `recipient-sharing:${profileId.value}:${generationId.value}`,
@@ -52,6 +57,25 @@ const canCreate = computed(
     data.value?.credential.status.state === 'active' &&
     (scope.value === 'public' || Boolean(selectedVerifier.value)),
 )
+const walletReady = computed(() => {
+  const current = account.value
+  return (
+    current?.address === data.value?.credential.subjectAddress &&
+    current?.network.id === 'testnet' &&
+    wallet?.manager.connected === true &&
+    supportsWalletLinkProof(wallet.manager.wallet?.id ?? '') &&
+    wallet.manager.supports('signMessage')
+  )
+})
+let formRevision = 0
+watch([profileId, generationId, scope, verifierOrganizationId, () => auth.user.value?.id], () => {
+  formRevision += 1
+  created.value = null
+})
+onBeforeUnmount(() => {
+  formRevision += 1
+  created.value = null
+})
 const date = (value: string) =>
   new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(
     new Date(value),
@@ -62,30 +86,61 @@ watch([profileId, generationId], () => {
   verifierOrganizationId.value = ''
 })
 async function create() {
-  if (busy.value || !canCreate.value) return
+  if (busy.value || !canCreate.value || !walletReady.value || !wallet) return
   busy.value = true
   mutationError.value = null
   created.value = null
+  const attempt = formRevision
+  const input = {
+    profileId: profileId.value,
+    generationId: generationId.value,
+    scope: scope.value,
+    ...(scope.value === 'full' ? { verifierOrganizationId: verifierOrganizationId.value } : {}),
+  }
   try {
+    const challenge = await auth.mutateApplication<{
+      id: string
+      address: string
+      networkId: number
+      message: string
+      expiresAt: string
+    }>('/api/recipient/presentation-challenges', input)
+    if (
+      attempt !== formRevision ||
+      challenge.address !== data.value?.credential.subjectAddress ||
+      challenge.networkId !== 1 ||
+      !walletReady.value
+    )
+      throw new Error('PRESENTATION_PROOF_CONTEXT_CHANGED')
+    const proof = await signWalletLinkChallenge(
+      wallet.manager,
+      { address: challenge.address, networkId: 'testnet' },
+      challenge.message,
+    )
+    if (attempt !== formRevision) throw new Error('PRESENTATION_PROOF_CONTEXT_CHANGED')
     const result = await auth.mutateApplication<CreatedPresentation>(
       '/api/recipient/presentations',
       {
-        profileId: profileId.value,
-        generationId: generationId.value,
-        scope: scope.value,
-        ...(scope.value === 'full' ? { verifierOrganizationId: verifierOrganizationId.value } : {}),
+        ...input,
+        proof: { challengeId: challenge.id, ...proof },
       },
     )
+    if (attempt !== formRevision) return
     created.value = {
       id: result.id,
       url: presentationLink(window.location.origin, localePath('/presentations'), result.token),
     }
     await refresh()
   } catch (cause) {
+    if (attempt !== formRevision) return
+    const code = (cause as { data?: { error?: string } }).data?.error
     mutationError.value =
-      (cause as { data?: { error?: string } }).data?.error === 'RECIPIENT_PRESENTATION_LIMIT'
+      code === 'RECIPIENT_PRESENTATION_LIMIT'
         ? 'limit'
-        : 'failed'
+        : code?.startsWith('RECIPIENT_PROOF_') ||
+            (cause instanceof Error && cause.message.startsWith('WALLET_'))
+          ? 'proof'
+          : 'failed'
   } finally {
     busy.value = false
   }
@@ -127,7 +182,13 @@ useSeoMeta({
     >
     <PageHeader :title="$t('presentation.createTitle')" :lead="$t('presentation.createHelp')" />
     <StatusBox v-if="error || mutationError" tone="error" role="alert" class="mb-5">{{
-      $t(mutationError === 'limit' ? 'presentation.limit' : 'presentation.actionError')
+      $t(
+        mutationError === 'limit'
+          ? 'presentation.limit'
+          : mutationError === 'proof'
+            ? 'roleJourney.proofFailed'
+            : 'presentation.actionError',
+      )
     }}</StatusBox>
     <p v-if="status === 'pending'">{{ $t('issuer.loading') }}</p>
     <template v-else-if="data && !error">
@@ -138,6 +199,20 @@ useSeoMeta({
         $t('recipient.inactiveHelp')
       }}</StatusBox>
       <form v-else class="grid gap-5" @submit.prevent="create">
+        <section
+          class="rounded border border-default p-4"
+          :aria-label="$t('roleJourney.shareProofTitle')"
+        >
+          <h3 class="font-semibold">{{ $t('roleJourney.shareProofTitle') }}</h3>
+          <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.shareProofHelp') }}</p>
+          <p class="mt-3 break-all font-mono text-sm">{{ data.credential.subjectAddress }}</p>
+          <ClientOnly
+            ><div class="mt-3"><WalletButton proof-only test-id-prefix="presentation-wallet" /></div
+          ></ClientOnly>
+          <p v-if="!walletReady" class="mt-3 text-sm text-muted">
+            {{ $t('roleJourney.shareConnectWallet') }}
+          </p>
+        </section>
         <fieldset class="grid gap-3">
           <legend class="mb-3 font-semibold">{{ $t('presentation.scope') }}</legend>
           <label class="flex gap-3"
@@ -189,7 +264,7 @@ useSeoMeta({
           <p v-else class="mt-2 text-sm text-muted">{{ $t('presentation.noFields') }}</p>
         </section>
         <p class="text-sm text-muted">{{ $t('presentation.duration') }}</p>
-        <UButton type="submit" :disabled="busy || !canCreate" :loading="busy">{{
+        <UButton type="submit" :disabled="busy || !canCreate || !walletReady" :loading="busy">{{
           $t('presentation.create')
         }}</UButton>
       </form>

@@ -198,3 +198,22 @@ Verifier history and CSV contain metadata and verification dimensions, never cla
 Reopening history is an authenticated CSRF-protected POST that rechecks current grant and approval.
 Portal approval remains distinct from issuer trust. Projected public claims cannot prove full-payload
 integrity: successful internal validation is exposed as `not_checked` for that partial view.
+
+## Dated holder proof and visible portal admission
+
+The completed issuer/recipient/verifier journey shows current portal admission as a factual
+application status, separate from issuer trust and ledger verification. It does not infer approval
+at issuance from the current organization row or endorse the truth of claims. The presentation link
+resolves all technical references; the viewer does not enter an address, URI or schema manually.
+
+Each new presentation requires a fresh text signature from the credential subject's currently linked
+wallet. Its server-generated challenge is purpose-separated from wallet linking and binds the exact
+credential, site, scope, audience and public disclosure. Atomic consumption prevents replay or a
+second grant from the same signature. The challenge expires after five minutes, independently of
+the existing unlimited, revocable grant. Signature evidence is stored separately from metadata-only
+verification history and is checked again on resolution. Legacy unsigned links are explicitly marked
+as lacking this evidence; they do not inherit a proof from the account's earlier wallet-link event.
+
+This is a dated master-key signature, not proof of the current visitor's identity, current wallet
+presence or current ledger authorization after master-key disabling. Existing private-field audience
+checks remain mandatory even with a valid signature. Anonymous minimal verification remains available.

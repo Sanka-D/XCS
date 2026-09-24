@@ -28,6 +28,13 @@ their unlimited, revocable authorization; there are no expiry or consumption col
 only their `revoked_at` column, and reads/appends verifier history. Authentication, public API and
 administrator roles receive no new private-payload or verifier-history grants.
 
+`0008_presentation_wallet_proof.sql` adds `app_presentation_challenges` and
+`app_presentation_proofs`, preserving deployed migrations 0000–0007 and existing grants. Challenges
+are session-bound, single-use and limited to five minutes. This lifetime applies only to signing;
+presentation links still have no automatic expiration. The portal role may select/insert both tables
+and delete challenges to consume them. It cannot update or delete persisted signature evidence.
+No new privileges are granted to authentication, public API or administrator roles.
+
 An organization has one responsible human account, not a shared login. Issuer and verifier
 applications are independent. Personal roles are `admin` and `recipient`; organization roles are
 `issuer` and `verifier`. Application approval never proves the validity of a ledger transaction or
@@ -56,13 +63,16 @@ erDiagram
     app_invites o|--o| app_credential_metadata : leads_to
     app_credential_metadata ||--o{ app_presentations : shared_as
     app_organizations o|--o{ app_presentations : designated_verifier
+    app_sessions ||--o{ app_presentation_challenges : requests_signature
+    app_presentations ||--o| app_presentation_proofs : carries_signature
     app_presentations ||--o{ app_verifier_history : checked_as
     app_users ||--o{ app_verifier_history : consulted
     app_organizations ||--o{ app_verifier_history : verifier
 ```
 
-The diagram omits reviewer/uploader/creator references for readability. All foreign keys use
-`ON DELETE RESTRICT`; no account deletion cascades into credential or ledger history.
+The diagram omits reviewer/uploader/creator references for readability. Durable history uses
+`ON DELETE RESTRICT`; transient wallet/presentation challenges cascade when their session is deleted.
+No account deletion cascades into credential or ledger history.
 
 ## Data dictionary
 
@@ -250,6 +260,36 @@ Per-credential lists place active grants before revoked history so all active gr
 reachable for revocation. The unfiltered list is a bounded view of 200 entries, also prioritizing
 active grants; use the credential filter for complete active-grant management.
 
+### `app_presentation_challenges` and `app_presentation_proofs`
+
+| Table      | Fields                                                                                                           | Retention and authority                                                                                                                                           |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Challenges | `id`, `session_id`, reserved `presentation_id`, JSON `request`, canonical `message`, `created_at`, `expires_at`  | Session/expiry indexes; expiry at most five minutes; atomic delete on successful creation; expired challenges are removed on the session's next challenge request |
+| Proofs     | `presentation_id` PK/FK, JSON `request`, canonical `message`, `signature`, `public_key`, `scheme`, `verified_at` | Immutable to the portal role; no private key, seed, session identifier or raw presentation bearer in the public proof                                             |
+
+The signed message has an explicit presentation-authorization purpose, origin, random nonce,
+challenge/presentation identifiers, issue/expiry times, profile/network, exact credential generation,
+issuer/subject addresses, schema UID, payload digest, visibility, sorted public-field selectors,
+scope and designated verifier organization. It explicitly excludes payments, transactions, wallet
+linking and ownership transfer. Challenges use a separate table so a signature cannot be consumed
+by the wallet-link endpoint. The public message contains neither user IDs nor session IDs.
+
+`POST /api/recipient/presentation-challenges` accepts the presentation reference/scope/audience and
+requires authentication and CSRF. The client signs the returned text with a supported wallet.
+`POST /api/recipient/presentations` requires the same input plus
+`proof: { challengeId, signature, publicKey, scheme }`. The server rechecks current session,
+recipient ownership, linked subject wallet, active credential and audience approval, verifies the
+signature over its stored message, then consumes the challenge and inserts the grant/proof in the
+same transaction as the serialized quota decision. Failed validation rolls the consumption back.
+No payload bytes or private claim values are required to authorize this operation.
+
+Resolution revalidates stored signature and exact disclosure bindings. `holderProof` is `verified`
+for intact signed records and `not_provided` for legacy links; corrupt/mismatched evidence produces
+a generic unavailable link. Signature evidence proves authorization at creation, not the holder's
+presence at consultation. It proves a master-key address only; regular keys, multisign and current
+ledger key-authority checks, including disabled master keys, are unsupported. Current Commons
+issuer admission is separate from signature evidence, ledger validity and issuer trust.
+
 ### `app_verifier_history`
 
 | Columns                       | Type / default          | Meaning                                                        |
@@ -357,9 +397,10 @@ public-payload writers must not be reused as unrestricted application writers. I
 see the [authentication runbook](runbooks/authentication.md). Nothing here
 enables production private hosting or converts a public payload into a private one.
 
-For 0007, apply the additive migration, reprovision the restricted portal grants, then deploy the
-updated application. There is no data backfill or destructive DDL. An application rollback can
-leave the new table and history intact; do not drop relationship history as a rollback shortcut.
+For 0007/0008, apply the additive migrations, reprovision the restricted portal grants, then deploy
+the updated application. Older app instances can still create unsigned links until replaced; such
+links remain explicitly marked as lacking a presentation proof. There is no data backfill or destructive DDL. An application rollback can
+leave the new tables, signature evidence and history intact; do not drop relationship history as a rollback shortcut.
 Grant provisioning remains separate from migration application. Existing deployments may continue
 using the previous application against the expanded schema during this sequence.
 
@@ -367,11 +408,12 @@ using the previous application against the expanded schema during this sequence.
 
 Visibility tests: `apps/indexer/test/db/app-visibility.test.ts`. Actual SQL, invitation concurrency,
 access decisions and constraints: `apps/indexer/test/db/app-model.integration.test.ts`.
-`apps/indexer/test/db/migrations.integration.test.ts` covers fresh creation and the 0006→0007 upgrade,
+`apps/indexer/test/db/migrations.integration.test.ts` covers fresh creation and the 0006→0007 and 0007→0008 upgrades,
 including unchanged accounts, presentation columns and applied migration history.
 `apps/web/test/recipient-http.test.ts`, `recipient-postgres.integration.test.ts` and the verifier tests
 cover CSRF, ownership, current approval, private/public projection, freshness, trust, quota races,
-rejection without payload reads and restricted SQL grants.
+rejection without payload reads, signed challenge scope/session binding, concurrent replay, expired
+challenges, wallet removal, legacy unsigned links, corrupted proofs and restricted SQL grants.
 
 ```sh
 pnpm --dir apps/indexer typecheck

@@ -806,7 +806,7 @@
     "settingsHelp": "Review your application and manage the wallets linked to your account.",
     "claimTitle": "Claim an invitation",
     "claimHelp": "Claiming connects this invitation to your account. It neither issues nor accepts an XRPL credential.",
-    "claimLogin": "Sign in first, then reopen the invitation from your email. The secret link is not saved in this browser.",
+    "claimLogin": "Sign in to continue. This invitation will open again automatically after sign-in.",
     "claimUnavailable": "This invitation is unavailable, expired, revoked or already claimed. Ask the issuer for a new link if needed.",
     "claimedHelp": "Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.",
     "claim": "Claim with this account",
@@ -965,7 +965,7 @@
       "schemaUnknown": "Schema not resolved",
       "contentUnavailable": "Content unavailable",
       "partial": "Partially checked",
-      "unknownIssuer": "Issuer not recognized",
+      "unknownIssuer": "Issuer trust not established",
       "passed": "Checks passed"
     },
     "limit": "Revoke an active presentation before creating another (limit: 200)."
@@ -988,5 +988,62 @@
     "reopen": "Check again",
     "reopenError": "This record could not be reopened. The link or your authorization may have changed, or current evidence is unavailable.",
     "currentResult": "Current verification result"
+  },
+  "roleJourney": {
+    "walletTitle": "Prepare your recipient wallet",
+    "walletIntro": "Link a wallet you control so your issuer can send the attestation to the correct address.",
+    "walletGuide": "From a new wallet to an attestation",
+    "setupTitle": "Choose and set up a compatible wallet",
+    "setupHelp": "Use the chooser below and its installation link if needed. Create or open your wallet in its own application, then return here. GemWallet, MetaMask XRP Snap and Otsu support this ownership proof.",
+    "backupTitle": "Keep your recovery information private",
+    "backupHelp": "Follow the wallet’s backup instructions and keep its recovery phrase or private key in a safe place. Never enter them in XCS or send them to your issuer. XCS only asks your wallet to sign a message.",
+    "networkTitle": "Select XRPL Testnet and prepare for fees",
+    "networkHelp": "Select Testnet in your wallet. Attestation acceptance needs test XRP for ledger fees and reserves; use your wallet’s Testnet funding instructions if needed. Linking the wallet here sends no transaction and transfers no funds.",
+    "proofTitle": "Connect, then prove control",
+    "chooseCompatibleWallet": "Choose a wallet for this proof",
+    "walletSelectionHelp": "Connecting and linking are separate steps. If another wallet is connected, disconnect it before choosing one of the compatible wallets.",
+    "connectFirst": "Connect a compatible wallet with the chooser above, then sign the ownership message below.",
+    "walletReady": "A Testnet wallet is linked to your account. Your issuer can now review this verified address before issuing.",
+    "continueRecipient": "Continue to my attestations",
+    "prepareWallet": "Prepare or manage my wallet",
+    "walletRequiredBeforeIssuance": "Link a wallet before your issuer can issue this attestation. Choose “Prepare or manage my wallet” above; you do not need to claim this invitation again.",
+    "shareProofTitle": "Authorize this link with your wallet",
+    "shareProofHelp": "Each new sharing link requires a fresh ownership message signed by the attestation’s recipient wallet. The message identifies this attestation, the selected scope and its audience. This does not submit a transaction or transfer funds.",
+    "shareConnectWallet": "Connect the recipient wallet shown above with GemWallet, MetaMask XRP Snap or Otsu before creating the link.",
+    "proofFailed": "The wallet proof was cancelled, expired or could not be verified. Check the wallet, scope and audience, then create a new request. No link is shown until its creation is confirmed.",
+    "recipientStates": {
+      "invited": "Waiting for the recipient to claim",
+      "wallet_required": "Recipient must link a wallet",
+      "ready": "Recipient ready to receive the attestation",
+      "issued": "Attestation already issued",
+      "unavailable": "Recipient readiness unavailable — refresh before issuing"
+    },
+    "walletVerifiedAt": "Wallet control verified on {date}",
+    "deliveryIsContact": "This email delivers the invitation; it is not proof of the claimant’s identity. Check the actual recipient and verified wallet before signing.",
+    "admissionTitle": "Commons portal admission",
+    "admissionStatuses": {
+      "approved": "Issuer organization approved for this portal",
+      "suspended": "Issuer portal approval suspended",
+      "not_approved": "Issuer organization is not currently approved",
+      "unknown": "Issuer portal approval could not be established"
+    },
+    "admissionReviewedAt": "Application decision: {date}",
+    "checkedAt": "Checked on {date}",
+    "admissionMeaning": "Portal approval grants permission to issue here. It is separate from issuer trust, ledger validity and the truth of the claims.",
+    "holderProofTitle": "Recipient wallet and sharing proof",
+    "holderVerifiedAt": "Wallet signature verified when this link was authorized on {date}",
+    "holderProofMissing": "No signed wallet proof was provided for this link.",
+    "holderProofMeaning": "The signature binds this recipient address to the authorization of this sharing link at that time. It does not identify the person opening the link or prove their current presence.",
+    "signedProofDetails": "Signed ownership evidence",
+    "ledgerRecipientTitle": "Attestation recipient on the ledger",
+    "ledgerStatuses": {
+      "active": "Issued to and accepted by this address.",
+      "pending": "Issued to this address; acceptance is still pending.",
+      "expired": "This attestation has expired.",
+      "deleted": "This attestation is no longer active.",
+      "unknown": "Current ledger evidence is unavailable."
+    },
+    "holderProofRecreate": "Ask the recipient to create a new link with a fresh wallet signature.",
+    "holderKeyLimit": "The signing public key derives this wallet address. This is a master-key address check; it does not establish whether master-key signing was enabled on the ledger at that time. It does not prove a civil identity."
   }
 }

@@ -183,6 +183,24 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
     expect(await database.sql`SELECT * FROM app_verifier_history`).toEqual([])
   })
 
+  it('upgrades 0007 additively while preserving legacy unsigned presentations and session records', async () => {
+    await migrateDatabase(database, await fixture(8))
+    await database.sql`INSERT INTO app_users(identity_issuer,identity_subject,display_name) VALUES ('https://identity.test','proof-migration','Retained recipient')`
+    const users = await database.sql`SELECT * FROM app_users`
+    const columns =
+      await database.sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='app_presentations' ORDER BY ordinal_position`
+    const history = await journalRows()
+    expect(await exists('public.app_presentation_challenges')).toBe(false)
+    await migrateDatabase(database)
+    expect(await database.sql`SELECT * FROM app_users`).toEqual(users)
+    expect(
+      await database.sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='app_presentations' ORDER BY ordinal_position`,
+    ).toEqual(columns)
+    expect((await journalRows()).slice(0, history.length)).toEqual(history)
+    expect(await exists('public.app_presentation_challenges')).toBe(true)
+    expect(await database.sql`SELECT * FROM app_presentation_proofs`).toEqual([])
+  })
+
   it.each(['tampered', 'future', 'nonprefix'] as const)(
     'rejects %s history before executing pending DDL',
     async (variant) => {

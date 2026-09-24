@@ -1,5 +1,8 @@
 import type { Claims } from '../../lib/db/index.js'
 import type { VerificationReport } from '../verification'
+import type { IssuerAdmission } from '../presentations/admission'
+import type { HolderProof } from '../presentations/proof'
+import type { WalletProof } from '../auth/wallet-proof'
 
 export interface RecipientCredential {
   profileId: string
@@ -66,11 +69,22 @@ export interface Presentation {
   createdAt: string
   revokedAt: string | null
 }
-export interface CreatePresentationInput {
+export interface PresentationChallengeInput {
   profileId: string
   generationId: string
   scope: 'public' | 'full'
   verifierOrganizationId?: string | null
+}
+export interface CreatePresentationInput extends PresentationChallengeInput {
+  proof: WalletProof & { challengeId: string }
+}
+export interface PresentationChallenge {
+  id: string
+  presentationId: string
+  address: string
+  networkId: number
+  message: string
+  expiresAt: string
 }
 export interface CreatedPresentation extends Presentation {
   token: string
@@ -88,6 +102,8 @@ export interface ResolvedPresentation {
   claims: Claims
   verification: VerificationReport
   requiresAuthorization: boolean
+  issuerAdmission: IssuerAdmission
+  holderProof: HolderProof
 }
 export class RecipientError extends Error {
   constructor(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { issuerCredentialState, issuerInvitationState } from '~/utils/issuerWorkspace'
 const props = defineProps<{ section: 'schemas' | 'recipients' | 'credentials' }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()
 const { data, error, status, refresh, mutate } = useIssuerWorkspace()
@@ -27,6 +27,10 @@ const selectedSchema = computed(() =>
     (schema) => `${schema.profileId}:${schema.schemaUid}` === chosenSchema.value,
   ),
 )
+const date = (value: string) =>
+  new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  )
 
 async function selectOrganization(event: Event) {
   await navigateTo({
@@ -172,6 +176,17 @@ useSeoMeta({ title: () => `${t(`issuer.${props.section}`)} — XCS`, robots: 'no
           <UCard>
             <h2 class="font-semibold break-all">{{ item.email }}</h2>
             <p>{{ $t(`issuer.states.${issuerInvitationState(item)}`) }}</p>
+            <p v-if="!item.revokedAt" class="mt-2 font-semibold">
+              {{ $t(`roleJourney.recipientStates.${item.recipientStatus ?? 'unavailable'}`) }}
+            </p>
+            <p v-if="item.recipientDisplayName" class="mt-2">
+              {{ $t('issuer.engine.recipient') }} : {{ item.recipientDisplayName }}
+            </p>
+            <p v-if="item.recipientWalletVerifiedAt" class="mt-2 text-sm text-muted">
+              {{
+                $t('roleJourney.walletVerifiedAt', { date: date(item.recipientWalletVerifiedAt) })
+              }}
+            </p>
             <p class="text-sm text-muted">
               {{ $t('issuer.delivery') }}:
               {{ $t(`issuer.deliveryStates.${item.deliveryStatus || 'pending'}`) }}
@@ -181,7 +196,7 @@ useSeoMeta({ title: () => `${t(`issuer.${props.section}`)} — XCS`, robots: 'no
             </p>
             <div class="mt-4 flex flex-wrap gap-3">
               <UButton
-                v-if="item.claimedAt && !item.revokedAt"
+                v-if="item.claimedAt && !item.revokedAt && item.recipientStatus === 'ready'"
                 :to="localePath(`/issuer/issue/${item.id}`)"
                 >{{ $t('issuer.reviewRecipient') }}</UButton
               >

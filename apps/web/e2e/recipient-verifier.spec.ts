@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
+import { Wallet } from 'xrpl'
+import { sign as signMessage, verify as verifyMessage } from 'ripple-keypairs'
 
 const profileId = 'xrpl-testnet-xcs-browser-e2e'
 const generationId = 'b'.repeat(64)
 const organizationId = '00000000-0000-4000-8000-000000000071'
 const presentationId = '00000000-0000-4000-8000-000000000072'
 const token = 'r'.repeat(43)
+const proofWallet = Wallet.fromEntropy(Uint8Array.from({ length: 16 }, (_, index) => 31 - index))
 const credential = {
   profileId,
   generationId,
@@ -13,7 +16,7 @@ const credential = {
   organizationId,
   organizationName: 'Synthetic school',
   issuerAddress: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
-  subjectAddress: 'r9cZA1mLK5R5Am25ArfXFmqgNwjZgnfk59',
+  subjectAddress: proofWallet.classicAddress,
   networkId: 1,
   visibility: 'private',
   createdAt: '2026-09-24T10:00:00Z',
@@ -51,6 +54,45 @@ const publicResult = {
   claims: { course: 'Synthetic course' },
   verification: report,
   requiresAuthorization: true,
+  issuerAdmission: {
+    status: 'approved',
+    organizationId,
+    checkedAt: '2026-09-24T10:00:00Z',
+    reviewedAt: '2026-09-23T10:00:00Z',
+  },
+  holderProof: { status: 'not_provided' },
+}
+
+async function prepareProofWallet(page: Page) {
+  await page.addInitScript(() => {
+    ;(
+      globalThis as typeof globalThis & { __xcsBrowserE2eAuthWallet?: boolean }
+    ).__xcsBrowserE2eAuthWallet = true
+  })
+  const challenges: { id: string; message: string }[] = []
+  await page.route('**/api/recipient/presentation-challenges', (route) => {
+    const input = route.request().postDataJSON()
+    const challenge = {
+      id: `00000000-0000-4000-8000-${String(challenges.length + 1).padStart(12, '0')}`,
+      message: `Synthetic presentation ownership proof ${challenges.length + 1}: ${JSON.stringify(input)}`,
+    }
+    challenges.push(challenge)
+    return route.fulfill({
+      json: {
+        ...challenge,
+        presentationId,
+        address: credential.subjectAddress,
+        networkId: 1,
+        expiresAt: '2099-09-24T10:00:00Z',
+      },
+    })
+  })
+  return challenges
+}
+async function connectProofWallet(page: Page) {
+  await page.getByTestId('presentation-wallet-toggle').click()
+  await page.getByTestId('presentation-wallet-menu').locator('[data-wallet-id="gemwallet"]').click()
+  await expect(page.getByTestId('presentation-wallet-status')).toContainText('Connected')
 }
 
 async function session(page: Page, signedIn = true) {
@@ -113,6 +155,15 @@ test('requires explicit opening, keeps the bearer out of URLs and reports a publ
   await expect(page.getByRole('heading', { name: 'Partially checked', exact: true })).toBeVisible()
   await expect(page.getByText('Synthetic course', { exact: true })).toBeVisible()
   await expect(page.getByText('Synthetic private person')).toHaveCount(0)
+  await expect(
+    page.getByRole('region', { name: 'Commons portal admission', exact: true }),
+  ).toContainText('Issuer organization approved for this portal')
+  await expect(
+    page.getByRole('region', { name: 'Attestation recipient on the ledger', exact: true }),
+  ).toContainText(credential.subjectAddress)
+  await expect(
+    page.getByText('No signed wallet proof was provided for this link.', { exact: true }),
+  ).toBeVisible()
   await expect(page.getByText('Payload: not checked.', { exact: false })).toBeVisible()
   const limitation = page.getByText('These checks describe the available technical evidence.', {
     exact: false,
@@ -127,6 +178,56 @@ test('requires explicit opening, keeps the bearer out of URLs and reports a publ
     ),
   ).toBe(false)
   expect(consoleMessages.join('\n')).not.toContain(token)
+})
+
+test('distinguishes Commons approval, ledger acceptance and a dated wallet signature from technical issuer trust', async ({
+  page,
+}) => {
+  await session(page, false)
+  const message = 'Synthetic presentation authorization bound to this recipient and link'
+  await page.route('**/api/presentations/resolve', (route) =>
+    route.fulfill({
+      json: {
+        ...publicResult,
+        requiresAuthorization: false,
+        verification: { ...report, payload: 'valid' },
+        holderProof: {
+          status: 'verified',
+          address: credential.subjectAddress,
+          networkId: 1,
+          verifiedAt: '2026-09-24T10:00:00Z',
+          message,
+          signature: signMessage(Buffer.from(message).toString('hex'), proofWallet.privateKey),
+          publicKey: proofWallet.publicKey,
+          scheme: 'ripple',
+          purpose: 'presentation_authorization',
+          keyAuthority: 'master_key_address_only',
+        },
+      },
+    }),
+  )
+  await enter(page, `/presentations#${token}`)
+  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Issuer trust not established', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('region', { name: 'Commons portal admission', exact: true }),
+  ).toContainText('Issuer organization approved for this portal')
+  const ledger = page.getByRole('region', {
+    name: 'Attestation recipient on the ledger',
+    exact: true,
+  })
+  await expect(ledger).toContainText(credential.subjectAddress)
+  await expect(ledger).toContainText('accepted')
+  const proof = page.getByRole('region', {
+    name: 'Recipient wallet and sharing proof',
+    exact: true,
+  })
+  await expect(proof).toContainText('Wallet signature verified when this link was authorized')
+  await expect(proof).toContainText('2026')
+  await expect(proof).not.toContainText('No signed wallet proof')
+  await expect(page.getByText(message, { exact: false })).not.toBeVisible()
 })
 
 test('clears previously disclosed claims when a presentation is revoked', async ({ page }) => {
@@ -151,7 +252,7 @@ test('clears previously disclosed claims when a presentation is revoked', async 
   await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Synthetic private person', { exact: true })).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Issuer not recognized', exact: true }),
+    page.getByRole('heading', { name: 'Issuer trust not established', exact: true }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Check again', exact: true }).click()
   await expect(
@@ -308,6 +409,7 @@ test('defaults to public sharing and requires a named audience before creating a
   page,
 }) => {
   await session(page)
+  const challenges = await prepareProofWallet(page)
   await page.route(`**/api/recipient/credentials/${profileId}/${generationId}`, (route) =>
     route.fulfill({ json: credential }),
   )
@@ -323,12 +425,22 @@ test('defaults to public sharing and requires a named audience before creating a
         profileId,
         generationId,
       })
+      const proof = route.request().postDataJSON().proof
+      const challenge = challenges.find((item) => item.id === proof.challengeId)!
+      expect(
+        verifyMessage(
+          Buffer.from(challenge.message).toString('hex'),
+          proof.signature,
+          proof.publicKey,
+        ),
+      ).toBe(true)
       grants.push(presentation)
       return route.fulfill({ json: { ...presentation, token, url: `/presentations#${token}` } })
     }
     return route.fulfill({ json: { presentations: grants } })
   })
   await enter(page, `/recipient/credentials/${generationId}/present?profile=${profileId}`)
+  await connectProofWallet(page)
   await expect(page.getByRole('radio', { name: 'Public fields only', exact: true })).toBeChecked()
   await expect(page.getByRole('img', { name: 'QR code for this sharing link' })).toHaveCount(0)
   await page.getByRole('radio', { name: 'Complete content for one verifier', exact: true }).check()
@@ -344,6 +456,10 @@ test('defaults to public sharing and requires a named audience before creating a
     new RegExp(`/presentations#${token}$`),
   )
   await expect(page.getByText('Sharing has no automatic expiry.', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Create sharing link', exact: true }).click()
+  await expect.poll(() => grants.length).toBe(2)
+  expect(challenges).toHaveLength(2)
+  expect(challenges[0]!.message).not.toBe(challenges[1]!.message)
 })
 
 test('shows the French recipient waiting state and notifications without reading payloads', async ({
@@ -393,6 +509,7 @@ test('shows the French recipient waiting state and notifications without reading
 
 test('explains the active presentation limit without issuing another link', async ({ page }) => {
   await session(page)
+  await prepareProofWallet(page)
   await page.route(`**/api/recipient/credentials/${profileId}/${generationId}`, (route) =>
     route.fulfill({ json: credential }),
   )
@@ -408,6 +525,8 @@ test('explains the active presentation limit without issuing another link', asyn
       : route.fulfill({ json: { presentations: [presentation] } }),
   )
   await enter(page, `/fr/recipient/credentials/${generationId}/present?profile=${profileId}`)
+  await page.getByTestId('presentation-wallet-toggle').click()
+  await page.getByTestId('presentation-wallet-menu').locator('[data-wallet-id="gemwallet"]').click()
   await page.getByRole('button', { name: 'Créer le lien de partage', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText(
     'Révoquez une présentation active avant d’en créer une autre (limite : 200).',

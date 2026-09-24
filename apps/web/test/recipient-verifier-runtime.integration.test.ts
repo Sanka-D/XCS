@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { expect as browserExpect, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
 import { Wallet } from 'xrpl'
+import { sign } from 'ripple-keypairs'
 import {
   computeSchemaUid,
   encodeCredentialPayload,
@@ -116,8 +117,9 @@ describe.skipIf(!enabled)('compiled recipient and verifier portals over HTTPS', 
       const recipient = await login('recipient'),
         verifier = await login('verifier'),
         outsider = await login('outsider')
+      const subjectWallet = Wallet.generate()
       const issuerAddress = Wallet.generate().address,
-        subjectAddress = Wallet.generate().address
+        subjectAddress = subjectWallet.address
       const profileId = 'sharing-runtime',
         ledgerHash = 'd'.repeat(64),
         generationId = 'c'.repeat(64),
@@ -192,16 +194,34 @@ describe.skipIf(!enabled)('compiled recipient and verifier portals over HTTPS', 
         await page.goto(runtime!.origin + '/')
       }
       await signIn(recipient)
+      await database.sql`INSERT INTO app_wallets(user_id,network_id,address,verified_at) VALUES (${recipient.userId},1,${subjectAddress},statement_timestamp())`
       await page.goto(runtime.origin + '/recipient')
       await browserExpect(page.getByText(definition.name, { exact: true })).toBeVisible()
-      const full = await request(page, '/api/recipient/presentations', {
+      const createPresentation = async (input: Record<string, unknown>) => {
+        const challenge = await request(page, '/api/recipient/presentation-challenges', input)
+        expect(challenge.status).toBe(200)
+        expect(challenge.body.address).toBe(subjectAddress)
+        return request(page, '/api/recipient/presentations', {
+          ...input,
+          proof: {
+            challengeId: challenge.body.id,
+            signature: sign(
+              Buffer.from(challenge.body.message, 'utf8').toString('hex'),
+              subjectWallet.privateKey,
+            ),
+            publicKey: subjectWallet.publicKey,
+            scheme: 'ripple',
+          },
+        })
+      }
+      const full = await createPresentation({
         profileId,
         generationId,
         scope: 'full',
         verifierOrganizationId: verifierOrg,
       })
       expect(full.status, JSON.stringify(full.body)).toBe(200)
-      const publicLink = await request(page, '/api/recipient/presentations', {
+      const publicLink = await createPresentation({
         profileId,
         generationId,
         scope: 'public',

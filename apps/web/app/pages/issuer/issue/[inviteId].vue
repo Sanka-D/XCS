@@ -8,6 +8,7 @@ import {
 definePageMeta({ layout: 'issuer', middleware: ['auth', 'role'], requiredRole: 'issuer' })
 const route = useRoute()
 const localePath = useLocalePath()
+const { locale } = useI18n()
 const api = useIssuerEngineApi()
 const { user } = useAuth()
 const inviteId = String(route.params.inviteId)
@@ -30,6 +31,13 @@ try {
 const wallets = computed(
   () => issuance.value?.recipient.wallets.filter((wallet) => wallet.networkId === 1) ?? [],
 )
+const selectedWallet = computed(() =>
+  wallets.value.find((wallet) => wallet.address === subjectAddress.value),
+)
+const date = (value: string) =>
+  new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value),
+  )
 const context = computed<IssuerIssueEngineContext | undefined>(() => {
   const initial = issuance.value
   const subject = subjectAddress.value
@@ -67,6 +75,16 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       <StatusBox v-else-if="!wallets.length" tone="warning">{{
         $t('issuer.engine.walletRequired')
       }}</StatusBox>
+      <UCard v-if="issuance" class="mt-4">
+        <p>
+          <strong>{{ $t('issuer.engine.deliveryContact') }} :</strong>
+          {{ issuance.invite.deliveryEmail ?? '—' }}
+        </p>
+        <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.deliveryIsContact') }}</p>
+        <p v-if="selectedWallet?.verifiedAt" class="mt-3">
+          {{ $t('roleJourney.walletVerifiedAt', { date: date(selectedWallet.verifiedAt) }) }}
+        </p>
+      </UCard>
       <UFormField v-if="wallets.length > 1" class="mt-4" :label="$t('issuer.engine.chooseWallet')">
         <USelect
           v-model="subjectAddress"

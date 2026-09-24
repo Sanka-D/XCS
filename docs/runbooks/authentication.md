@@ -7,7 +7,8 @@
 Issue #27 adds optional sign-in, PostgreSQL sessions, current role guards and wallet linking to the
 Nuxt application. Authentication is disabled by default. Public discovery, verification, Studio and
 existing wallet transaction flows remain available without an account. Role-specific issuance,
-invitation, approval and private-delivery workflows remain separate issues.
+invitation, approval and private-delivery workflows are available through the optional role
+workspaces; see the [recipient/verifier journey](recipient-verifier.md).
 
 ## Register the client
 
@@ -153,3 +154,10 @@ real wallet consent or successful production login.
 Disable `XCS_AUTH_ENABLED` to remove account navigation and reject auth endpoints while keeping
 public routes available. Retain the additive tables and use forward fixes. Do not roll back by
 removing populated users, wallet links or the migration journal.
+
+The guided Account wallet picker offers only the three supported message-proof adapters. Its
+installation links come from those adapters; setup, backup and private keys stay inside the wallet.
+An invitation supplies an allowlisted return to the recipient workspace, exposed after successful
+linking. Connected alone, wrong-network, unsupported-message and unlinked states never qualify as
+verified ownership. New credential presentations use a distinct, purpose-bound five-minute challenge
+and a fresh signature; the wallet-link signature itself cannot create a presentation.

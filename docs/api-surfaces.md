@@ -195,24 +195,34 @@ These same-origin `/api` routes share the enabled issuer service and its restric
 They are private, `no-store` and `no-referrer`, with session authorization, bounded request bodies and
 rate limits. Authenticated mutations require CSRF. They are separate from the public `/v1` contract.
 
-| Route                                                     | Purpose                                                               |
-| --------------------------------------------------------- | --------------------------------------------------------------------- |
-| `GET /api/recipient/workspace`                            | Owned invitations, credentials and event notifications                |
-| `GET /api/recipient/verifiers`                            | Eligible approved verifier organizations                              |
-| `GET /api/recipient/credentials/:profileId/:generationId` | Owned exact credential and disclosure metadata                        |
-| `GET …/payload`                                           | Explicit authenticated full payload review/report                     |
-| `POST …/reconcile`                                        | Check exact indexed accept/reject/remove transaction                  |
-| `GET /api/recipient/presentations`                        | Own grants, optionally filtered by profile/generation                 |
-| `POST /api/recipient/presentations`                       | Create public or designated-verifier grant                            |
-| `POST /api/recipient/presentations/:id/revoke`            | Revoke own grant                                                      |
-| `POST /api/presentations/resolve`                         | Explicit token resolution; full access rechecks audience and approval |
-| `GET /api/verifier/workspace`                             | Application status and metadata-only history                          |
-| `POST /api/verifier/applications`                         | Submit organization and review documents                              |
-| `GET /api/verifier/history.csv`                           | Approved actor's metadata export                                      |
-| `POST /api/verifier/history/:id/presentation`             | Reauthorize and record reopening; empty JSON body                     |
-| `POST /api/auth/link-handoff`                             | Same-origin invitation/presentation token cookie before login         |
-| `POST /api/auth/link-handoff/consume`                     | Authenticated, CSRF-protected one-time cookie retrieval               |
+| Route                                                     | Purpose                                                                      |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `GET /api/recipient/workspace`                            | Owned invitations, credentials and event notifications                       |
+| `GET /api/recipient/verifiers`                            | Eligible approved verifier organizations                                     |
+| `GET /api/recipient/credentials/:profileId/:generationId` | Owned exact credential and disclosure metadata                               |
+| `GET …/payload`                                           | Explicit authenticated full payload review/report                            |
+| `POST …/reconcile`                                        | Check exact indexed accept/reject/remove transaction                         |
+| `GET /api/recipient/presentations`                        | Own grants, optionally filtered by profile/generation                        |
+| `POST /api/recipient/presentation-challenges`             | Issue a five-minute, session-bound wallet challenge for exact sharing intent |
+| `POST /api/recipient/presentations`                       | Create grant after fresh wallet proof; consume challenge atomically          |
+| `POST /api/recipient/presentations/:id/revoke`            | Revoke own grant                                                             |
+| `POST /api/presentations/resolve`                         | Explicit token resolution; full access rechecks audience and approval        |
+| `GET /api/verifier/workspace`                             | Application status and metadata-only history                                 |
+| `POST /api/verifier/applications`                         | Submit organization and review documents                                     |
+| `GET /api/verifier/history.csv`                           | Approved actor's metadata export                                             |
+| `POST /api/verifier/history/:id/presentation`             | Reauthorize and record reopening; empty JSON body                            |
+| `POST /api/auth/link-handoff`                             | Same-origin invitation/presentation token cookie before login                |
+| `POST /api/auth/link-handoff/consume`                     | Authenticated, CSRF-protected one-time cookie retrieval                      |
 
 Bearer links use fragments, then explicit JSON POSTs, never token query parameters. Unknown/revoked
 presentations are indistinguishable. Wrong-audience full grants disclose only the public projection.
 See [recipient/verifier boundaries and limits](runbooks/recipient-verifier.md).
+
+Presentation creation now requires `proof: { challengeId, signature, publicKey, scheme }` alongside
+profile, generation, scope and optional designated organization. `scheme` is `ripple` or `otsu`, as in
+wallet linking, but a wallet-link challenge cannot authorize sharing. Resolution adds `issuerAdmission`
+(current portal status, organization and observation/review timestamps) and `holderProof` (dated
+signature evidence, or `not_provided` for legacy links). These facts do not change issuer trust,
+payload-integrity dimensions or private-field access. Corrupted stored proofs make a link unavailable.
+Issuer workspace invitations additionally report recipient readiness and wallet verification time;
+the issuance context distinguishes delivery email from the actual claimant's linked address.

@@ -17,6 +17,8 @@ import {
 } from '../recipient/repository'
 import { RecipientError, type ResolvedPresentation } from '../recipient/types'
 import { managedCredentialEvidence, type EvidencePolicy } from './evidence'
+import { issuerAdmission } from './admission'
+import { loadPresentationProof } from './proof'
 
 export type PresentationObserver = (
   db: XcsDatabase,
@@ -68,6 +70,9 @@ export class PresentationRepository {
         )
         if (credential.metadata.recipientUserId !== row.presentation.recipientUserId)
           throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
+        const holderProof = await loadPresentationProof(db, row.presentation.id, credential)
+        if (holderProof.status === 'invalid')
+          throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
         let scope: 'public' | 'full' = 'public'
         if (row.presentation.scope === 'full' && session) {
           const authorized = await db.execute(sql`SELECT o.id FROM app_organizations o
@@ -106,6 +111,8 @@ export class PresentationRepository {
           scope,
           claims,
           verification,
+          issuerAdmission: await issuerAdmission(db, credential.metadata.issuerOrganizationId),
+          holderProof,
           requiresAuthorization: row.presentation.scope === 'full' && scope !== 'full',
         }
         if (session && this.observer) await this.observer(db, session, result)

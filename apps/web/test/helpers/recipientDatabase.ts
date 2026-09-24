@@ -1,5 +1,11 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { Wallet, unixTimeToRippleTime } from 'xrpl'
+import { sign } from 'ripple-keypairs'
+import type { RecipientRepository } from '../../server/xcs/recipient/repository'
+import type {
+  PresentationChallengeInput,
+  CreatePresentationInput,
+} from '../../server/xcs/recipient/types'
 import {
   canonicalJson,
   computeSchemaUid,
@@ -91,7 +97,8 @@ export async function createRecipientDatabase(url: string) {
       ledgerHash = 'd'.repeat(64),
       acceptedHash = 'e'.repeat(64)
     const issuerAddress = Wallet.generate().address,
-      subjectAddress = Wallet.generate().address
+      subjectWallet = Wallet.generate(),
+      subjectAddress = subjectWallet.address
     const definition = {
       xcsVersion: '0.1' as const,
       name: 'Synthetic recipient credential',
@@ -150,6 +157,7 @@ export async function createRecipientDatabase(url: string) {
       canonical,
       issuerAddress,
       subjectAddress,
+      subjectWallet,
       ledgerHash,
       uri,
       close,
@@ -157,5 +165,24 @@ export async function createRecipientDatabase(url: string) {
   } catch (error) {
     await close()
     throw error
+  }
+}
+
+/** Test-only synthetic wallet signer; never logs or persists the private key. */
+export async function signPresentationInput(
+  repository: RecipientRepository,
+  session: Session,
+  input: PresentationChallengeInput,
+  wallet: Wallet,
+): Promise<CreatePresentationInput> {
+  const challenge = await repository.presentationChallenge(session, input)
+  return {
+    ...input,
+    proof: {
+      challengeId: challenge.id,
+      publicKey: wallet.publicKey,
+      scheme: 'ripple',
+      signature: sign(Buffer.from(challenge.message).toString('hex'), wallet.privateKey),
+    },
   }
 }

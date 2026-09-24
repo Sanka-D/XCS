@@ -12,7 +12,11 @@ import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import type { Session } from '../auth/types'
 import { readJsonBody } from '../private-body'
 import { hash, object, text, uuid } from '../issuer/types'
-import { RecipientError, type CreatePresentationInput } from './types'
+import {
+  RecipientError,
+  type CreatePresentationInput,
+  type PresentationChallengeInput,
+} from './types'
 import type { RecipientRepository } from './repository'
 
 export const PORTAL_HEADERS = {
@@ -99,23 +103,41 @@ export function createRecipientHandler(options: {
       return repository.presentations(sessions.get(event)!, filter)
     }),
   )
+  const presentationInput = (input: Record<string, unknown>): PresentationChallengeInput => {
+    if (input.scope !== 'public' && input.scope !== 'full')
+      throw new RecipientError(400, 'RECIPIENT_INPUT_INVALID')
+    return {
+      profileId: text(input.profileId, 200),
+      generationId: hash(input.generationId),
+      scope: input.scope,
+      verifierOrganizationId:
+        input.verifierOrganizationId == null ? null : uuid(input.verifierOrganizationId),
+    }
+  }
+  const presentationKeys = ['profileId', 'generationId', 'scope', 'verifierOrganizationId']
+  router.post(
+    '/api/recipient/presentation-challenges',
+    defineEventHandler(async (event) => {
+      const input = presentationInput(await body(event, presentationKeys))
+      return repository.presentationChallenge(sessions.get(event)!, input)
+    }),
+  )
   router.post(
     '/api/recipient/presentations',
     defineEventHandler(async (event) => {
-      const input = await body(event, [
-        'profileId',
-        'generationId',
-        'scope',
-        'verifierOrganizationId',
-      ])
-      if (input.scope !== 'public' && input.scope !== 'full')
+      const input = await body(event, [...presentationKeys, 'proof'])
+      if (!input.proof) throw new RecipientError(400, 'RECIPIENT_PROOF_REQUIRED')
+      const proof = object(input.proof, ['challengeId', 'signature', 'publicKey', 'scheme'])
+      if (proof.scheme !== 'ripple' && proof.scheme !== 'otsu')
         throw new RecipientError(400, 'RECIPIENT_INPUT_INVALID')
       const data: CreatePresentationInput = {
-        profileId: text(input.profileId, 200),
-        generationId: hash(input.generationId),
-        scope: input.scope,
-        verifierOrganizationId:
-          input.verifierOrganizationId == null ? null : uuid(input.verifierOrganizationId),
+        ...presentationInput(input),
+        proof: {
+          challengeId: uuid(proof.challengeId),
+          signature: text(proof.signature, 144),
+          publicKey: text(proof.publicKey, 66),
+          scheme: proof.scheme,
+        },
       }
       return repository.createPresentation(sessions.get(event)!, data)
     }),

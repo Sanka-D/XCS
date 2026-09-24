@@ -125,6 +125,7 @@ describe('database schema', () => {
       '0005_admin_review.sql',
       '0006_issuer_workspace.sql',
       '0007_recipient_verifier.sql',
+      '0008_presentation_wallet_proof.sql',
     ])
     expect(snapshotFiles).toEqual([
       '0000_snapshot.json',
@@ -135,6 +136,7 @@ describe('database schema', () => {
       '0005_snapshot.json',
       '0006_snapshot.json',
       '0007_snapshot.json',
+      '0008_snapshot.json',
     ])
 
     const baseline = readFileSync(new URL('0000_baseline.sql', DRIZZLE_DIRECTORY), 'utf8')
@@ -156,6 +158,7 @@ describe('database schema', () => {
       expect.objectContaining({ idx: 5, tag: '0005_admin_review' }),
       expect.objectContaining({ idx: 6, tag: '0006_issuer_workspace' }),
       expect.objectContaining({ idx: 7, tag: '0007_recipient_verifier' }),
+      expect.objectContaining({ idx: 8, tag: '0008_presentation_wallet_proof' }),
     ])
 
     const previous = JSON.parse(

@@ -184,3 +184,24 @@ XCS_RECIPIENT_RUNTIME_TEST=1 pnpm --dir apps/web exec vitest run \
 The root `test:runtime` script includes this scenario. It uses synthetic sessions and indexed evidence
 through actual routes and restricted roles, without live Identity, external SMTP or wallet signing.
 It checks anonymous/wrong-audience/full disclosure, history reopening, revocation and suspension.
+
+## Connected role journey
+
+`e2e/role-journey.spec.ts` checks guided wallet onboarding and factual presentation evidence.
+`role-journey-postgres.integration.test.ts` checks issuer admission and invitation readiness against
+restricted SQL roles. Recipient PostgreSQL tests also cover fresh purpose-bound challenges, signature
+replay, scope/audience mutation, expiration, session changes and legacy links without a signature.
+
+After the production build, the connected HTTPS scenario is included in `test:runtime`, or run:
+
+```sh
+XCS_ROLE_JOURNEY_RUNTIME_TEST=1 pnpm --dir apps/web exec vitest run   --no-file-parallelism test/role-journey-runtime.integration.test.ts
+```
+
+Supply the same isolated `XCS_TEST_DATABASE_URL` and local Mailpit settings used by issuer runtime.
+The test drives actual role APIs and production UI through application approval, invitation delivery,
+claim, wallet-link signing, issuer `CredentialCreate`, recipient `CredentialAccept`, signed sharing
+and verifier disclosure. The GemWallet extension transport and XRPL WebSocket are controlled fixtures;
+the real SDK signs ephemeral synthetic keys held only in Node. Only verified submitted blobs trigger
+synthetic ledger projection changes. Identity sessions, administrator bootstrap and schema/indexer
+prerequisites are fixtures; this is not a live Identity registration or XRPL consensus/indexer test.

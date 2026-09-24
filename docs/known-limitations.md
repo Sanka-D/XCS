@@ -267,3 +267,9 @@ remains a browser-boundary risk. Private or sensitive claims must not enter this
   claims; new private reads still require current authorization. Explicit failed post-signature
   validation clears the recoverable blob, but interrupted signing/revalidation remains a qualification
   case for wallet recovery.
+
+- Presentation wallet proofs establish a dated master-key signature for the exact sharing intent.
+  They do not prove current presence, identity of the link viewer, or current ledger authority after
+  master-key disabling/regular-key changes. Legacy unsigned grants remain explicitly distinguishable.
+  Issuer admission shown on the link is the current portal decision; historical approval at issuance
+  is not inferred. Wallet creation/backup stays in the wallet provider, never the XCS application.

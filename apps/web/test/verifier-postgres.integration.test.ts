@@ -60,6 +60,13 @@ function resolved(scope: 'public' | 'full' = 'full'): ResolvedPresentation {
     scope,
     claims: { secret: 'NEVER_STORE_PRIVATE_CLAIMS' },
     verification: { onChain: 'active', schema: 'valid', payload: 'valid', issuerTrust: 'unknown' },
+    issuerAdmission: {
+      status: 'approved',
+      organizationId,
+      checkedAt: new Date().toISOString(),
+      reviewedAt: null,
+    },
+    holderProof: { status: 'not_provided' },
     requiresAuthorization: false,
   } as ResolvedPresentation
 }

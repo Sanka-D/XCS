@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
   appCredentialMetadata,
@@ -5,6 +6,9 @@ import {
   appIssuerPayloads,
   appOrganizations,
   appPresentations,
+  appPresentationChallenges,
+  appPresentationProofs,
+  type PresentationProofRequest,
 } from '#db/schema/app'
 import { credentialEvents, credentialGenerations, networkProfiles, schemas } from '#db/schema'
 import {
@@ -15,6 +19,8 @@ import {
   type XcsDatabase,
 } from '../../lib/db/index.js'
 import type { Session } from '../auth/types'
+import { verifyWalletProof } from '../auth/wallet-proof'
+import { presentationProofMessage, proofMatchesCredential } from '../presentations/proof'
 import {
   managedCredentialEvidence,
   type CredentialMetadata,
@@ -24,6 +30,8 @@ import { IndexerUnavailableError } from '../ledger-freshness'
 import {
   RecipientError,
   type CreatePresentationInput,
+  type PresentationChallengeInput,
+  type PresentationChallenge,
   type CreatedPresentation,
   type Presentation,
   type RecipientCredential,
@@ -401,6 +409,96 @@ export class RecipientRepository {
       return { presentations: rows.map((r) => presentationDto(r.presentation, r.name)) }
     })
   }
+  private async presentationReady(
+    db: XcsDatabase,
+    session: Session,
+    input: PresentationChallengeInput,
+  ) {
+    const row = await this.owned(db, session, input.profileId, input.generationId)
+    // A stored historical link alone cannot authorize a new share after wallet removal.
+    const wallets = await db.execute(
+      sql`SELECT id FROM app_wallets WHERE user_id=${session.userId} AND network_id=${row.networkId} AND address=${row.metadata.subjectAddress} AND revoked_at IS NULL`,
+    )
+    if (!wallets.length) throw new RecipientError(409, 'RECIPIENT_WALLET_REQUIRED')
+    const { verification } = await managedCredentialEvidence(
+      db,
+      row.metadata,
+      undefined,
+      false,
+      this.policy,
+    )
+    if (verification.onChain !== 'active')
+      throw new RecipientError(409, 'RECIPIENT_CREDENTIAL_NOT_ACTIVE')
+    let verifierName: string | null = null
+    if (input.scope === 'full') {
+      if (!input.verifierOrganizationId)
+        throw new RecipientError(400, 'RECIPIENT_VERIFIER_REQUIRED')
+      const rows = await db.execute<{ name: string }>(
+        sql`SELECT o.name FROM app_organizations o JOIN app_organization_applications a ON a.organization_id=o.id AND a.role='verifier' WHERE o.id=${input.verifierOrganizationId} AND o.status='active' AND a.status='approved'`,
+      )
+      if (!rows[0]) throw new RecipientError(409, 'RECIPIENT_VERIFIER_UNAVAILABLE')
+      verifierName = rows[0].name
+    } else if (input.scope !== 'public' || input.verifierOrganizationId)
+      throw new RecipientError(400, 'RECIPIENT_INPUT_INVALID')
+    return { row, verifierName }
+  }
+  presentationChallenge(
+    session: Session,
+    input: PresentationChallengeInput,
+  ): Promise<PresentationChallenge> {
+    return this.transaction(async (db) => {
+      const { row } = await this.presentationReady(db, session, input)
+      // Use the same database clock as consumption; application-host clock skew cannot extend the proof window.
+      const [clock] = await db.execute<{ now: string }>(sql`SELECT statement_timestamp() AS now`)
+      const now = new Date(String(clock!.now)),
+        expiresAt = new Date(now.getTime() + 300000)
+      const id = randomUUID(),
+        presentationId = randomUUID()
+      const request: PresentationProofRequest = {
+        version: 1,
+        origin: this.origin,
+        challengeId: id,
+        presentationId,
+        nonce: randomBytes(32).toString('base64url'),
+        issuedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        profileId: input.profileId,
+        networkId: row.networkId,
+        generationId: input.generationId,
+        issuerAddress: row.metadata.issuerAddress,
+        subjectAddress: row.metadata.subjectAddress,
+        schemaUid: row.metadata.schemaUid,
+        payloadDigest: row.metadata.payloadDigest,
+        visibility: row.metadata.visibility,
+        publicFields: [...row.metadata.publicFields].sort(),
+        scope: input.scope,
+        verifierOrganizationId: input.verifierOrganizationId ?? null,
+      }
+      const message = presentationProofMessage(request)
+      if (Buffer.byteLength(message) > 8192)
+        throw new RecipientError(400, 'RECIPIENT_INPUT_INVALID')
+      await db.execute(
+        sql`DELETE FROM app_presentation_challenges WHERE session_id=${session.id} AND expires_at <= statement_timestamp()`,
+      )
+      await db.insert(appPresentationChallenges).values({
+        id,
+        sessionId: session.id,
+        presentationId,
+        request,
+        message,
+        createdAt: now,
+        expiresAt,
+      })
+      return {
+        id,
+        presentationId,
+        address: row.metadata.subjectAddress,
+        networkId: row.networkId,
+        message,
+        expiresAt: expiresAt.toISOString(),
+      }
+    })
+  }
   createPresentation(
     session: Session,
     input: CreatePresentationInput,
@@ -415,35 +513,47 @@ export class RecipientRepository {
         input.generationId,
       ])
       await db.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key},0))`)
-      const row = await this.owned(db, session, input.profileId, input.generationId)
+      const { row, verifierName } = await this.presentationReady(db, session, input)
+      if (!input.proof) throw new RecipientError(400, 'RECIPIENT_PROOF_REQUIRED')
+      // DELETE takes a row lock and rolls back with any later validation failure.
+      // Separate challenge tables prevent wallet-link signatures from crossing purposes.
+      const [challenge] = await db
+        .delete(appPresentationChallenges)
+        .where(
+          and(
+            eq(appPresentationChallenges.id, input.proof.challengeId),
+            eq(appPresentationChallenges.sessionId, session.id),
+          ),
+        )
+        .returning()
+      if (!challenge) throw new RecipientError(403, 'RECIPIENT_PROOF_INVALID')
+      const [clock] = await db.execute<{ fresh: boolean }>(
+        sql`SELECT ${challenge.expiresAt.toISOString()}::timestamptz > statement_timestamp() AS fresh`,
+      )
+      if (!clock?.fresh) throw new RecipientError(409, 'RECIPIENT_PROOF_EXPIRED')
+      const request = challenge.request
+      if (
+        request.origin !== this.origin ||
+        request.challengeId !== challenge.id ||
+        request.presentationId !== challenge.presentationId ||
+        request.issuedAt !== challenge.createdAt.toISOString() ||
+        request.expiresAt !== challenge.expiresAt.toISOString() ||
+        request.scope !== input.scope ||
+        request.verifierOrganizationId !== (input.verifierOrganizationId ?? null) ||
+        !proofMatchesCredential(request, row) ||
+        presentationProofMessage(request) !== challenge.message ||
+        !verifyWalletProof(challenge.message, row.metadata.subjectAddress, input.proof)
+      )
+        throw new RecipientError(403, 'RECIPIENT_PROOF_INVALID')
       const [quota] = await db.execute<{ count: number }>(
         sql`SELECT count(*)::int AS count FROM app_presentations WHERE recipient_user_id=${session.userId} AND profile_id=${input.profileId} AND generation_id=${input.generationId} AND revoked_at IS NULL`,
       )
       if (quota!.count >= 200) throw new RecipientError(409, 'RECIPIENT_PRESENTATION_LIMIT')
-      const { verification } = await managedCredentialEvidence(
-        db,
-        row.metadata,
-        undefined,
-        false,
-        this.policy,
-      )
-      if (verification.onChain !== 'active')
-        throw new RecipientError(409, 'RECIPIENT_CREDENTIAL_NOT_ACTIVE')
-      let verifierName: string | null = null
-      if (input.scope === 'full') {
-        if (!input.verifierOrganizationId)
-          throw new RecipientError(400, 'RECIPIENT_VERIFIER_REQUIRED')
-        const rows = await db.execute<{ name: string }>(
-          sql`SELECT o.name FROM app_organizations o JOIN app_organization_applications a ON a.organization_id=o.id AND a.role='verifier' WHERE o.id=${input.verifierOrganizationId} AND o.status='active' AND a.status='approved'`,
-        )
-        if (!rows[0]) throw new RecipientError(409, 'RECIPIENT_VERIFIER_UNAVAILABLE')
-        verifierName = rows[0].name
-      } else if (input.verifierOrganizationId)
-        throw new RecipientError(400, 'RECIPIENT_INPUT_INVALID')
       const secret = createAppToken()
       const [presentation] = await db
         .insert(appPresentations)
         .values({
+          id: challenge.presentationId,
           profileId: input.profileId,
           generationId: input.generationId,
           recipientUserId: session.userId,
@@ -452,6 +562,14 @@ export class RecipientRepository {
           tokenHash: secret.tokenHash,
         })
         .returning()
+      await db.insert(appPresentationProofs).values({
+        presentationId: presentation!.id,
+        request,
+        message: challenge.message,
+        signature: input.proof.signature,
+        publicKey: input.proof.publicKey,
+        scheme: input.proof.scheme,
+      })
       return {
         ...presentationDto(presentation!, verifierName),
         token: secret.token,

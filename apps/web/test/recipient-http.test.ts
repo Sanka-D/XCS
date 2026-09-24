@@ -19,7 +19,8 @@ function recipientFixture() {
     workspace: vi.fn(async () => ({ credentials: [] })),
     payload: vi.fn(async () => ({ claims: { private: 'secret' } })),
     reconcile: vi.fn(async () => ({ status: { state: 'deleted' } })),
-    createPresentation: vi.fn(),
+    createPresentation: vi.fn(async () => ({ id: 'presentation' })),
+    presentationChallenge: vi.fn(async () => ({ id: 'challenge' })),
     presentations: vi.fn(async () => ({ presentations: [] })),
   }
   const handler = toNodeListener(
@@ -92,6 +93,76 @@ describe('recipient HTTP boundary', () => {
       ).statusCode,
     ).toBe(400)
     expect(repository.presentations).not.toHaveBeenCalled()
+  })
+  it('requires CSRF for challenges and a strict purpose-specific proof before creating links', async () => {
+    const { repository, handler } = recipientFixture()
+    const payload = { profileId: 'testnet', generationId: generation, scope: 'public' }
+    const headers = { authorization: 'test-session', origin, 'x-xcs-csrf': session.csrfToken }
+    expect(
+      (
+        await inject(handler, {
+          method: 'POST',
+          url: '/api/recipient/presentation-challenges',
+          payload,
+          headers: { authorization: 'test-session', origin },
+        })
+      ).statusCode,
+    ).toBe(403)
+    expect(repository.presentationChallenge).not.toHaveBeenCalled()
+    expect(
+      (
+        await inject(handler, {
+          method: 'POST',
+          url: '/api/recipient/presentation-challenges',
+          payload,
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(repository.presentationChallenge).toHaveBeenCalledWith(session, {
+      ...payload,
+      verifierOrganizationId: null,
+    })
+    const missing = await inject(handler, {
+      method: 'POST',
+      url: '/api/recipient/presentations',
+      payload,
+      headers,
+    })
+    expect(missing.statusCode).toBe(400)
+    expect(missing.json()).toEqual({ error: 'RECIPIENT_PROOF_REQUIRED' })
+    expect(repository.createPresentation).not.toHaveBeenCalled()
+    const proof = {
+      challengeId: '00000000-0000-4000-8000-000000000001',
+      scheme: 'ripple',
+      publicKey: 'ED' + 'a'.repeat(64),
+      signature: 'a'.repeat(128),
+    }
+    expect(
+      (
+        await inject(handler, {
+          method: 'POST',
+          url: '/api/recipient/presentations',
+          payload: { ...payload, proof: { ...proof, message: 'client-selected' } },
+          headers,
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await inject(handler, {
+          method: 'POST',
+          url: '/api/recipient/presentations',
+          payload: { ...payload, proof },
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(repository.createPresentation).toHaveBeenCalledWith(session, {
+      ...payload,
+      verifierOrganizationId: null,
+      proof,
+    })
   })
   it('reads full claims only through the explicit payload endpoint', async () => {
     const { repository, handler } = recipientFixture()

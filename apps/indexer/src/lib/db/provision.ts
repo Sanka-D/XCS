@@ -313,14 +313,15 @@ const GRANT_ISSUER_ACCESS_SQL = `
   GRANT SELECT ON app_sessions, app_wallets, app_organizations, app_organization_applications,
     app_schema_metadata, app_invites, app_credential_metadata, app_issuer_payloads,
     app_invite_deliveries, app_presentations, network_profiles, schemas, schema_events,
-    credential_generations, credential_events, ledger_checkpoints, indexer_status, app_verifier_history TO xcs_issuer;
+    credential_generations, credential_events, ledger_checkpoints, indexer_status, app_verifier_history, app_presentation_challenges, app_presentation_proofs TO xcs_issuer;
   GRANT INSERT (id, responsible_user_id, name) ON app_organizations TO xcs_issuer;
   GRANT INSERT (organization_id, role, website, contact, jurisdiction, description, purpose) ON app_organization_applications TO xcs_issuer;
   GRANT INSERT (id, organization_id, application_role, storage_key, mime_type, byte_length, sha256, uploaded_by) ON app_documents TO xcs_issuer;
   GRANT INSERT ON app_schema_metadata, app_invites, app_credential_metadata, app_issuer_payloads, app_invite_deliveries TO xcs_issuer;
   GRANT UPDATE (token_hash, expires_at, revoked_at, claimed_by, claimed_at) ON app_invites TO xcs_issuer;
   GRANT UPDATE (status, error_code) ON app_invite_deliveries TO xcs_issuer;
-  GRANT INSERT ON app_presentations, app_verifier_history TO xcs_issuer;
+  GRANT INSERT ON app_presentations, app_verifier_history, app_presentation_challenges, app_presentation_proofs TO xcs_issuer;
+  GRANT DELETE ON app_presentation_challenges TO xcs_issuer;
   GRANT UPDATE (revoked_at) ON app_presentations TO xcs_issuer;
   ALTER ROLE xcs_issuer LOGIN;
 `

@@ -438,6 +438,8 @@ describe.skipIf(!url)('admin real PostgreSQL / shared auth / restricted pools', 
         await page
           .getByRole('heading', { name: 'Runtime browser organization', exact: true })
           .waitFor()
+        // SSR headings can appear before Vue has attached the decision button handler.
+        await page.locator('[data-client-ready="true"]').waitFor()
         await page.getByRole('button', { name: 'Approve access', exact: true }).click()
         await page.getByTestId('admin-confirm-decision').click()
         await page.waitForURL(/\/admin\?/)

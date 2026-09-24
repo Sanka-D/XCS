@@ -10,6 +10,7 @@ import type { StoredOperation } from './operationJournal'
 export interface IssuerWallet {
   address: string
   networkId: number
+  verifiedAt?: string | null
 }
 export interface IssuerIssuanceContext {
   existingCredential?: { profileId: string; generationId: string } | null
@@ -21,6 +22,7 @@ export interface IssuerIssuanceContext {
     claimedBy: string
     expiresAt: string
     revokedAt: string | null
+    deliveryEmail?: string | null
   }
   schema: {
     schemaUid: string

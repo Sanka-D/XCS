@@ -806,7 +806,7 @@
     "settingsHelp": "Consultez votre candidature et gérez les wallets liés à votre compte.",
     "claimTitle": "Réclamer une invitation",
     "claimHelp": "Réclamer lie cette invitation à votre compte. Cela n’émet ni n’accepte une attestation XRPL.",
-    "claimLogin": "Connectez-vous, puis rouvrez l’invitation depuis votre email. Le lien secret n’est pas conservé dans ce navigateur.",
+    "claimLogin": "Connectez-vous pour continuer. Cette invitation se rouvrira automatiquement après la connexion.",
     "claimUnavailable": "Cette invitation est indisponible, expirée, révoquée ou déjà réclamée. Demandez un nouveau lien à l’émetteur si nécessaire.",
     "claimedHelp": "Invitation réclamée. Liez votre wallet dans votre compte pour que l’émetteur le vérifie avant d’émettre.",
     "claim": "Réclamer avec ce compte",
@@ -965,7 +965,7 @@
       "schemaUnknown": "Schéma non résolu",
       "contentUnavailable": "Contenu indisponible",
       "partial": "Vérification partielle",
-      "unknownIssuer": "Émetteur non reconnu",
+      "unknownIssuer": "Confiance dans l’émetteur non établie",
       "passed": "Contrôles réussis"
     },
     "limit": "Révoquez une présentation active avant d’en créer une autre (limite : 200)."
@@ -988,5 +988,62 @@
     "reopen": "Vérifier à nouveau",
     "reopenError": "Cette vérification n’a pas pu être rouverte. Le lien ou vos autorisations ont pu changer, ou les preuves actuelles sont indisponibles.",
     "currentResult": "Résultat actuel de la vérification"
+  },
+  "roleJourney": {
+    "walletTitle": "Préparer votre wallet destinataire",
+    "walletIntro": "Liez un wallet que vous contrôlez pour que l’émetteur envoie l’attestation à la bonne adresse.",
+    "walletGuide": "Du nouveau wallet à l’attestation",
+    "setupTitle": "Choisir et configurer un wallet compatible",
+    "setupHelp": "Utilisez le sélecteur ci-dessous et, si nécessaire, le lien d’installation proposé. Créez ou ouvrez votre wallet dans son application, puis revenez ici. GemWallet, MetaMask XRP Snap et Otsu prennent en charge cette preuve de contrôle.",
+    "backupTitle": "Garder vos informations de récupération privées",
+    "backupHelp": "Suivez les consignes de sauvegarde du wallet et conservez sa phrase de récupération ou sa clé privée dans un endroit sûr. Ne les saisissez jamais dans XCS et ne les envoyez pas à l’émetteur. XCS demande uniquement une signature à votre wallet.",
+    "networkTitle": "Choisir XRPL Testnet et prévoir les frais",
+    "networkHelp": "Sélectionnez Testnet dans votre wallet. Accepter une attestation nécessite des XRP de test pour les frais et réserves du registre ; utilisez si besoin les instructions de financement Testnet de votre wallet. Lier le wallet ici ne soumet aucune transaction et ne transfère aucun fonds.",
+    "proofTitle": "Se connecter, puis prouver le contrôle",
+    "chooseCompatibleWallet": "Choisir un wallet pour cette preuve",
+    "walletSelectionHelp": "Connexion et liaison sont deux étapes distinctes. Si un autre wallet est connecté, déconnectez-le avant de choisir un wallet compatible.",
+    "connectFirst": "Connectez un wallet compatible avec le sélecteur ci-dessus, puis signez le message de contrôle ci-dessous.",
+    "walletReady": "Un wallet Testnet est lié à votre compte. L’émetteur peut maintenant examiner cette adresse vérifiée avant d’émettre.",
+    "continueRecipient": "Continuer vers mes attestations",
+    "prepareWallet": "Préparer ou gérer mon wallet",
+    "walletRequiredBeforeIssuance": "Liez un wallet pour permettre l’émission. Choisissez « Préparer ou gérer mon wallet » ci-dessus ; inutile de revendiquer à nouveau cette invitation.",
+    "shareProofTitle": "Autoriser ce lien avec votre wallet",
+    "shareProofHelp": "Chaque nouveau lien exige un nouveau message de contrôle signé par le wallet destinataire de l’attestation. Le message identifie cette attestation, les champs partagés et leur destinataire. Il ne soumet aucune transaction et ne transfère aucun fonds.",
+    "shareConnectWallet": "Connectez le wallet destinataire affiché ci-dessus avec GemWallet, MetaMask XRP Snap ou Otsu avant de créer le lien.",
+    "proofFailed": "La preuve du wallet a été annulée, a expiré ou n’a pas pu être vérifiée. Vérifiez le wallet, le contenu partagé et le destinataire, puis recommencez. Aucun lien n’est affiché avant confirmation de sa création.",
+    "recipientStates": {
+      "invited": "En attente de revendication par le destinataire",
+      "wallet_required": "Le destinataire doit lier un wallet",
+      "ready": "Destinataire prêt à recevoir l’attestation",
+      "issued": "Attestation déjà émise",
+      "unavailable": "Disponibilité du destinataire inconnue — actualisez avant d’émettre"
+    },
+    "walletVerifiedAt": "Contrôle du wallet vérifié le {date}",
+    "deliveryIsContact": "Cet email sert à livrer l’invitation ; il ne prouve pas l’identité de la personne qui la revendique. Vérifiez le bénéficiaire réel et son wallet avant de signer.",
+    "admissionTitle": "Admission au portail Commons",
+    "admissionStatuses": {
+      "approved": "Organisation émettrice approuvée sur ce portail",
+      "suspended": "Agrément émetteur suspendu sur ce portail",
+      "not_approved": "Organisation émettrice non approuvée actuellement",
+      "unknown": "Agrément émetteur non établi"
+    },
+    "admissionReviewedAt": "Décision sur la candidature : {date}",
+    "checkedAt": "Vérifié le {date}",
+    "admissionMeaning": "L’agrément autorise l’émission sur ce portail. Il est distinct de la confiance dans l’émetteur, de la validité sur le registre et de la véracité des déclarations.",
+    "holderProofTitle": "Wallet destinataire et preuve de partage",
+    "holderVerifiedAt": "Signature du wallet vérifiée lors de l’autorisation de ce lien le {date}",
+    "holderProofMissing": "Aucune preuve signée du wallet n’a été fournie pour ce lien.",
+    "holderProofMeaning": "La signature lie cette adresse destinataire à l’autorisation du partage à cette date. Elle n’identifie pas la personne qui ouvre le lien et ne prouve pas sa présence actuelle.",
+    "signedProofDetails": "Preuve de contrôle signée",
+    "ledgerRecipientTitle": "Destinataire de l’attestation sur le registre",
+    "ledgerStatuses": {
+      "active": "Émise pour cette adresse et acceptée par celle-ci.",
+      "pending": "Émise pour cette adresse ; acceptation encore attendue.",
+      "expired": "Cette attestation a expiré.",
+      "deleted": "Cette attestation n’est plus active.",
+      "unknown": "Les preuves actuelles du registre sont indisponibles."
+    },
+    "holderProofRecreate": "Demandez au destinataire de créer un nouveau lien avec une nouvelle signature de son wallet.",
+    "holderKeyLimit": "La clé publique signataire correspond à cette adresse de wallet. Ce contrôle porte sur l’adresse de la clé maître ; il ne prouve pas que sa signature était activée sur le registre à cette date. Il ne prouve pas une identité civile."
   }
 }

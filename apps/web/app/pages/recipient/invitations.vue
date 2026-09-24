@@ -160,9 +160,11 @@ useSeoMeta({
     <StatusBox v-else-if="failed" tone="error">{{ $t('issuer.claimUnavailable') }}</StatusBox>
     <template v-else-if="claimed">
       <StatusBox tone="success">{{ $t('issuer.claimedHelp') }}</StatusBox>
-      <UButton class="mt-5" :to="localePath('/account')">{{
-        $t('auth.linkCurrentWallet')
-      }}</UButton>
+      <UButton
+        class="mt-5"
+        :to="{ path: localePath('/account'), query: { returnTo: localePath('/recipient') } }"
+        >{{ $t('roleJourney.prepareWallet') }}</UButton
+      >
       <UButton class="mt-5 ml-3" :to="localePath('/recipient')" variant="outline">{{
         $t('recipient.title')
       }}</UButton>

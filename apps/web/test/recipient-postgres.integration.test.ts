@@ -1,10 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { unixTimeToRippleTime } from 'xrpl'
-import { createRecipientDatabase } from './helpers/recipientDatabase'
+import { Wallet, unixTimeToRippleTime } from 'xrpl'
+import { sign } from 'ripple-keypairs'
+import { createAppToken } from '../server/lib/db/index.js'
+import { createRecipientDatabase, signPresentationInput } from './helpers/recipientDatabase'
 import { RecipientRepository } from '../server/xcs/recipient/repository'
 import { PresentationRepository } from '../server/xcs/presentations/repository'
 import { StaticTrustPolicy } from '../server/xcs/verification'
-import type { CreatedPresentation } from '../server/xcs/recipient/types'
+import type { Session } from '../server/xcs/auth/types'
+import type {
+  CreatedPresentation,
+  PresentationChallengeInput,
+  CreatePresentationInput,
+} from '../server/xcs/recipient/types'
 
 const url = process.env.XCS_TEST_DATABASE_URL?.trim()
 if (process.env.XCS_REQUIRE_POSTGRES_TESTS === '1' && !url)
@@ -15,17 +22,22 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     recipient: RecipientRepository,
     presentations: PresentationRepository
   let full: CreatedPresentation, publicLink: CreatedPresentation
+  const createPresentation = async (session: Session, input: PresentationChallengeInput) =>
+    recipient.createPresentation(
+      session,
+      await signPresentationInput(recipient, session, input, f.subjectWallet),
+    )
   beforeAll(async () => {
     f = await createRecipientDatabase(url!)
     recipient = new RecipientRepository(f.portal, 'https://xcs.test')
     presentations = new PresentationRepository(f.portal)
-    full = await recipient.createPresentation(f.sessions.recipient, {
+    full = await createPresentation(f.sessions.recipient, {
       profileId: f.profileId,
       generationId: f.generationId,
       scope: 'full',
       verifierOrganizationId: f.verifierOrg,
     })
-    publicLink = await recipient.createPresentation(f.sessions.recipient, {
+    publicLink = await createPresentation(f.sessions.recipient, {
       profileId: f.profileId,
       generationId: f.generationId,
       scope: 'public',
@@ -100,7 +112,7 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     await expect(
       recipient.revokePresentation(f.sessions.other, publicLink.id),
     ).rejects.toMatchObject({ statusCode: 404 })
-    const disposable = await recipient.createPresentation(f.sessions.recipient, {
+    const disposable = await createPresentation(f.sessions.recipient, {
       profileId: f.profileId,
       generationId: f.generationId,
       scope: 'public',
@@ -119,7 +131,13 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     await f.db
       .sql`UPDATE app_credential_metadata SET visibility='public',public_fields='[]'::jsonb WHERE profile_id=${f.profileId}`
     try {
-      const result = await presentations.resolve(null, publicLink.token)
+      const alreadyPublic = await createPresentation(f.sessions.recipient, {
+        profileId: f.profileId,
+        generationId: f.generationId,
+        scope: 'public',
+      })
+      const result = await presentations.resolve(null, alreadyPublic.token)
+      await recipient.revokePresentation(f.sessions.recipient, alreadyPublic.id)
       expect(result.scope).toBe('public')
       expect(result.claims).toEqual({ course: 'Public course', secret: 'Private synthetic claim' })
       expect(result).not.toHaveProperty('canonicalPayload')
@@ -136,7 +154,7 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
       expect(result.scope).toBe('public')
       expect(result.claims).not.toHaveProperty('secret')
       await expect(
-        recipient.createPresentation(f.sessions.recipient, {
+        createPresentation(f.sessions.recipient, {
           profileId: f.profileId,
           generationId: f.generationId,
           scope: 'full',
@@ -231,9 +249,9 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     const input = { profileId: f.profileId, generationId: f.generationId, scope: 'public' as const }
     await f.db.sql`UPDATE credential_generations SET accepted=false WHERE profile_id=${f.profileId}`
     try {
-      await expect(recipient.createPresentation(f.sessions.recipient, input)).rejects.toMatchObject(
-        { code: 'RECIPIENT_CREDENTIAL_NOT_ACTIVE' },
-      )
+      await expect(createPresentation(f.sessions.recipient, input)).rejects.toMatchObject({
+        code: 'RECIPIENT_CREDENTIAL_NOT_ACTIVE',
+      })
       expect((await presentations.resolve(null, publicLink.token)).verification.onChain).toBe(
         'pending',
       )
@@ -244,9 +262,9 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     await f.db
       .sql`UPDATE credential_generations SET expiration=${unixTimeToRippleTime(Date.now() - 60000)} WHERE profile_id=${f.profileId}`
     try {
-      await expect(recipient.createPresentation(f.sessions.recipient, input)).rejects.toMatchObject(
-        { code: 'RECIPIENT_CREDENTIAL_NOT_ACTIVE' },
-      )
+      await expect(createPresentation(f.sessions.recipient, input)).rejects.toMatchObject({
+        code: 'RECIPIENT_CREDENTIAL_NOT_ACTIVE',
+      })
       expect(
         (await presentations.resolve(f.sessions.verifier, full.token)).verification.onChain,
       ).toBe('expired')
@@ -372,8 +390,8 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
         scope: 'public' as const,
       }
       const attempts = await Promise.allSettled([
-        recipient.createPresentation(f.sessions.recipient, input),
-        recipient.createPresentation(f.sessions.recipient, input),
+        createPresentation(f.sessions.recipient, input),
+        createPresentation(f.sessions.recipient, input),
       ])
       expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
       const failure = attempts.find(
@@ -397,8 +415,10 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
         (grant) => grant.id !== full.id && grant.id !== publicLink.id,
       )!
       await recipient.revokePresentation(f.sessions.recipient, spare.id)
-      expect((await recipient.createPresentation(f.sessions.recipient, input)).revokedAt).toBe(null)
+      expect((await createPresentation(f.sessions.recipient, input)).revokedAt).toBe(null)
     } finally {
+      await f.db
+        .sql`DELETE FROM app_presentation_proofs WHERE presentation_id NOT IN (${full.id},${publicLink.id})`
       await f.db.sql`DELETE FROM app_presentations WHERE id NOT IN (${full.id},${publicLink.id})`
     }
   })
@@ -425,5 +445,205 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
       .sql`SELECT column_name FROM information_schema.columns WHERE table_name='app_presentations'`
     expect(columns.map((row) => row.column_name)).not.toContain('expires_at')
     expect(columns.map((row) => row.column_name)).not.toContain('consumed_at')
+  })
+  it('requires a fresh signed scope-bound challenge and consumes it atomically only once', async () => {
+    const input = { profileId: f.profileId, generationId: f.generationId, scope: 'public' as const }
+    const signed = await signPresentationInput(
+      recipient,
+      f.sessions.recipient,
+      input,
+      f.subjectWallet,
+    )
+    const [challenge] = await f.db
+      .sql`SELECT * FROM app_presentation_challenges WHERE id=${signed.proof.challengeId}`
+    for (const forbidden of [
+      f.sessions.recipient.id,
+      f.sessions.recipient.userId,
+      f.sessions.recipient.tokenHash,
+      f.subjectWallet.privateKey,
+      'Private synthetic claim',
+    ])
+      expect(challenge!.message).not.toContain(forbidden)
+    expect(challenge!.message).toContain('XCS presentation authorization v1')
+    expect(challenge!.message).toContain(f.generationId)
+    expect(challenge!.message).toContain('"/course"')
+    expect(challenge!.message).toContain('not a transaction, payment, wallet link')
+    const results = await Promise.allSettled([
+      recipient.createPresentation(f.sessions.recipient, signed),
+      recipient.createPresentation(f.sessions.recipient, signed),
+    ])
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    expect(
+      (results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason,
+    ).toMatchObject({ code: 'RECIPIENT_PROOF_INVALID' })
+    const result = (
+      results.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<CreatedPresentation>
+    ).value
+    const resolved = await presentations.resolve(null, result.token)
+    expect(resolved.holderProof).toMatchObject({
+      status: 'verified',
+      address: f.subjectAddress,
+      publicKey: f.subjectWallet.publicKey,
+      keyAuthority: 'master_key_address_only',
+    })
+    expect(resolved.issuerAdmission.status).toBe('approved')
+    expect(
+      await f.db
+        .sql`SELECT id FROM app_presentation_challenges WHERE id=${signed.proof.challengeId}`,
+    ).toEqual([])
+    await expect(
+      f.portal.sql`UPDATE app_presentation_proofs SET message='tampered'`,
+    ).rejects.toMatchObject({ code: '42501' })
+    await expect(f.authClient.sql`SELECT * FROM app_presentation_proofs`).rejects.toMatchObject({
+      code: '42501',
+    })
+    await recipient.revokePresentation(f.sessions.recipient, result.id)
+  })
+  it('rejects scope/audience changes, another wallet, another session, and cross-purpose signatures without consuming the valid challenge', async () => {
+    const input = { profileId: f.profileId, generationId: f.generationId, scope: 'public' as const }
+    const signed = await signPresentationInput(
+      recipient,
+      f.sessions.recipient,
+      input,
+      f.subjectWallet,
+    )
+    await expect(
+      recipient.createPresentation(f.sessions.recipient, {
+        ...signed,
+        scope: 'full',
+        verifierOrganizationId: f.verifierOrg,
+      }),
+    ).rejects.toMatchObject({ code: 'RECIPIENT_PROOF_INVALID' })
+    const other = Wallet.generate()
+    await expect(
+      recipient.createPresentation(f.sessions.recipient, {
+        ...signed,
+        proof: { ...signed.proof, publicKey: other.publicKey },
+      }),
+    ).rejects.toMatchObject({ code: 'RECIPIENT_PROOF_INVALID' })
+    await expect(
+      recipient.createPresentation(f.sessions.recipient, {
+        ...signed,
+        proof: {
+          ...signed.proof,
+          signature: sign(
+            Buffer.from('XCS wallet ownership proof').toString('hex'),
+            f.subjectWallet.privateKey,
+          ),
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'RECIPIENT_PROOF_INVALID' })
+    const token = {
+      ...createAppToken(),
+      csrfToken: createAppToken().token,
+      idleSeconds: 1800,
+      absoluteSeconds: 28800,
+    }
+    await f.auth.createSession(
+      {
+        issuer: 'https://identity.test',
+        subject: 'recipient',
+        emailVerified: true,
+        email: 'recipient@example.test',
+      },
+      token,
+    )
+    const secondSession = (await f.auth.session(token.tokenHash))!
+    await expect(recipient.createPresentation(secondSession, signed)).rejects.toMatchObject({
+      code: 'RECIPIENT_PROOF_INVALID',
+    })
+    // Auth has no access to this purpose's challenge, even if the holder submits its UUID.
+    expect(await f.auth.challenge(f.sessions.recipient.tokenHash, signed.proof.challengeId)).toBe(
+      null,
+    )
+    expect(await f.auth.linkWallet(f.sessions.recipient.tokenHash, signed.proof.challengeId)).toBe(
+      false,
+    )
+    const created = await recipient.createPresentation(f.sessions.recipient, signed)
+    await recipient.revokePresentation(f.sessions.recipient, created.id)
+  })
+  it('rechecks current wallet, acceptance, disclosure and verifier approval between signing and creation', async () => {
+    const input = {
+      profileId: f.profileId,
+      generationId: f.generationId,
+      scope: 'full' as const,
+      verifierOrganizationId: f.verifierOrg,
+    }
+    const signed = await signPresentationInput(
+      recipient,
+      f.sessions.recipient,
+      input,
+      f.subjectWallet,
+    )
+    await f.db
+      .sql`UPDATE app_wallets SET revoked_at=statement_timestamp() WHERE user_id=${f.sessions.recipient.userId}`
+    try {
+      await expect(
+        recipient.createPresentation(f.sessions.recipient, signed),
+      ).rejects.toMatchObject({ code: 'RECIPIENT_WALLET_REQUIRED' })
+    } finally {
+      await f.db
+        .sql`UPDATE app_wallets SET revoked_at=NULL WHERE user_id=${f.sessions.recipient.userId}`
+    }
+    await f.db.sql`UPDATE credential_generations SET accepted=false WHERE profile_id=${f.profileId}`
+    try {
+      await expect(
+        recipient.createPresentation(f.sessions.recipient, signed),
+      ).rejects.toMatchObject({ code: 'RECIPIENT_CREDENTIAL_NOT_ACTIVE' })
+    } finally {
+      await f.db
+        .sql`UPDATE credential_generations SET accepted=true WHERE profile_id=${f.profileId}`
+    }
+    await f.db
+      .sql`UPDATE app_credential_metadata SET public_fields='[]'::jsonb WHERE profile_id=${f.profileId}`
+    try {
+      await expect(
+        recipient.createPresentation(f.sessions.recipient, signed),
+      ).rejects.toMatchObject({ code: 'RECIPIENT_PROOF_INVALID' })
+    } finally {
+      await f.db
+        .sql`UPDATE app_credential_metadata SET public_fields='["/course"]'::jsonb WHERE profile_id=${f.profileId}`
+    }
+    await f.db
+      .sql`UPDATE app_organization_applications SET status='suspended',review_reason='Test' WHERE organization_id=${f.verifierOrg} AND role='verifier'`
+    try {
+      await expect(
+        recipient.createPresentation(f.sessions.recipient, signed),
+      ).rejects.toMatchObject({ code: 'RECIPIENT_VERIFIER_UNAVAILABLE' })
+    } finally {
+      await f.db
+        .sql`UPDATE app_organization_applications SET status='approved',review_reason=NULL WHERE organization_id=${f.verifierOrg} AND role='verifier'`
+    }
+    const created = await recipient.createPresentation(f.sessions.recipient, signed)
+    await recipient.revokePresentation(f.sessions.recipient, created.id)
+  })
+  it('expires challenges after five minutes, requires a proof for new links and distinguishes unsigned legacy grants from corrupted proofs', async () => {
+    const input = { profileId: f.profileId, generationId: f.generationId, scope: 'public' as const }
+    await expect(
+      recipient.createPresentation(f.sessions.recipient, input as CreatePresentationInput),
+    ).rejects.toMatchObject({ code: 'RECIPIENT_PROOF_REQUIRED' })
+    const signed = await signPresentationInput(
+      recipient,
+      f.sessions.recipient,
+      input,
+      f.subjectWallet,
+    )
+    await f.db
+      .sql`UPDATE app_presentation_challenges SET created_at=statement_timestamp()-interval '6 minutes',expires_at=statement_timestamp()-interval '1 minute' WHERE id=${signed.proof.challengeId}`
+    await expect(recipient.createPresentation(f.sessions.recipient, signed)).rejects.toMatchObject({
+      code: 'RECIPIENT_PROOF_EXPIRED',
+    })
+    const legacy = createAppToken()
+    await f.db
+      .sql`INSERT INTO app_presentations(profile_id,generation_id,recipient_user_id,scope,token_hash) VALUES (${f.profileId},${f.generationId},${f.sessions.recipient.userId},'public',${legacy.tokenHash})`
+    expect((await presentations.resolve(null, legacy.token)).holderProof).toEqual({
+      status: 'not_provided',
+    })
+    const created = await createPresentation(f.sessions.recipient, input)
+    await f.db
+      .sql`UPDATE app_presentation_proofs SET signature=${'0'.repeat(128)} WHERE presentation_id=${created.id}`
+    await expect(presentations.resolve(null, created.token)).rejects.toMatchObject({
+      code: 'PRESENTATION_UNAVAILABLE',
+    })
   })
 })

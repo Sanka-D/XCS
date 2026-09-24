@@ -27,6 +27,8 @@ test('signs in through OIDC, persists a session, denies issuer access, links and
   await expect(page.getByTestId('auth-link-wallet')).toBeEnabled()
   await page.getByTestId('auth-link-wallet').click()
   await expect(page.getByTestId('linked-wallets').locator('tbody tr')).toHaveCount(1)
+  await expect(page.getByTestId('wallet-link-continue')).toHaveAttribute('href', '/recipient')
+  await expect(page).toHaveURL(/\/account$/)
   // Hold hydration deterministically: SSR mutation buttons must remain disabled
   // until their click listeners are attached, even when the account is visible.
   let releaseScripts!: () => void
@@ -49,6 +51,7 @@ test('signs in through OIDC, persists a session, denies issuer access, links and
   }
   await page.getByTestId('linked-wallets').getByRole('button').click()
   await expect(page.getByTestId('linked-wallets')).toHaveCount(0)
+  await expect(page.getByTestId('wallet-link-continue')).toHaveCount(0)
   await page.getByTestId('auth-logout').click()
   await expect(page).toHaveURL(/\/auth\/login$/)
   await page.goto('/account')

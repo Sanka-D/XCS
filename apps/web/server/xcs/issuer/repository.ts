@@ -80,8 +80,20 @@ export class IssuerRepository {
     const invites = await this.client
       .sql`SELECT i.id,i.organization_id AS "organizationId",i.profile_id AS "profileId",i.schema_uid AS "schemaUid",
       i.delivery_email AS email,i.created_at AS "createdAt",i.expires_at AS "expiresAt",i.claimed_by AS "claimedBy",i.claimed_at AS "claimedAt",i.revoked_at AS "revokedAt",
-      CASE WHEN d.status='sending' AND d.created_at<statement_timestamp()-interval '2 minutes' THEN 'uncertain' ELSE d.status END AS "deliveryStatus",d.error_code AS "deliveryError"
-      FROM app_invites i LEFT JOIN LATERAL (SELECT status,error_code,created_at FROM app_invite_deliveries WHERE invite_id=i.id ORDER BY created_at DESC,id DESC LIMIT 1) d ON TRUE
+      CASE WHEN d.status='sending' AND d.created_at<statement_timestamp()-interval '2 minutes' THEN 'uncertain' ELSE d.status END AS "deliveryStatus",d.error_code AS "deliveryError",
+      recipient.display_name AS "recipientDisplayName",wallet.verified_at AS "recipientWalletVerifiedAt",
+      CASE WHEN i.revoked_at IS NOT NULL OR NOT n.enabled OR n.network_id<>1
+        OR (i.claimed_by IS NOT NULL AND recipient.status<>'active') THEN 'unavailable'
+        WHEN m.generation_id IS NOT NULL THEN 'issued'
+        WHEN i.claimed_by IS NULL THEN 'invited'
+        WHEN wallet.verified_at IS NOT NULL THEN 'ready' ELSE 'wallet_required' END AS "recipientStatus"
+      FROM app_invites i
+      JOIN network_profiles n ON n.profile_id=i.profile_id
+      LEFT JOIN app_users recipient ON recipient.id=i.claimed_by
+      LEFT JOIN app_credential_metadata m ON m.invite_id=i.id
+      LEFT JOIN LATERAL (SELECT max(verified_at) AS verified_at FROM app_wallets
+        WHERE user_id=i.claimed_by AND network_id=n.network_id AND revoked_at IS NULL) wallet ON TRUE
+      LEFT JOIN LATERAL (SELECT status,error_code,created_at FROM app_invite_deliveries WHERE invite_id=i.id ORDER BY created_at DESC,id DESC LIMIT 1) d ON TRUE
       WHERE i.organization_id=${id} ORDER BY i.created_at DESC,i.id LIMIT 200`
     const credentials = await this.client
       .sql`SELECT m.*,g.accepted,g.expiration,g.deleted_ledger_index,g.deletion_cause
@@ -97,6 +109,7 @@ export class IssuerRepository {
         expiresAt: iso(row.expiresAt),
         claimedAt: iso(row.claimedAt),
         revokedAt: iso(row.revokedAt),
+        recipientWalletVerifiedAt: iso(row.recipientWalletVerifiedAt),
       })),
       credentials: credentials.map((row) => this.credentialDto(row)),
     }
@@ -282,9 +295,9 @@ export class IssuerRepository {
       WHERE s.profile_id=${invite.profile_id} AND s.schema_uid=${invite.schema_uid} AND n.enabled AND n.network_id=1`
     if (!recipient || !schema) throw new IssuerError(409, 'ISSUER_ISSUANCE_UNAVAILABLE')
     const wallets =
-      await sql`SELECT address,network_id AS "networkId" FROM app_wallets WHERE user_id=${recipient.id} AND network_id=${schema.network_id} AND revoked_at IS NULL`
+      await sql`SELECT address,network_id AS "networkId",verified_at AS "verifiedAt" FROM app_wallets WHERE user_id=${recipient.id} AND network_id=${schema.network_id} AND revoked_at IS NULL`
     const issuerWallets =
-      await sql`SELECT address,network_id AS "networkId" FROM app_wallets WHERE user_id=${session.userId} AND network_id=${schema.network_id} AND revoked_at IS NULL`
+      await sql`SELECT address,network_id AS "networkId",verified_at AS "verifiedAt" FROM app_wallets WHERE user_id=${session.userId} AND network_id=${schema.network_id} AND revoked_at IS NULL`
     return { invite, org, recipient, schema, wallets, issuerWallets }
   }
 
@@ -302,14 +315,23 @@ export class IssuerRepository {
         claimedBy: rows.invite.claimed_by,
         expiresAt: iso(rows.invite.expires_at),
         revokedAt: iso(rows.invite.revoked_at),
+        deliveryEmail: rows.invite.delivery_email,
       },
       organization: { id: rows.org.id, name: rows.org.name },
       recipient: {
         id: rows.recipient.id,
         displayName: rows.recipient.display_name,
-        wallets: rows.wallets,
+        wallets: rows.wallets.map((wallet) => ({
+          ...wallet,
+          networkId: Number(wallet.networkId),
+          verifiedAt: iso(wallet.verifiedAt),
+        })),
       },
-      issuerWallets: rows.issuerWallets,
+      issuerWallets: rows.issuerWallets.map((wallet) => ({
+        ...wallet,
+        networkId: Number(wallet.networkId),
+        verifiedAt: iso(wallet.verifiedAt),
+      })),
       schema: {
         profileId: rows.schema.profile_id,
         schemaUid: rows.schema.schema_uid,

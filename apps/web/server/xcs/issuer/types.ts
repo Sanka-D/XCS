@@ -31,6 +31,9 @@ export interface IssuerInvite {
   revokedAt: string | null
   deliveryStatus: 'sending' | 'sent' | 'failed' | 'uncertain' | 'cancelled' | null
   deliveryError: string | null
+  recipientStatus?: 'invited' | 'wallet_required' | 'ready' | 'issued' | 'unavailable'
+  recipientDisplayName?: string | null
+  recipientWalletVerifiedAt?: string | null
 }
 export interface IssuerCredential {
   profileId: string

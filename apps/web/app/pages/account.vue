@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { useWallet as useXrplConnectWallet } from '@xrpl-commons/xrpl-connect-vue'
 import { signWalletLinkChallenge } from '~/utils/walletLinkProof'
+import { supportsWalletLinkProof, walletLinkReturnPath } from '~/utils/roleJourney'
 
 definePageMeta({ middleware: ['auth'] })
 const { locale, t } = useI18n()
 const localePath = useLocalePath()
+const route = useRoute()
+const onboarding = computed(() => route.query.returnTo !== undefined)
+const returnPath = computed(() => walletLinkReturnPath(route.query.returnTo, locale.value))
 const auth = useAuth()
 const { user, expiresAt, absoluteExpiresAt } = auth
 const wallet = import.meta.client ? useXrplConnectWallet() : undefined
@@ -22,7 +26,7 @@ const canLink = computed(() => {
   return Boolean(
     current?.network.id === 'testnet' &&
     wallet?.manager.connected &&
-    ['gemwallet', 'metamask-snap', 'otsu'].includes(wallet.manager.wallet?.id ?? '') &&
+    supportsWalletLinkProof(wallet.manager.wallet?.id ?? '') &&
     wallet.manager.supports('signMessage'),
   )
 })
@@ -30,6 +34,9 @@ const isLinked = computed(() =>
   user.value?.wallets.some(
     (link) => link.address === walletAccount.value?.address && link.networkId === 1,
   ),
+)
+const hasLinkedWallet = computed(
+  () => user.value?.wallets.some((link) => link.networkId === 1) === true,
 )
 const formatDate = (value?: string) =>
   value
@@ -81,11 +88,14 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
 
 <template>
   <UContainer class="py-10 sm:py-14">
-    <PageHeader :title="$t('auth.account')" :lead="$t('auth.accountIntro')" />
+    <PageHeader
+      :title="$t(onboarding ? 'roleJourney.walletTitle' : 'auth.account')"
+      :lead="$t(onboarding ? 'roleJourney.walletIntro' : 'auth.accountIntro')"
+    />
     <StatusBox v-if="error" tone="error" class="mb-5" role="alert">{{ error }}</StatusBox>
     <StatusBox v-if="notice" tone="success" class="mb-5" role="status">{{ notice }}</StatusBox>
     <template v-if="user">
-      <UCard>
+      <UCard v-if="!onboarding">
         <h2 class="text-xl font-semibold">{{ $t('auth.profile') }}</h2>
         <MetadataList class="mt-4">
           <dt>{{ $t('auth.name') }}</dt>
@@ -117,7 +127,7 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
         <p class="mt-3 text-sm text-muted">{{ $t('auth.signOutHelp') }}</p>
       </UCard>
 
-      <section class="mt-8" aria-labelledby="account-organizations">
+      <section v-if="!onboarding" class="mt-8" aria-labelledby="account-organizations">
         <h2 id="account-organizations" class="text-2xl font-semibold">
           {{ $t('auth.organizations') }}
         </h2>
@@ -141,6 +151,33 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
 
       <section class="mt-8" aria-labelledby="account-wallets">
         <h2 id="account-wallets" class="text-2xl font-semibold">{{ $t('auth.linkedWallets') }}</h2>
+        <section class="my-5 rounded border border-default p-5" aria-labelledby="wallet-onboarding">
+          <h3 id="wallet-onboarding" class="text-lg font-semibold">
+            {{ $t('roleJourney.walletGuide') }}
+          </h3>
+          <ol class="mt-4 list-decimal space-y-4 pl-5">
+            <li>
+              <strong>{{ $t('roleJourney.setupTitle') }}</strong>
+              <p class="mt-1 text-sm text-muted">{{ $t('roleJourney.setupHelp') }}</p>
+            </li>
+            <li>
+              <strong>{{ $t('roleJourney.backupTitle') }}</strong>
+              <p class="mt-1 text-sm text-muted">{{ $t('roleJourney.backupHelp') }}</p>
+            </li>
+            <li>
+              <strong>{{ $t('roleJourney.networkTitle') }}</strong>
+              <p class="mt-1 text-sm text-muted">{{ $t('roleJourney.networkHelp') }}</p>
+            </li>
+            <li>
+              <strong>{{ $t('roleJourney.proofTitle') }}</strong>
+              <p class="mt-1 text-sm text-muted">{{ $t('auth.walletLinkHelp') }}</p>
+            </li>
+          </ol>
+          <ClientOnly
+            ><div class="mt-5"><WalletButton proof-only test-id-prefix="wallet-link" /></div
+          ></ClientOnly>
+          <p class="mt-3 text-sm text-muted">{{ $t('roleJourney.walletSelectionHelp') }}</p>
+        </section>
         <p class="mt-3 text-toned">{{ $t('auth.walletLinkHelp') }}</p>
         <p class="mt-2 text-sm text-muted">{{ $t('auth.masterKeyOnly') }}</p>
         <p v-if="!user.wallets.length" class="mt-4 text-muted">{{ $t('auth.noWallets') }}</p>
@@ -185,7 +222,9 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             <p v-if="walletAccount" class="mb-3 break-all font-mono text-sm">
               {{ walletAccount.address }}
             </p>
-            <p v-if="!walletAccount" class="mb-3 text-muted">{{ $t('auth.connectFirst') }}</p>
+            <p v-if="!walletAccount" class="mb-3 text-muted">
+              {{ $t('roleJourney.connectFirst') }}
+            </p>
             <p v-else-if="!canLink" class="mb-3 text-muted">{{ $t('auth.walletUnsupported') }}</p>
             <p v-else-if="isLinked" class="mb-3 text-muted">{{ $t('auth.alreadyLinked') }}</p>
             <UButton
@@ -197,6 +236,24 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             >
           </div>
         </ClientOnly>
+        <StatusBox v-if="hasLinkedWallet" class="mt-6" tone="success">{{
+          $t('roleJourney.walletReady')
+        }}</StatusBox>
+        <UButton
+          v-if="hasLinkedWallet"
+          :to="returnPath"
+          class="mt-3"
+          data-testid="wallet-link-continue"
+          >{{ $t('roleJourney.continueRecipient') }}</UButton
+        >
+        <UButton
+          v-if="onboarding"
+          :to="localePath('/account')"
+          color="neutral"
+          variant="link"
+          class="mt-3 ml-3"
+          >{{ $t('auth.account') }}</UButton
+        >
       </section>
     </template>
     <UButton v-else :to="localePath('/auth/login')">{{ $t('auth.signIn') }}</UButton>
