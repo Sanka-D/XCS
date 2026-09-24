@@ -27,6 +27,13 @@ only a signed blob and transaction hash. Hosts integrating a wallet that refresh
 non-signature field remains bound to the reviewed transaction, and submission uses the signed expiry
 value.
 
+After signing, the SDK checks the current ledger before invoking `onValidatedSignature`. An
+already-expired fresh signature is rejected without persisting recovery material or relaying it;
+the journal records a failed preparation so the host can offer a fresh review. It checks again
+after `beforeSubmit`, immediately before relay. If expiry occurs after recovery material was
+exposed to host hooks, the operation remains signed and recoverable. These first-submission
+guards do not establish historical absence for `submitSignedTransaction` retries.
+
 The optional operation journal records hashes and lifecycle stages, never signed blobs, payloads,
 seeds, or private keys. Browser and service hosts can persist a validated signed blob through
 `onValidatedSignature` before the first relay attempt. Volatile checks belong in `beforeSubmit`; if

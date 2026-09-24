@@ -200,6 +200,69 @@ describe('reliable submission', () => {
     expect(submit).not.toHaveBeenCalled()
   })
 
+  it('rejects a signature returned after expiry before persisting it or entering the relay path', async () => {
+    const blob = signedBlob()
+    const transaction = decode(blob) as unknown as SubmittableTransaction
+    const journal = new MemoryOperationJournal()
+    const submit = vi.fn()
+    const onValidatedSignature = vi.fn()
+    const beforeSubmit = vi.fn()
+    const request = vi.fn(async () => ({ result: { ledger_current_index: 51 } }))
+    await expect(
+      signPreparedAndSubmit(
+        mockClient({ submit, request }),
+        transaction,
+        { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
+        { journal, onValidatedSignature, beforeSubmit },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_TRANSACTION_EXPIRED' })
+    expect(onValidatedSignature).not.toHaveBeenCalled()
+    expect(beforeSubmit).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    expect(journal.entries.map((entry) => entry.stage)).toEqual(['prepared', 'failed'])
+    expect(journal.entries.every((entry) => entry.txHash === undefined)).toBe(true)
+  })
+
+  it('rechecks expiry after the final asynchronous host guard without relaying the blob', async () => {
+    const blob = signedBlob()
+    const journal = new MemoryOperationJournal()
+    let currentLedger = 49
+    const submit = vi.fn()
+    const onValidatedSignature = vi.fn()
+    await expect(
+      signPreparedAndSubmit(
+        mockClient({
+          submit,
+          request: vi.fn(async () => ({ result: { ledger_current_index: currentLedger } })),
+        }),
+        decode(blob) as unknown as SubmittableTransaction,
+        { sign: async () => ({ txBlob: blob, hash: hashes.hashSignedTx(blob) }) },
+        {
+          journal,
+          onValidatedSignature,
+          beforeSubmit: async () => {
+            currentLedger = 51
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_TRANSACTION_EXPIRED' })
+    expect(onValidatedSignature).toHaveBeenCalledOnce()
+    expect(submit).not.toHaveBeenCalled()
+    // Once recovery material has escaped to a host hook, do not infer global absence.
+    expect(journal.entries.at(-1)?.stage).toBe('signed')
+  })
+
+  it('keeps a previously relayed cached transaction pending after its ledger window', async () => {
+    const request = vi.fn(async ({ command }: { command: string }) => ({
+      result: command === 'tx' ? { validated: false } : { ledger_current_index: 100 },
+    }))
+    await expect(
+      getTransactionStatus(mockClient({ request }), 'AB'.repeat(32), 50),
+    ).resolves.toMatchObject({ status: 'pending' })
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({ command: 'tx' }))
+  })
+
   it('runs the validated-signature hook after exact comparison and before submit', async () => {
     const calls: string[] = []
     const blob = signedBlob()

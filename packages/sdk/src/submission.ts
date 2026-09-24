@@ -257,6 +257,9 @@ export async function signPreparedAndSubmit<T extends SubmittableTransaction>(
       allowLastLedgerSequenceRefresh: options.allowSignerLastLedgerSequenceRefresh,
     })
     signedLastLedgerSequence = signedTransaction.LastLedgerSequence as number
+    // A wallet approval can outlive the reviewed ledger window. Reject before
+    // exposing recovery material to host hooks, so a fresh operation can retry.
+    await assertTransactionNotExpired(client, signedLastLedgerSequence)
     await options.onValidatedSignature?.({
       operationId,
       transaction: signedTransaction,
@@ -277,6 +280,13 @@ export async function signPreparedAndSubmit<T extends SubmittableTransaction>(
   return submitSignedTransaction(client, signed.txBlob, {
     ...options,
     operationId,
+    beforeSubmit: async (signature) => {
+      await options.beforeSubmit?.(signature)
+      // Recheck after asynchronous persistence/business guards, at the last
+      // boundary before this first relay. Recovery of old blobs stays separate:
+      // passing LastLedgerSequence does not prove absence from ledger history.
+      await assertTransactionNotExpired(client, signature.lastLedgerSequence)
+    },
   })
 }
 

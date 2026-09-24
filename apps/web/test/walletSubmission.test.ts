@@ -72,6 +72,57 @@ function storedOperation(overrides: Partial<StoredOperation> = {}): StoredOperat
 }
 
 describe('wallet sign-only normalization', () => {
+  it('releases the business lock when a fresh wallet signature expires before persistence or relay', async () => {
+    const wallet = Wallet.generate()
+    const subject = Wallet.generate().address
+    const schemaUid = '12'.repeat(32)
+    const transaction = {
+      TransactionType: 'CredentialCreate' as const,
+      Account: wallet.address,
+      Subject: subject,
+      CredentialType: schemaUid,
+      Fee: '12',
+      Sequence: 1,
+      LastLedgerSequence: 100,
+    }
+    const signed = wallet.sign(transaction)
+    const initial = storedOperation({
+      account: wallet.address,
+      transactionType: 'CredentialCreate',
+      business: { action: 'credential-issue', issuer: wallet.address, subject, schemaUid },
+    })
+    const entries: SubmissionJournalEntry[] = []
+    const submit = vi.fn()
+    const persist = vi.fn()
+    await expect(
+      signPreparedAndSubmit(
+        {
+          isConnected: () => true,
+          submit,
+          request: async () => ({ result: { ledger_current_index: 101 } }),
+        } as unknown as Client,
+        transaction,
+        createWalletSigner({ sign: async () => ({ hash: '', tx_blob: signed.tx_blob }) }),
+        {
+          journal: {
+            append: async (entry) => {
+              entries.push(entry)
+            },
+          },
+          onValidatedSignature: persist,
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'XCS_SDK_TRANSACTION_EXPIRED' })
+    const failed = entries.reduce(applyJournalEntry, initial)
+    expect(failed.stage).toBe('failed')
+    expect(failed.txBlob).toBeUndefined()
+    expect(failed.txHash).toBeUndefined()
+    expect(persist).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    expect(operationConflictsWith(initial, { ...initial, operationId: 'fresh-review' })).toBe(true)
+    expect(operationConflictsWith(failed, { ...initial, operationId: 'fresh-review' })).toBe(false)
+  })
+
   it('derives the XRPL hash when the wallet returns an empty hash', () => {
     const { signed } = signedPayment()
     const normalized = normalizeWalletSignature({ hash: '', tx_blob: signed.tx_blob })
@@ -252,7 +303,11 @@ describe('wallet sign-only normalization', () => {
     const persist = vi.fn()
     const submit = vi.fn()
     const entries: SubmissionJournalEntry[] = []
-    const client = { isConnected: () => true, submit } as unknown as Client
+    const client = {
+      isConnected: () => true,
+      submit,
+      request: async () => ({ result: { ledger_current_index: 99 } }),
+    } as unknown as Client
 
     await expect(
       signPreparedAndSubmit(
@@ -279,7 +334,11 @@ describe('wallet sign-only normalization', () => {
     const changed = attacker.sign({ ...transaction, Account: attacker.address })
     const persist = vi.fn()
     const submit = vi.fn()
-    const client = { isConnected: () => true, submit } as unknown as Client
+    const client = {
+      isConnected: () => true,
+      submit,
+      request: async () => ({ result: { ledger_current_index: 99 } }),
+    } as unknown as Client
 
     await expect(
       signPreparedAndSubmit(
@@ -321,6 +380,7 @@ describe('wallet sign-only normalization', () => {
       request: async () => ({
         result: {
           validated: true,
+          ledger_current_index: 99,
           ledger_index: 99,
           meta: { TransactionResult: 'tesSUCCESS' },
         },
@@ -359,7 +419,11 @@ describe('wallet sign-only normalization', () => {
     const submit = vi.fn()
     await expect(
       signPreparedAndSubmit(
-        { isConnected: () => true, submit } as unknown as Client,
+        {
+          isConnected: () => true,
+          submit,
+          request: async () => ({ result: { ledger_current_index: 99 } }),
+        } as unknown as Client,
         transaction,
         createWalletSigner({ sign: async () => ({ hash: '', tx_blob: signed.tx_blob }) }),
         {
@@ -407,7 +471,11 @@ describe('wallet sign-only normalization', () => {
     const persistSigned = vi.fn()
     const submit = vi.fn()
     const entries: SubmissionJournalEntry[] = []
-    const client = { isConnected: () => true, submit } as unknown as Client
+    const client = {
+      isConnected: () => true,
+      submit,
+      request: async () => ({ result: { ledger_current_index: 99 } }),
+    } as unknown as Client
 
     await expect(
       signPreparedAndSubmit(
