@@ -95,7 +95,14 @@ references and raw failure diagnostics. The existing journal and saved content a
   Real database/SMTP/HTTP boundaries are exercised here with synthetic sessions and XRPL transports,
   separately from the manual live Testnet qualification. The isolated test services were stopped.
   CI web, package and Docker jobs passed on the preceding UI commit; the existing license-policy
-  failure was confirmed unchanged. The final test-only correction is revalidated by the next CI run.
+  failure was confirmed unchanged.
+- A subsequent CI attempt timed out in an unchanged indexer migration test. An isolated replay
+  reproduced concurrent PostgreSQL role provisioning (`pg_authid_rolname_index`). Indexer test
+  files now run sequentially whenever a database URL is supplied, matching `test:postgres`;
+  unit-only parallelism and explicit concurrency tests remain unchanged. All 357 indexer tests
+  passed against a fresh PostgreSQL18 cluster, followed by 300 unit tests with 57 expected database
+  skips without a database URL. No timeout or assertion was relaxed. The final configuration and
+  test corrections are revalidated by the next CI run.
 
 Other wallet compatibility and external email delivery were not requalified by this UI change.
 The optional Crossmark live configuration's selectors were updated but that separate wallet-specific

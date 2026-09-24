@@ -60,6 +60,11 @@ pnpm --dir apps/indexer test:postgres
 pnpm --dir apps/web test:postgres
 ```
 
+When `XCS_TEST_DATABASE_URL` is set, the indexer's Vitest configuration runs test files in
+sequence, including through `test` and `verify`. Separate databases still share cluster-wide
+roles, so concurrent provisioning can collide or replace another suite's role credentials.
+Unit-only runs retain file parallelism; assertions and timeouts are unchanged.
+
 Install Chromium once and run browser flows with:
 
 ```bash
