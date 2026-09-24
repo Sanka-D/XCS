@@ -37,10 +37,12 @@ const props = defineProps<{
     subjectAddress: string
     schemaUid: string
     visibility: 'public' | 'private'
+    organizationName?: string
   }
   initialAction?: 'accept' | 'reject' | 'remove'
 }>()
 const emit = defineEmits<{ reconciled: [] }>()
+const primaryAction = computed(() => props.initialAction ?? 'accept')
 const auth = useAuth()
 const request = useRequestFetch()
 const privateReview = computed(() => props.fixedCredential?.visibility === 'private')
@@ -102,7 +104,12 @@ const messageDisplay = computed(() => {
   if (message.value === 'CREDENTIAL_LINK_SUBJECT_WALLET_MISMATCH') {
     return t('accept.subjectWalletMismatch')
   }
-  return walletTransactionErrorMessage(message.value, t) ?? message.value
+  return (
+    walletTransactionErrorMessage(message.value, t) ??
+    (props.fixedCredential && message.value
+      ? t('simpleRecipient.actionUnavailable')
+      : message.value)
+  )
 })
 const messageIsLocalized = computed(
   () => message.value.length > 0 && messageDisplay.value !== message.value,
@@ -143,7 +150,9 @@ const blockReasonMessage = computed(() => {
   if (blockReason.value === 'CREDENTIAL_ISSUER_TRUST_ACK_STALE') {
     return t('accept.issuerAcknowledgementStale')
   }
-  return blockReason.value
+  return props.fixedCredential && blockReason.value
+    ? t('simpleRecipient.actionUnavailable')
+    : blockReason.value
 })
 const payloadHost = computed(() => {
   if (!review.value?.uri) return null
@@ -319,6 +328,23 @@ watch(
   },
   { deep: true },
 )
+// A reconciled credential can stay on the same page while its available action changes.
+watch(
+  () => props.initialAction,
+  (next) => {
+    if (!props.fixedCredential) return
+    linkedAction.value = next ?? ''
+    action.value = linkedSubjectAction(linkedAction.value)
+    invalidatePreview()
+  },
+)
+async function reviewAction(next: CredentialSubjectAction) {
+  if (busy.value) return
+  action.value = next
+  await nextTick()
+  await buildPreview()
+}
+
 watch(
   () => auth.user.value?.id,
   () => {
@@ -767,7 +793,37 @@ async function submit() {
     />
     <UCard class="mb-6">
       <div class="grid gap-5">
-        <UFormField :label="$t('accept.action')">
+        <template v-if="fixedCredential">
+          <template v-if="primaryAction === 'accept'">
+            <h2 class="text-xl font-semibold">{{ $t('simpleRecipient.reviewStep') }}</h2>
+            <p class="text-muted">{{ $t('simpleRecipient.reviewIntro') }}</p>
+            <UButton :disabled="busy" @click="reviewAction('accept')">{{
+              busy ? $t('common.working') : $t('accept.review')
+            }}</UButton>
+          </template>
+          <p v-else-if="primaryAction === 'remove'" class="text-muted">
+            {{ $t('simpleRecipient.acceptedActions') }}
+          </p>
+          <details id="subject-action" class="rounded border border-default p-4">
+            <summary class="cursor-pointer font-semibold">
+              {{ $t('simpleRecipient.otherActions') }}
+            </summary>
+            <p v-if="primaryAction === 'remove'" class="mt-3 text-sm text-muted">
+              {{ $t('simpleRecipient.removeIntro') }}
+            </p>
+            <UButton
+              class="mt-3"
+              color="neutral"
+              variant="outline"
+              :disabled="busy"
+              @click="reviewAction(primaryAction === 'remove' ? 'remove' : 'reject')"
+              >{{
+                $t(primaryAction === 'remove' ? 'accept.removeAction' : 'accept.rejectAction')
+              }}</UButton
+            >
+          </details>
+        </template>
+        <UFormField v-else :label="$t('accept.action')">
           <USelect
             id="subject-action"
             v-model="action"
@@ -790,7 +846,7 @@ async function submit() {
             :disabled="busy"
           />
         </UFormField>
-        <div>
+        <div v-if="!fixedCredential">
           <UButton type="button" :disabled="busy" @click="buildPreview">
             {{ busy ? $t('common.working') : $t('accept.review') }}
           </UButton>
@@ -805,9 +861,10 @@ async function submit() {
       data-testid="accept-error"
       :title="messageDisplay"
     >
-      <p v-if="messageIsLocalized">
+      <details v-if="messageIsLocalized">
+        <summary class="cursor-pointer">{{ $t('accept.technicalDetails') }}</summary>
         <code>{{ message }}</code>
-      </p>
+      </details>
     </StatusBox>
     <!-- The review is a pre-signing snapshot, not the state after ledger validation. -->
     <UCard v-if="review && !result" class="mb-6" data-testid="credential-subject-review">
@@ -815,15 +872,25 @@ async function submit() {
         <h2 class="text-xl font-semibold">{{ $t('accept.exactCredential') }}</h2>
       </template>
       <MetadataList>
-        <dt>Issuer</dt>
-        <dd>
+        <dt>{{ $t('simpleRecipient.reviewIssuer') }}</dt>
+        <dd v-if="fixedCredential">
+          {{ fixedCredential.organizationName ?? $t('recipient.credential') }}
+        </dd>
+        <dd v-else>
           <code>{{ review.issuer }}</code>
         </dd>
-        <dt>Subject</dt>
-        <dd>
+        <dt>{{ $t('simpleRecipient.reviewSubject') }}</dt>
+        <dd v-if="fixedCredential">
+          {{ $t('simpleRecipient.yourWallet') }}
+          <details class="mt-1 text-sm">
+            <summary class="cursor-pointer">{{ $t('simpleRecipient.walletIdentity') }}</summary>
+            <code class="break-all">{{ review.subject }}</code>
+          </details>
+        </dd>
+        <dd v-else>
           <code>{{ review.subject }}</code>
         </dd>
-        <dt>Schema</dt>
+        <dt>{{ $t(fixedCredential ? 'simpleUi.attestationType' : 'verify.schema') }}</dt>
         <dd>
           <strong>{{
             schemaDetail?.name ?? (fixedCredential ? $t('recipient.credential') : review.schemaUid)
@@ -832,7 +899,12 @@ async function submit() {
         <dt>{{ $t('accept.expiration') }}</dt>
         <dd>{{ review.expiration ?? $t('accept.noExpiration') }}</dd>
         <dt>{{ $t('accept.state') }}</dt>
-        <dd><StatusPill :value="review.state" /></dd>
+        <dd>
+          <AttestationStatus v-if="fixedCredential" :value="review.state" /><StatusPill
+            v-else
+            :value="review.state"
+          />
+        </dd>
       </MetadataList>
 
       <StatusBox v-if="action === 'accept' && !acceptanceReview?.claims" tone="notice">
@@ -871,12 +943,9 @@ async function submit() {
         <h2 class="mt-6 mb-2 text-xl font-semibold">
           {{ $t(privateReview ? 'recipient.readContent' : 'accept.publicClaims') }}
         </h2>
-        <MetadataList data-testid="credential-claims">
-          <template v-for="(value, key) in acceptanceReview.claims" :key="key">
-            <dt>{{ key }}</dt>
-            <dd>{{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}</dd>
-          </template>
-        </MetadataList>
+        <div data-testid="credential-claims">
+          <AttestationFields :claims="acceptanceReview.claims" />
+        </div>
       </template>
       <StatusBox
         v-if="action === 'accept' && acceptanceReview?.report.issuerTrust === 'unknown'"
@@ -938,6 +1007,12 @@ async function submit() {
       <details class="mt-5 rounded-lg p-4 ring-1 ring-default">
         <summary class="cursor-pointer font-semibold">{{ $t('accept.technicalDetails') }}</summary>
         <MetadataList class="mt-4">
+          <template v-if="fixedCredential">
+            <dt>{{ $t('recipient.issuerWallet') }}</dt>
+            <dd>
+              <code class="break-all">{{ review.issuer }}</code>
+            </dd>
+          </template>
           <dt>Schema UID</dt>
           <dd>
             <code>{{ review.schemaUid }}</code>

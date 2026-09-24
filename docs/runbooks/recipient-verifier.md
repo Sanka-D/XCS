@@ -18,6 +18,17 @@ Rollback deploys the previous compatible web image and leaves the additive table
 Do not drop history or rewrite migration history. Payloads and application records require backups;
 replaying XRPL cannot reconstruct off-chain claims or sharing grants.
 
+## Everyday interface
+
+With the authenticated portals enabled, the home page and main navigation offer Receive, Issue
+and Verify. Technical exploration remains under More. Verification accepts the complete sharing
+link, including when pasted into the verification page; it never fetches an arbitrary pasted URL.
+Attestation names, organizations, readable fields and next actions are primary. Wallet addresses,
+hashes, raw transactions and verification dimensions remain available in collapsed details.
+Expired/revoked states, missing proofs and incomplete checks still appear before those details.
+Wallet approval still requires explicit consent, including GemWallet’s coded-message limitation.
+Recipient acceptance updates the available actions on the same page; removal is a secondary action.
+
 ## Issuer journey
 
 Apply as an organization and wait for Commons' administrator decision. Issuance remains blocked

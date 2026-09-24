@@ -45,7 +45,10 @@ const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const messageDisplay = computed(() => {
-  return walletTransactionErrorMessage(message.value, t) ?? message.value
+  return (
+    walletTransactionErrorMessage(message.value, t) ??
+    (props.issuerContext ? t('simpleIssuer.error') : message.value)
+  )
 })
 const messageIsLocalized = computed(
   () => message.value.length > 0 && messageDisplay.value !== message.value,
@@ -282,21 +285,17 @@ async function submit() {
 
 <template>
   <UContainer class="py-10 sm:py-14">
-    <PageHeader
-      eyebrow="Credential issuer"
-      :title="$t('revoke.title')"
-      :lead="$t('revoke.description')"
-    />
-    <StatusBox tone="warning">{{ $t('revoke.warning') }}</StatusBox>
+    <PageHeader :title="$t('simpleIssuer.revokeTitle')" :lead="$t('simpleIssuer.revokeLead')" />
+    <StatusBox tone="warning">{{ $t('simpleIssuer.revokeWarning') }}</StatusBox>
 
     <UCard class="mb-6">
       <div class="grid gap-5">
         <template v-if="issuerContext">
           <p>
-            <strong>{{ $t('issuer.engine.schema') }}:</strong> {{ issuerContext.schemaName }}
+            <strong>{{ $t('simpleIssuer.model') }}:</strong> {{ issuerContext.schemaName }}
           </p>
           <p>
-            <strong>{{ $t('issuer.engine.recipient') }}:</strong> {{ issuerContext.recipientLabel }}
+            <strong>{{ $t('simpleIssuer.recipient') }}:</strong> {{ issuerContext.recipientLabel }}
           </p>
         </template>
         <UFormField v-if="!issuerContext" label="Subject">
@@ -312,54 +311,65 @@ async function submit() {
         </UFormField>
         <div>
           <UButton :disabled="busy" @click="buildPreview">
-            {{ busy ? $t('common.working') : $t('revoke.review') }}
+            {{ busy ? $t('common.working') : $t('simpleIssuer.reviewRevoke') }}
           </UButton>
         </div>
       </div>
     </UCard>
 
     <StatusBox v-if="message" tone="error" data-testid="revoke-error" :title="messageDisplay">
-      <p v-if="messageIsLocalized">
+      <details v-if="messageIsLocalized">
+        <summary>{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ message }}</code>
-      </p>
+      </details>
     </StatusBox>
 
     <UCard v-if="credential && report" class="mb-6">
       <template #header>
         <h2 class="text-xl font-semibold">{{ $t('revoke.exactCredential') }}</h2>
       </template>
-      <MetadataList>
-        <dt>Issuer</dt>
-        <dd>
-          <code>{{ credential.issuer }}</code>
-        </dd>
-        <dt>Subject</dt>
-        <dd>
-          <code>{{ credential.subject }}</code>
-        </dd>
-        <dt>Schema UID</dt>
-        <dd>
-          <code>{{ credential.schemaUid }}</code>
-        </dd>
-        <dt>{{ $t('revoke.state') }}</dt>
-        <dd><StatusPill :value="credential.state" /></dd>
-        <dt>{{ $t('revoke.expiration') }}</dt>
-        <dd>{{ expiration ?? $t('revoke.noExpiration') }}</dd>
-        <dt>URI</dt>
-        <dd>
-          <code>{{ decodedUri ?? '—' }}</code>
-        </dd>
-        <dt>{{ $t('revoke.generation') }}</dt>
-        <dd>
-          <code>{{ credential.generationId }}</code>
-        </dd>
-      </MetadataList>
+      <p>{{ $t('simpleIssuer.currentState') }} : <AttestationStatus :value="credential.state" /></p>
+      <p class="mt-2">
+        {{ $t('simpleIssuer.expiration') }} : {{ expiration ?? $t('revoke.noExpiration') }}
+      </p>
+      <details class="mt-4">
+        <summary class="cursor-pointer text-sm text-muted">
+          {{ $t('simpleIssuer.technical') }}
+        </summary>
+        <MetadataList>
+          <dt>Issuer</dt>
+          <dd>
+            <code>{{ credential.issuer }}</code>
+          </dd>
+          <dt>Subject</dt>
+          <dd>
+            <code>{{ credential.subject }}</code>
+          </dd>
+          <dt>Schema UID</dt>
+          <dd>
+            <code>{{ credential.schemaUid }}</code>
+          </dd>
+          <dt>{{ $t('revoke.state') }}</dt>
+          <dd><StatusPill :value="credential.state" /></dd>
+          <dt>{{ $t('revoke.expiration') }}</dt>
+          <dd>{{ expiration ?? $t('revoke.noExpiration') }}</dd>
+          <dt>URI</dt>
+          <dd>
+            <code>{{ decodedUri ?? '—' }}</code>
+          </dd>
+          <dt>{{ $t('revoke.generation') }}</dt>
+          <dd>
+            <code>{{ credential.generationId }}</code>
+          </dd>
+        </MetadataList>
+      </details>
     </UCard>
 
     <TransactionPreview
       :transaction="transaction"
       :busy="busy"
       :compact="!!issuerContext"
+      :confirm-label="$t('simpleIssuer.revoke')"
       @confirm="submit"
     />
     <BusinessFinality

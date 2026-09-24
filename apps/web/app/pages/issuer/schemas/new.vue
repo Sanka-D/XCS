@@ -57,7 +57,13 @@ useSeoMeta({ robots: 'noindex,nofollow' })
         class="mt-4"
         :items="organizations.map((item) => ({ label: item.name, value: item.id }))"
       />
-      <StatusBox v-if="error" tone="error">{{ error }}</StatusBox>
+      <StatusBox v-if="error" tone="error"
+        ><p>{{ $t('simpleIssuer.error') }}</p>
+        <details>
+          <summary>{{ $t('simpleIssuer.technical') }}</summary>
+          <code>{{ error }}</code>
+        </details></StatusBox
+      >
     </UContainer>
     <SchemaRegistrationForm
       v-if="context"

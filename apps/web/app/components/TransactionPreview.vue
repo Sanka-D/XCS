@@ -9,7 +9,30 @@ const props = defineProps<{
   confirmLabel?: string
 }>()
 const emit = defineEmits<{ confirm: [] }>()
-const { walletId, consentToRawSigning } = useWallet()
+const { walletId, account, consentToRawSigning } = useWallet()
+const actionKey = computed(() => {
+  switch (props.transaction?.TransactionType) {
+    case 'CredentialCreate':
+      return 'issue'
+    case 'CredentialAccept':
+      return 'accept'
+    case 'CredentialDelete':
+      return 'remove'
+    case 'Payment':
+      return 'payment'
+    default:
+      return 'other'
+  }
+})
+function formatDrops(drops: unknown): string | null {
+  if (typeof drops !== 'string' || !/^\d+$/.test(drops)) return null
+  const padded = drops.padStart(7, '0')
+  return `${padded.slice(0, -6)}.${padded.slice(-6)}`
+}
+const fee = computed(() => formatDrops(props.transaction?.Fee))
+const paymentAmount = computed(() =>
+  props.transaction?.TransactionType === 'Payment' ? formatDrops(props.transaction.Amount) : null,
+)
 const rawSigning = computed(() =>
   requiresGemWalletRawSigning(walletId.value, props.transaction?.TransactionType),
 )
@@ -32,15 +55,22 @@ function confirm() {
 
 <template>
   <UCard v-if="transaction" class="mb-6" data-testid="transaction-preview" aria-live="polite">
-    <details v-if="compact && !rawSigning">
-      <summary class="cursor-pointer font-semibold">{{ $t('transaction.preview') }}</summary>
-      <JsonBlock class="mt-3" :code="JSON.stringify(transaction, null, 2)" />
-    </details>
-    <div v-else>
-      <p class="text-xs font-semibold tracking-[0.2em] text-muted uppercase">
-        {{ $t('transaction.preview') }}
-      </p>
-      <h2 class="mb-4 text-xl font-semibold">{{ transaction.TransactionType }}</h2>
+    <h2 class="text-xl font-semibold">{{ $t('transaction.preview') }}</h2>
+    <p class="mt-3 font-semibold">{{ $t(`simpleUi.signActions.${actionKey}`) }}</p>
+    <p class="mt-2 text-sm">{{ $t('simpleUi.walletWillAsk') }}</p>
+    <p class="mt-2 font-semibold">
+      {{
+        account?.network.id === 'testnet' ? $t('simpleUi.testNetwork') : $t('simpleUi.checkNetwork')
+      }}
+    </p>
+    <p class="mt-2">
+      {{ fee === null ? $t('simpleUi.feeUnknown') : $t('simpleUi.fee', { fee }) }}
+    </p>
+    <p v-if="paymentAmount !== null" class="mt-2">
+      {{ $t('simpleUi.paymentAmount', { amount: paymentAmount }) }}
+    </p>
+    <details class="mt-4" data-testid="transaction-technical-details">
+      <summary class="cursor-pointer font-semibold">{{ $t('simpleUi.technicalDetails') }}</summary>
       <MetadataList>
         <template v-for="(value, key) in transaction" :key="key">
           <dt>{{ key }}</dt>
@@ -49,7 +79,7 @@ function confirm() {
           </dd>
         </template>
       </MetadataList>
-    </div>
+    </details>
     <StatusBox v-if="rawSigning" tone="warning" class="mt-5">
       <p>{{ $t('transaction.rawWarning') }}</p>
       <UCheckbox
@@ -68,13 +98,7 @@ function confirm() {
       :disabled="busy || (rawSigning && !rawAcknowledged)"
       @click="confirm"
     >
-      {{
-        busy
-          ? $t('common.working')
-          : rawSigning
-            ? $t('transaction.rawSign')
-            : (confirmLabel ?? $t('transaction.sign'))
-      }}
+      {{ busy ? $t('common.working') : (confirmLabel ?? $t('transaction.sign')) }}
     </UButton>
   </UCard>
 </template>

@@ -14,7 +14,6 @@ const localePath = useLocalePath()
 <template>
   <StatusBox v-if="pending" tone="warning" role="status" data-testid="issuer-save-pending">
     <p>{{ $t(canRestart ? 'issuer.engine.failedOperation' : 'issuer.engine.savePending') }}</p>
-    <code class="break-all">{{ pending.transactionHash }}</code>
     <div class="mt-3 flex gap-3">
       <UButton v-if="canRestart" :disabled="busy" @click="$emit('restart')">{{
         $t('issuer.engine.restartFailedOperation')
@@ -26,7 +25,12 @@ const localePath = useLocalePath()
         $t('nav.operations')
       }}</UButton>
     </div>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="error" role="alert">{{ $t('simpleUi.saveError') }}</p>
+    <details class="mt-3">
+      <summary class="cursor-pointer">{{ $t('simpleUi.technicalDetails') }}</summary>
+      <code class="break-all">{{ pending.transactionHash }}</code>
+      <p v-if="error">{{ error }}</p>
+    </details>
   </StatusBox>
   <StatusBox v-else-if="saved" tone="success" role="status">{{
     $t('issuer.engine.saved')

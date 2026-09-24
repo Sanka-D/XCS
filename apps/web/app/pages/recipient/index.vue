@@ -45,7 +45,9 @@ useSeoMeta({ title: () => `${t('recipient.title')} — XCS`, robots: 'noindex,no
           :to="{ path: localePath('/account'), query: { returnTo: localePath('/recipient') } }"
           color="neutral"
           variant="outline"
-          >{{ $t('roleJourney.prepareWallet') }}</UButton
+          >{{
+            $t(hasLinkedWallet ? 'simpleRecipient.manageWallet' : 'roleJourney.prepareWallet')
+          }}</UButton
         >
         <UButton :loading="status === 'pending'" @click="refresh()">{{
           $t('recipient.refresh')
@@ -99,6 +101,15 @@ useSeoMeta({ title: () => `${t('recipient.title')} — XCS`, robots: 'noindex,no
                   )
                 }}
               </p>
+              <UButton
+                v-if="!invite.revokedAt && !hasLinkedWallet"
+                class="mt-4"
+                :to="{
+                  path: localePath('/account'),
+                  query: { returnTo: localePath('/recipient') },
+                }"
+                >{{ $t('roleJourney.prepareWallet') }}</UButton
+              >
             </UCard>
           </li>
         </ul>
@@ -125,12 +136,12 @@ useSeoMeta({ title: () => `${t('recipient.title')} — XCS`, robots: 'noindex,no
                 {{ credential.schemaName ?? $t('recipient.credential') }}
               </h3>
               <p class="mt-1">{{ credential.organizationName }}</p>
-              <StatusPill class="mt-3" :value="credential.status.state" />
+              <AttestationStatus class="mt-3" :value="credential.status.state" />
               <p class="mt-3 text-sm text-muted">
                 {{ $t(`recipient.visibility.${credential.visibility}`) }}
               </p>
               <UButton :to="credentialLink(credential)" class="mt-4">{{
-                $t('recipient.open')
+                $t(group.key === 'ready' ? 'simpleRecipient.reviewAttestation' : 'recipient.open')
               }}</UButton>
             </UCard>
           </li>

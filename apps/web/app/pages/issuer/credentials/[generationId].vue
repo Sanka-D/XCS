@@ -8,6 +8,7 @@ import {
 
 definePageMeta({ layout: 'issuer', middleware: ['auth', 'role'], requiredRole: 'issuer' })
 const route = useRoute()
+const { t } = useI18n()
 const localePath = useLocalePath()
 const api = useIssuerEngineApi()
 const auth = useAuth()
@@ -44,7 +45,7 @@ const context = computed<IssuerRevokeEngineContext | undefined>(() => {
     schemaName: current.schema.name,
     issuerAddress: current.issuerAddress,
     subjectAddress: current.subjectAddress,
-    recipientLabel: current.recipient?.displayName ?? current.recipientUserId,
+    recipientLabel: current.recipient?.displayName ?? t('simpleIssuer.recipientFallback'),
     async beforeSign(publisher) {
       await auth.load(true)
       await auth.checkRole('issuer', current.organizationId)
@@ -79,7 +80,13 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       <UButton :to="localePath('/issuer')" color="neutral" variant="outline">{{
         $t('issuer.engine.back')
       }}</UButton>
-      <StatusBox v-if="error" tone="error">{{ error }}</StatusBox>
+      <StatusBox v-if="error" tone="error"
+        ><p>{{ $t('simpleIssuer.error') }}</p>
+        <details>
+          <summary>{{ $t('simpleIssuer.technical') }}</summary>
+          <code>{{ error }}</code>
+        </details></StatusBox
+      >
       <IssuerEngineRecovery
         :pending="recovery.pending.value"
         :saved="recovery.saved.value"
@@ -92,11 +99,11 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       <UCard v-if="detail" class="mt-5">
         <h1 class="text-xl font-semibold">{{ detail.schema.name }}</h1>
         <p class="mt-3">
-          {{ $t('issuer.engine.recipient') }}:
-          {{ detail.recipient?.displayName ?? detail.recipientUserId }}
+          {{ $t('simpleIssuer.recipient') }}:
+          {{ detail.recipient?.displayName ?? $t('simpleIssuer.recipientFallback') }}
         </p>
-        <p>{{ $t('issuer.engine.visibility') }}: {{ $t(`issuer.engine.${detail.visibility}`) }}</p>
-        <StatusPill :value="credentialState" />
+        <p>{{ $t('simpleIssuer.visibility') }}: {{ $t(`simpleIssuer.${detail.visibility}`) }}</p>
+        <AttestationStatus :value="credentialState" />
       </UCard>
     </UContainer>
     <CredentialRevokeForm

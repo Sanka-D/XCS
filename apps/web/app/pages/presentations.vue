@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ResolvedPresentation } from '../../server/xcs/recipient/types'
 import { purgePrivateLinkFragment } from '~/utils/privateLinkHistory'
+import { presentationTokenFromLink } from '~/utils/presentationView'
 
 const auth = useAuth()
 const handoff = usePrivateLinkHandoff()
@@ -12,6 +13,8 @@ const ready = ref(false)
 const busy = ref(false)
 const failed = ref<'unusable' | 'unavailable' | null>(null)
 const result = shallowRef<ResolvedPresentation | null>(null)
+const receivedLink = ref('')
+const invalidLink = ref(false)
 let revision = 0
 let activeRequest = 0
 let disposed = false
@@ -56,18 +59,33 @@ onMounted(async () => {
       if (handoffRevision === revision) failed.value = 'unavailable'
     }
   }
-  if (!failed.value && !/^[A-Za-z0-9_-]{43}$/.test(token.value)) failed.value = 'unusable'
+  if (token.value && !failed.value && !/^[A-Za-z0-9_-]{43}$/.test(token.value))
+    failed.value = 'unusable'
   ready.value = true
 })
 onBeforeUnmount(() => {
   disposed = true
   activeRequest += 1
   token.value = ''
+  receivedLink.value = ''
   clearResult()
   document.removeEventListener('visibilitychange', hideResult)
   window.removeEventListener('hashchange', captureFragment)
 })
 watch(() => auth.user.value?.id, clearResult)
+async function openReceivedLink() {
+  if (busy.value || !ready.value) return
+  invalidLink.value = false
+  try {
+    token.value = presentationTokenFromLink(window.location.origin, receivedLink.value)
+  } catch {
+    invalidLink.value = true
+    return
+  } finally {
+    receivedLink.value = ''
+  }
+  await open()
+}
 async function open() {
   if (busy.value || !ready.value || !/^[A-Za-z0-9_-]{43}$/.test(token.value)) return
   busy.value = true
@@ -146,6 +164,37 @@ useSeoMeta({
       <StatusBox v-if="failed === 'unavailable'" class="mt-5" tone="error">{{
         $t('presentation.unavailableHelp')
       }}</StatusBox>
+      <form
+        v-if="!token || failed === 'unusable'"
+        class="mt-5 grid gap-4"
+        @submit.prevent="openReceivedLink"
+      >
+        <label for="received-presentation-link" class="font-semibold">{{
+          $t('simpleUi.receivedLink')
+        }}</label>
+        <input
+          id="received-presentation-link"
+          v-model="receivedLink"
+          type="text"
+          inputmode="url"
+          autocomplete="off"
+          autocapitalize="none"
+          :spellcheck="false"
+          :disabled="busy"
+          required
+          class="w-full min-w-0 rounded border border-default bg-default p-3"
+          aria-describedby="received-link-help"
+        />
+        <p id="received-link-help" class="text-sm text-muted">
+          {{ $t('simpleUi.receivedLinkHelp') }}
+        </p>
+        <StatusBox v-if="invalidLink" tone="error" role="alert">{{
+          $t('simpleUi.invalidLink')
+        }}</StatusBox>
+        <UButton type="submit" :loading="busy" :disabled="busy">{{
+          $t('simpleUi.verifyLink')
+        }}</UButton>
+      </form>
       <div v-if="token && failed !== 'unusable'" class="mt-5 flex flex-wrap gap-3">
         <UButton :loading="busy" :disabled="busy" @click="open">{{
           $t(result ? 'presentation.checkAgain' : 'presentation.open')

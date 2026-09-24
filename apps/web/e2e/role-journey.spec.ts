@@ -107,7 +107,9 @@ test('explains wallet readiness before issuer preparation when the recipient has
     }),
   ).toBeVisible()
   await expect(
-    page.getByRole('link', { name: 'Prepare or manage my wallet', exact: true }),
+    page
+      .getByRole('region', { name: 'Waiting for issuance', exact: true })
+      .getByRole('link', { name: 'Prepare or manage my wallet', exact: true }),
   ).toHaveAttribute('href', '/account?returnTo=/recipient')
 })
 
@@ -168,9 +170,9 @@ test('allows issuance only when the claimed recipient has a verified wallet read
     page.getByText('Recipient ready to receive the attestation', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole('link', { name: 'Review recipient and issue', exact: true }),
+    page.getByRole('link', { name: 'Prepare the attestation', exact: true }),
   ).toHaveCount(1)
   await expect(
-    page.getByRole('link', { name: 'Review recipient and issue', exact: true }),
+    page.getByRole('link', { name: 'Prepare the attestation', exact: true }),
   ).toHaveAttribute('href', '/issuer/issue/ready-wallet')
 })

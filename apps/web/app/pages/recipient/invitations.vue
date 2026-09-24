@@ -12,6 +12,9 @@ const loaded = ref(false)
 const failed = ref(false)
 const busy = ref(false)
 const claimed = ref(false)
+const hasLinkedWallet = computed(
+  () => auth.user.value?.wallets.some((wallet) => wallet.networkId === 1) === true,
+)
 const preview = ref<{ organizationName?: string; schemaName?: string } | null>(null)
 let revision = 0
 let initialized = false
@@ -159,15 +162,25 @@ useSeoMeta({
     </template>
     <StatusBox v-else-if="failed" tone="error">{{ $t('issuer.claimUnavailable') }}</StatusBox>
     <template v-else-if="claimed">
-      <StatusBox tone="success">{{ $t('issuer.claimedHelp') }}</StatusBox>
+      <StatusBox tone="success">{{
+        $t(hasLinkedWallet ? 'simpleRecipient.invitationReady' : 'issuer.claimedHelp')
+      }}</StatusBox>
+      <UButton v-if="hasLinkedWallet" class="mt-5" :to="localePath('/recipient')">{{
+        $t('roleJourney.continueRecipient')
+      }}</UButton>
       <UButton
+        v-else
         class="mt-5"
         :to="{ path: localePath('/account'), query: { returnTo: localePath('/recipient') } }"
         >{{ $t('roleJourney.prepareWallet') }}</UButton
       >
-      <UButton class="mt-5 ml-3" :to="localePath('/recipient')" variant="outline">{{
-        $t('recipient.title')
-      }}</UButton>
+      <UButton
+        v-if="!hasLinkedWallet"
+        class="mt-5 ml-3"
+        :to="localePath('/recipient')"
+        variant="outline"
+        >{{ $t('recipient.title') }}</UButton
+      >
     </template>
     <template v-else-if="preview">
       <h2 class="text-xl font-semibold">{{ preview.schemaName }}</h2>

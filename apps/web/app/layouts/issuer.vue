@@ -23,7 +23,7 @@ const links = [
             query: route.query.organizationId ? { organizationId: route.query.organizationId } : {},
           }"
         >
-          {{ $t(`issuer.${label}`) }}
+          {{ $t(`simpleIssuer.nav.${label}`) }}
         </UButton>
       </nav>
       <slot />

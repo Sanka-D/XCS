@@ -199,20 +199,6 @@ useSeoMeta({
         $t('recipient.inactiveHelp')
       }}</StatusBox>
       <form v-else class="grid gap-5" @submit.prevent="create">
-        <section
-          class="rounded border border-default p-4"
-          :aria-label="$t('roleJourney.shareProofTitle')"
-        >
-          <h3 class="font-semibold">{{ $t('roleJourney.shareProofTitle') }}</h3>
-          <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.shareProofHelp') }}</p>
-          <p class="mt-3 break-all font-mono text-sm">{{ data.credential.subjectAddress }}</p>
-          <ClientOnly
-            ><div class="mt-3"><WalletButton proof-only test-id-prefix="presentation-wallet" /></div
-          ></ClientOnly>
-          <p v-if="!walletReady" class="mt-3 text-sm text-muted">
-            {{ $t('roleJourney.shareConnectWallet') }}
-          </p>
-        </section>
         <fieldset class="grid gap-3">
           <legend class="mb-3 font-semibold">{{ $t('presentation.scope') }}</legend>
           <label class="flex gap-3"
@@ -264,6 +250,24 @@ useSeoMeta({
           <p v-else class="mt-2 text-sm text-muted">{{ $t('presentation.noFields') }}</p>
         </section>
         <p class="text-sm text-muted">{{ $t('presentation.duration') }}</p>
+        <section
+          class="rounded border border-default p-4"
+          :aria-label="$t('roleJourney.shareProofTitle')"
+        >
+          <h3 class="font-semibold">{{ $t('roleJourney.shareProofTitle') }}</h3>
+          <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.shareProofHelp') }}</p>
+          <details class="mt-3 text-sm">
+            <summary class="cursor-pointer">{{ $t('simpleRecipient.walletDetails') }}</summary>
+            <p class="mt-2 break-all font-mono">{{ data.credential.subjectAddress }}</p>
+          </details>
+          <ClientOnly
+            ><div class="mt-3"><WalletButton proof-only test-id-prefix="presentation-wallet" /></div
+          ></ClientOnly>
+          <p v-if="!walletReady" class="mt-3 text-sm text-muted">
+            {{ $t('roleJourney.shareConnectWallet') }}
+          </p>
+        </section>
+
         <UButton type="submit" :disabled="busy || !canCreate || !walletReady" :loading="busy">{{
           $t('presentation.create')
         }}</UButton>

@@ -185,8 +185,8 @@ test('prepares a schema against the real API and Testnet with an empty backgroun
     .click()
   await page.locator('a[href="/schemas/register"]').click()
   await page.getByRole('button', { name: 'Course completion template', exact: true }).click()
-  await page.getByRole('button', { name: 'Validate and prepare', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Sign and submit', exact: true })).toBeVisible({
+  await page.getByRole('button', { name: 'Review the template', exact: true }).click()
+  await expect(page.getByTestId('transaction-sign')).toBeVisible({
     timeout: 30000,
   })
   // Do not sign or submit using the test transport. The preview is read-only.

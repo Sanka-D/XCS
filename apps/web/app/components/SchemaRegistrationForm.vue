@@ -21,6 +21,7 @@ const emit = defineEmits<{ busy: [value: boolean] }>()
 const recovery = useIssuerEngineRecovery(() => props.issuerContext)
 const { account, busy, prepare, signAndSubmit } = useWallet()
 const { t } = useI18n()
+const route = useRoute()
 const { getActiveNetworkProfile } = useXcsApi()
 const editorMode = ref<'guided' | 'json'>('guided')
 const guidedDraft = ref<GuidedSchemaDraft>(createCourseCompletionDraft())
@@ -37,17 +38,32 @@ const pageBusy = computed(() => busy.value || submitting.value || recovery.savin
 watch(pageBusy, (value) => emit('busy', value), { immediate: true })
 const nameBytes = computed(() => utf8ByteLength(guidedDraft.value.name))
 const descriptionBytes = computed(() => utf8ByteLength(guidedDraft.value.description))
-const formErrorMessage = computed(
-  () => walletTransactionErrorMessage(formError.value, t) ?? formError.value,
-)
+function readableSchemaError(value: string): string {
+  const walletMessage = walletTransactionErrorMessage(value, t)
+  if (walletMessage) return walletMessage
+  if (value.startsWith('INVALID_SCHEMA ($.description):'))
+    return t('simpleIssuer.descriptionInvalid')
+  if (value.startsWith('INVALID_SCHEMA ($.name):')) return t('simpleIssuer.nameInvalid')
+  if (value.startsWith('INVALID_SCHEMA ($.fields') || value === 'SCHEMA_FIELD_DUPLICATE')
+    return t('simpleIssuer.fieldsInvalid')
+  if (value.startsWith('INVALID_SCHEMA') || value.startsWith('INVALID_JSON'))
+    return t('simpleIssuer.modelInvalid')
+  return t('simpleIssuer.error')
+}
+const formErrorMessage = computed(() => readableSchemaError(formError.value))
+const modelSummary = computed(() => {
+  if (!canonicalSchema.value) return null
+  return parseJson(canonicalSchema.value) as {
+    name: string
+    description: string
+    fields: Record<string, { type: string; optional?: boolean }>
+  }
+})
 let previewRevision = 0
 
 function schemaErrorMessage(error: unknown): string {
-  if (error instanceof XcsError) {
-    if (error.path === '$.description') return t('register.descriptionInvalid')
-    if (error.path === '$.name') return t('register.nameInvalid')
-    return error.path ? `${error.path}: ${error.message}` : error.message
-  }
+  if (error instanceof XcsError)
+    return `${error.code}${error.path ? ` (${error.path})` : ''}: ${error.message}`
   return error instanceof Error ? error.message : String(error)
 }
 
@@ -233,11 +249,7 @@ async function submit() {
 
 <template>
   <UContainer class="py-10 sm:py-14">
-    <PageHeader
-      eyebrow="Schema publisher"
-      :title="$t('register.title')"
-      :lead="$t('register.description')"
-    />
+    <PageHeader :title="$t('simpleIssuer.modelTitle')" :lead="$t('simpleIssuer.modelLead')" />
 
     <IssuerEngineRecovery
       v-if="issuerContext"
@@ -251,29 +263,29 @@ async function submit() {
     />
     <UCard v-if="!issuerContext || (!recovery.pending.value && !recovery.saved.value)" class="mb-6">
       <div class="grid gap-5">
-        <div class="flex flex-wrap gap-3" role="group" :aria-label="$t('register.schema')">
+        <div class="flex flex-wrap gap-3">
           <UButton
-            size="sm"
+            v-if="editorMode === 'json'"
             color="neutral"
-            :variant="editorMode === 'guided' ? 'solid' : 'outline'"
-            type="button"
-            :aria-pressed="editorMode === 'guided'"
+            variant="outline"
             :disabled="pageBusy"
             @click="selectEditorMode('guided')"
+            >{{ $t('simpleIssuer.guided') }}</UButton
           >
-            {{ $t('register.guidedMode') }}
-          </UButton>
-          <UButton
-            size="sm"
-            color="neutral"
-            :variant="editorMode === 'json' ? 'solid' : 'outline'"
-            type="button"
-            :aria-pressed="editorMode === 'json'"
-            :disabled="pageBusy"
-            @click="selectEditorMode('json')"
-          >
-            {{ $t('register.jsonMode') }}
-          </UButton>
+          <details>
+            <summary class="cursor-pointer text-sm text-muted">
+              {{ $t('simpleIssuer.advanced') }}
+            </summary>
+            <UButton
+              class="mt-2"
+              color="neutral"
+              variant="outline"
+              :disabled="pageBusy"
+              @click="selectEditorMode('json')"
+              >{{ $t('simpleIssuer.editJson') }}</UButton
+            >
+            <p class="mt-2 text-sm text-muted">{{ $t('register.advancedHint') }}</p>
+          </details>
         </div>
 
         <template v-if="editorMode === 'guided'">
@@ -300,7 +312,10 @@ async function submit() {
             </UButton>
           </div>
 
-          <UFormField :label="$t('register.schemaName')" :error="nameBytes === 0 || nameBytes > 64">
+          <UFormField
+            :label="$t('simpleIssuer.modelName')"
+            :error="nameBytes === 0 || nameBytes > 64"
+          >
             <UInput
               id="schema-name"
               v-model="guidedDraft.name"
@@ -309,11 +324,11 @@ async function submit() {
               aria-describedby="schema-name-hint"
             />
             <p id="schema-name-hint" class="text-sm text-muted">
-              {{ $t('register.textBytes', { count: nameBytes, max: 64 }) }}
+              {{ $t('simpleIssuer.shortName') }}
             </p>
           </UFormField>
           <UFormField
-            :label="$t('register.schemaDescription')"
+            :label="$t('simpleIssuer.modelDescription')"
             :error="descriptionBytes === 0 || descriptionBytes > 256"
           >
             <UTextarea
@@ -325,24 +340,32 @@ async function submit() {
               :disabled="pageBusy"
             />
             <p id="schema-description-hint" class="text-sm text-muted">
-              {{ $t('register.textBytes', { count: descriptionBytes, max: 256 }) }}
+              {{ $t('simpleIssuer.shortDescription') }}
             </p>
           </UFormField>
 
           <fieldset class="grid gap-3 rounded-[0.8rem] p-4 ring-1 ring-default">
-            <legend class="px-1 font-semibold">{{ $t('register.fields') }}</legend>
+            <legend class="px-1 font-semibold">{{ $t('simpleIssuer.fields') }}</legend>
             <div
               v-for="(field, index) in guidedDraft.fields"
               :key="index"
               class="grid gap-3 border-b border-default pb-3 sm:grid-cols-[1fr_10rem_auto_auto] sm:items-end"
             >
-              <UFormField :label="$t('register.fieldName')">
+              <UFormField
+                :label="$t('simpleIssuer.fieldName')"
+                :help="$t('simpleIssuer.fieldNameHint')"
+              >
                 <UInput v-model="field.name" :disabled="pageBusy" autocomplete="off" />
               </UFormField>
-              <UFormField :label="$t('register.fieldType')">
+              <UFormField :label="$t('simpleIssuer.fieldType')">
                 <USelect
                   v-model="field.type"
-                  :items="GUIDED_SCHEMA_FIELD_TYPES.map((type) => ({ label: type, value: type }))"
+                  :items="
+                    GUIDED_SCHEMA_FIELD_TYPES.map((type) => ({
+                      label: $t(`simpleIssuer.fieldTypes.${type}`),
+                      value: type,
+                    }))
+                  "
                   :disabled="pageBusy"
                 />
               </UFormField>
@@ -350,7 +373,7 @@ async function submit() {
                 v-model="field.optional"
                 class="sm:pb-2"
                 :disabled="pageBusy"
-                :label="$t('register.optional')"
+                :label="$t('simpleIssuer.optional')"
               />
               <UButton
                 color="neutral"
@@ -360,7 +383,7 @@ async function submit() {
                 :disabled="pageBusy"
                 @click="removeField(index)"
               >
-                {{ $t('register.removeField') }}
+                {{ $t('simpleIssuer.removeField') }}
               </UButton>
             </div>
             <div>
@@ -372,12 +395,17 @@ async function submit() {
                 :disabled="pageBusy"
                 @click="addField"
               >
-                {{ $t('register.addField') }}
+                {{ $t('simpleIssuer.addField') }}
               </UButton>
             </div>
           </fieldset>
-          <p class="text-sm text-muted">{{ $t('register.advancedHint') }}</p>
-          <StatusBox v-if="guidedError" tone="error" role="alert">{{ guidedError }}</StatusBox>
+          <StatusBox v-if="guidedError" tone="error" role="alert"
+            ><p>{{ readableSchemaError(guidedError) }}</p>
+            <details>
+              <summary>{{ $t('simpleIssuer.technical') }}</summary>
+              {{ guidedError }}
+            </details></StatusBox
+          >
         </template>
 
         <template v-else>
@@ -392,32 +420,59 @@ async function submit() {
           </UFormField>
         </template>
 
-        <StatusBox tone="warning">{{ $t('register.irreversible') }}</StatusBox>
+        <StatusBox tone="warning">{{ $t('simpleIssuer.publicModel') }}</StatusBox>
         <div>
           <UButton type="button" :disabled="pageBusy" @click="buildPreview">
-            {{ $t('register.prepare') }}
+            {{ $t('simpleIssuer.reviewModel') }}
           </UButton>
         </div>
       </div>
     </UCard>
 
     <StatusBox v-if="formError" tone="error" role="alert" :title="formErrorMessage">
-      <p v-if="formErrorMessage !== formError">
+      <details v-if="formErrorMessage !== formError">
+        <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ formError }}</code>
-      </p>
+      </details>
     </StatusBox>
 
-    <UCard v-if="canonicalSchema" class="mb-6">
-      <template #header>
-        <h2 class="text-xl font-semibold">{{ $t('register.canonical') }}</h2>
-      </template>
-      <JsonBlock :code="canonicalSchema" />
-      <p class="text-sm break-all text-muted">
-        {{ memoByteLength }} bytes · <code>{{ schemaDigestHex }}</code>
-      </p>
+    <UCard v-if="modelSummary" class="mb-6" data-testid="schema-review">
+      <template #header
+        ><h2 class="text-xl font-semibold">{{ $t('simpleIssuer.modelReview') }}</h2></template
+      >
+      <h3 class="font-semibold">{{ modelSummary.name }}</h3>
+      <p class="mt-2 text-muted">{{ modelSummary.description }}</p>
+      <dl class="mt-4 grid gap-3">
+        <div
+          v-for="(field, name) in modelSummary.fields"
+          :key="name"
+          class="flex flex-wrap justify-between gap-2"
+        >
+          <dt class="font-medium">{{ name }}</dt>
+          <dd>
+            {{ $t(`simpleIssuer.fieldTypes.${field.type}`)
+            }}<span v-if="field.optional"> · {{ $t('simpleIssuer.optional') }}</span>
+          </dd>
+        </div>
+      </dl>
+      <details class="mt-5">
+        <summary class="cursor-pointer text-sm text-muted">
+          {{ $t('simpleIssuer.technical') }}
+        </summary>
+        <JsonBlock class="mt-3" :code="canonicalSchema" />
+        <p class="text-sm break-all text-muted">
+          {{ memoByteLength }} bytes · <code>{{ schemaDigestHex }}</code>
+        </p>
+      </details>
     </UCard>
 
-    <TransactionPreview :transaction="transaction" :busy="pageBusy" @confirm="submit" />
+    <TransactionPreview
+      :transaction="transaction"
+      :busy="pageBusy"
+      compact
+      :confirm-label="$t('simpleIssuer.publishModel')"
+      @confirm="submit"
+    />
     <BusinessFinality
       v-if="result"
       :tx-hash="result.txHash"
@@ -430,8 +485,19 @@ async function submit() {
       v-if="result?.businessConfirmation === 'confirmed' && result.businessEvidence?.schemaUid"
       tone="success"
     >
-      <NuxtLinkLocale :to="`/schemas/${result.businessEvidence.schemaUid}`">
-        {{ $t('register.openSchema') }}
+      <NuxtLinkLocale
+        :to="
+          issuerContext
+            ? {
+                path: '/issuer/schemas',
+                query: route.query.organizationId
+                  ? { organizationId: route.query.organizationId }
+                  : {},
+              }
+            : `/schemas/${result.businessEvidence.schemaUid}`
+        "
+      >
+        {{ $t(issuerContext ? 'simpleIssuer.openModels' : 'register.openSchema') }}
       </NuxtLinkLocale>
     </StatusBox>
   </UContainer>

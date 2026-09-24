@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { VerificationDimensions } from '../app/utils/credentialReview'
-import { presentationHeadline, presentationLink } from '../app/utils/presentationView'
+import {
+  presentationHeadline,
+  presentationTokenFromLink,
+  presentationLink,
+} from '../app/utils/presentationView'
 
 const valid: VerificationDimensions = {
   onChain: 'active',
@@ -66,5 +70,40 @@ describe('share link', () => {
     ).toThrow()
     expect(() => presentationLink('https://portal.example', '/p/locator', token)).toThrow()
     expect(() => presentationLink('https://portal.example', '/presentations', 'invalid')).toThrow()
+  })
+})
+
+describe('received presentation link', () => {
+  const token = 'x'.repeat(43)
+  it('accepts complete English and French sharing links from this portal', () => {
+    for (const path of ['/presentations', '/fr/presentations']) {
+      expect(
+        presentationTokenFromLink(
+          'https://portal.example',
+          ` https://portal.example${path}#${token} `,
+        ),
+      ).toBe(token)
+    }
+  })
+  it.each([
+    'https://foreign.example/presentations',
+    'https://portal.example.evil.test/presentations',
+    'http://portal.example/presentations',
+    'https://user:password@portal.example/presentations',
+    'https://portal.example/presentations?token=secret',
+    'https://portal.example/p/locator',
+    'javascript:alert(1)',
+  ])('rejects foreign or unrelated links without fetching them: %s', (input) => {
+    expect(() => presentationTokenFromLink('https://portal.example', `${input}#${token}`)).toThrow()
+  })
+  it('rejects bare references, missing and malformed fragments', () => {
+    for (const input of [
+      token,
+      '/presentations',
+      'https://portal.example/presentations',
+      'https://portal.example/presentations#invalid',
+    ]) {
+      expect(() => presentationTokenFromLink('https://portal.example', input)).toThrow()
+    }
   })
 })

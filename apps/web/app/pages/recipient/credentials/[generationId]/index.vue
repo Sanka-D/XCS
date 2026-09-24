@@ -94,7 +94,7 @@ useSeoMeta({
           :title="detail.schemaName ?? $t('recipient.credential')"
           :lead="detail.organizationName"
         />
-        <StatusPill :value="detail.status.state" />
+        <AttestationStatus :value="detail.status.state" />
         <p class="mt-3 text-muted">{{ $t(`recipient.visibility.${detail.visibility}`) }}</p>
         <section
           v-if="detail.visibility === 'private'"
@@ -142,8 +142,13 @@ useSeoMeta({
             $t('recipient.readError')
           }}</StatusBox>
           <template v-if="content">
-            <VerificationGrid :report="content.verification" />
-            <JsonBlock :code="JSON.stringify(content.claims, null, 2)" />
+            <AttestationFields class="mt-5" :claims="content.claims" />
+            <details class="mt-5 rounded border border-default p-4">
+              <summary class="cursor-pointer font-semibold">
+                {{ $t('simpleRecipient.verificationDetails') }}
+              </summary>
+              <VerificationGrid class="mt-3" :report="content.verification" />
+            </details>
           </template>
         </section>
       </template>

@@ -152,7 +152,7 @@ const formErrorMessage = computed(() => {
   if (formError.value === 'SIGNED_TRANSACTION_NOT_INDEXED') {
     return t('issue.errors.hostedNotIndexed')
   }
-  return formError.value
+  return props.issuerContext ? t('simpleIssuer.error') : formError.value
 })
 
 const formErrorIsLocalized = computed(
@@ -595,11 +595,7 @@ const credentialLink = computed(() => {
 
 <template>
   <UContainer class="py-10 sm:py-14">
-    <PageHeader
-      eyebrow="Credential issuer"
-      :title="$t('issue.title')"
-      :lead="$t('issue.description')"
-    />
+    <PageHeader :title="$t('simpleIssuer.issueTitle')" :lead="$t('simpleIssuer.issueLead')" />
     <StatusBox v-if="!issuerContext" tone="warning">{{ $t('issue.noPii') }}</StatusBox>
     <HostedPublicationRecovery v-if="!issuerContext" :exclude-id="publicationJobId" />
     <IssuerEngineRecovery
@@ -623,15 +619,19 @@ const credentialLink = computed(() => {
       <div class="grid gap-5">
         <template v-if="issuerContext">
           <p>
-            <strong>{{ $t('issuer.engine.schema') }}:</strong> {{ issuerContext.schemaName }}
+            <strong>{{ $t('simpleIssuer.model') }}:</strong> {{ issuerContext.schemaName }}
           </p>
           <p>
-            <strong>{{ $t('issuer.engine.recipient') }}:</strong> {{ issuerContext.recipientLabel }}
+            <strong>{{ $t('simpleIssuer.recipient') }}:</strong> {{ issuerContext.recipientLabel }}
           </p>
-          <p class="break-all">
-            <strong>{{ $t('issuer.engine.linkedWallet') }}:</strong>
-            {{ issuerContext.subjectAddress }}
-          </p>
+          <details>
+            <summary class="cursor-pointer text-sm text-muted">
+              {{ $t('simpleIssuer.accountDetails') }}
+            </summary>
+            <p class="mt-2 break-all">
+              <code>{{ issuerContext.subjectAddress }}</code>
+            </p>
+          </details>
         </template>
         <UFormField v-if="!issuerContext" label="Schema UID">
           <UInput
@@ -654,49 +654,46 @@ const credentialLink = computed(() => {
 
         <div class="flex flex-wrap gap-3">
           <UButton
-            size="sm"
-            color="neutral"
-            :variant="claimsEditorMode === 'guided' ? 'solid' : 'outline'"
-            type="button"
-            :aria-pressed="claimsEditorMode === 'guided'"
-            :disabled="submissionBusy"
-            @click="selectClaimsEditorMode('guided')"
-          >
-            {{ $t('issue.guidedClaims') }}
-          </UButton>
-          <UButton
-            size="sm"
-            color="neutral"
-            :variant="claimsEditorMode === 'json' ? 'solid' : 'outline'"
-            type="button"
-            :aria-pressed="claimsEditorMode === 'json'"
-            :disabled="submissionBusy"
-            @click="selectClaimsEditorMode('json')"
-          >
-            {{ $t('issue.jsonClaims') }}
-          </UButton>
-          <UButton
-            size="sm"
+            v-if="claimsEditorMode === 'json'"
             color="neutral"
             variant="outline"
-            type="button"
+            :disabled="submissionBusy"
+            @click="selectClaimsEditorMode('guided')"
+            >{{ $t('simpleIssuer.guided') }}</UButton
+          >
+          <UButton
+            v-if="!issuerContext || (guidedClaims.length === 0 && !schemaLoadBusy)"
+            color="neutral"
+            variant="outline"
             :disabled="submissionBusy || schemaLoadBusy"
             @click="loadGuidedClaimForm"
+            >{{ $t('issue.loadSchema') }}</UButton
           >
-            {{ $t('issue.loadSchema') }}
-          </UButton>
+          <details>
+            <summary class="cursor-pointer text-sm text-muted">
+              {{ $t('simpleIssuer.advanced') }}
+            </summary>
+            <UButton
+              class="mt-2"
+              color="neutral"
+              variant="outline"
+              :disabled="submissionBusy"
+              @click="selectClaimsEditorMode('json')"
+              >{{ $t('simpleIssuer.editJson') }}</UButton
+            >
+          </details>
         </div>
 
         <template v-if="claimsEditorMode === 'guided'">
           <p v-if="loadedSchemaName" class="text-sm text-muted">
-            {{ $t('issue.loadedSchema', { name: loadedSchemaName }) }}
+            {{ $t('simpleIssuer.model') }} : {{ loadedSchemaName }}
           </p>
           <div v-if="guidedClaims.length" class="grid gap-4">
             <UFormField
               v-for="field in guidedClaims"
               :key="field.name"
               :label="field.name"
-              :hint="`${field.type} · ${$t(field.optional ? 'issue.optionalField' : 'issue.requiredField')}`"
+              :hint="`${$t(`simpleIssuer.fieldTypes.${field.type}`)} · ${$t(field.optional ? 'issue.optionalField' : 'issue.requiredField')}`"
             >
               <USelect
                 v-if="field.type === 'bool'"
@@ -704,8 +701,8 @@ const credentialLink = computed(() => {
                 v-model="field.value"
                 :items="[
                   { label: '—', value: undefined },
-                  { label: 'true', value: 'true' },
-                  { label: 'false', value: 'false' },
+                  { label: $t('simpleIssuer.yes'), value: 'true' },
+                  { label: $t('simpleIssuer.no'), value: 'false' },
                 ]"
                 :required="!field.optional"
                 :disabled="submissionBusy"
@@ -723,7 +720,11 @@ const credentialLink = computed(() => {
           </div>
           <p v-else class="text-sm text-muted">{{ $t('issue.advancedClaimsHint') }}</p>
           <StatusBox v-if="guidedClaimsError && guidedClaims.length" tone="error">
-            {{ guidedClaimsError }}
+            <p>{{ $t('simpleIssuer.fieldError') }}</p>
+            <details>
+              <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
+              <code>{{ guidedClaimsError }}</code>
+            </details>
           </StatusBox>
         </template>
         <template v-else>
@@ -739,21 +740,21 @@ const credentialLink = computed(() => {
         </template>
 
         <div v-if="issuerContext" class="grid gap-4">
-          <UFormField :label="$t('issuer.engine.visibility')">
+          <UFormField :label="$t('simpleIssuer.visibility')">
             <USelect
               v-model="visibility"
               :disabled="submissionBusy"
               :items="[
-                { label: $t('issuer.engine.private'), value: 'private' },
-                { label: $t('issuer.engine.public'), value: 'public' },
+                { label: $t('simpleIssuer.private'), value: 'private' },
+                { label: $t('simpleIssuer.public'), value: 'public' },
               ]"
             />
           </UFormField>
           <StatusBox v-if="visibility === 'public'" tone="warning">{{
-            $t('issuer.engine.publicWarning')
+            $t('simpleIssuer.publicWarning')
           }}</StatusBox>
           <fieldset v-else class="grid gap-2">
-            <legend>{{ $t('issuer.engine.publicFields') }}</legend>
+            <legend>{{ $t('simpleIssuer.publicFields') }}</legend>
             <UCheckbox
               v-for="name in Object.keys(claimObject)"
               :key="name"
@@ -769,7 +770,7 @@ const credentialLink = computed(() => {
               "
             />
           </fieldset>
-          <p class="text-sm text-muted">{{ $t('issuer.engine.onChainPublic') }}</p>
+          <p class="text-sm text-muted">{{ $t('simpleIssuer.publicMetadata') }}</p>
         </div>
         <StatusBox
           v-else-if="hostedPayloadsEnabled"
@@ -790,7 +791,7 @@ const credentialLink = computed(() => {
           />
         </UFormField>
 
-        <UFormField :label="$t('issue.expiration')">
+        <UFormField :label="$t('simpleIssuer.expiration')">
           <UInput
             id="expiration"
             v-model="expiration"
@@ -800,7 +801,7 @@ const credentialLink = computed(() => {
         </UFormField>
         <div>
           <UButton type="button" :disabled="submissionBusy" @click="buildPreview">
-            {{ $t('issue.prepare') }}
+            {{ $t('simpleIssuer.reviewIssue') }}
           </UButton>
         </div>
       </div>
@@ -813,23 +814,24 @@ const credentialLink = computed(() => {
       :title="formErrorMessage"
       role="alert"
     >
-      <p v-if="formErrorIsLocalized">
+      <details v-if="formErrorIsLocalized">
+        <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ formError }}</code>
-      </p>
+      </details>
     </StatusBox>
 
     <UCard v-if="canonicalPayload" class="mb-6">
       <template #header>
-        <h2 class="text-xl font-semibold">{{ $t('issue.payload') }}</h2>
+        <h2 class="text-xl font-semibold">{{ $t('simpleIssuer.reviewTitle') }}</h2>
       </template>
       <div v-if="issuerContext" class="grid gap-4 sm:grid-cols-2">
         <section>
-          <h3 class="font-semibold">{{ $t('issuer.engine.publicPreview') }}</h3>
-          <JsonBlock :code="JSON.stringify(visibilityPreview.public, null, 2)" />
+          <h3 class="font-semibold">{{ $t('simpleIssuer.publicPreview') }}</h3>
+          <AttestationFields :claims="visibilityPreview.public" />
         </section>
         <section>
-          <h3 class="font-semibold">{{ $t('issuer.engine.privatePreview') }}</h3>
-          <JsonBlock :code="JSON.stringify(visibilityPreview.private, null, 2)" />
+          <h3 class="font-semibold">{{ $t('simpleIssuer.privatePreview') }}</h3>
+          <AttestationFields :claims="visibilityPreview.private" />
         </section>
       </div>
       <JsonBlock v-else :code="canonicalPayload" />
@@ -837,9 +839,21 @@ const credentialLink = computed(() => {
         v-if="issuerContext"
         v-model="visibilityReviewed"
         :disabled="submissionBusy"
-        :label="$t('issuer.engine.visibilityReviewed')"
+        :label="$t('simpleIssuer.visibilityReviewed')"
       />
-      <p class="text-sm break-all">
+      <details v-if="issuerContext" class="mt-4">
+        <summary class="cursor-pointer text-sm text-muted">
+          {{ $t('simpleIssuer.technical') }}
+        </summary>
+        <p class="mt-2 text-sm break-all">
+          <code>{{ credentialUri }}</code>
+        </p>
+        <JsonBlock class="mt-3" :code="canonicalPayload" />
+        <UButton class="mt-3" color="neutral" variant="outline" @click="downloadPayload">{{
+          $t('simpleIssuer.download')
+        }}</UButton>
+      </details>
+      <p v-else class="text-sm break-all">
         <code>{{ credentialUri }}</code>
       </p>
       <UCheckbox
@@ -848,7 +862,7 @@ const credentialLink = computed(() => {
         :disabled="submissionBusy"
         :label="$t('issue.hosted.consent', { url: credentialUri.split('#')[0] })"
       />
-      <div class="my-4">
+      <div v-if="!issuerContext" class="my-4">
         <UButton color="neutral" variant="outline" type="button" @click="downloadPayload">
           {{ $t('issue.download') }}
         </UButton>
@@ -872,6 +886,7 @@ const credentialLink = computed(() => {
       :transaction="transaction"
       :busy="submissionBusy"
       :compact="!!issuerContext"
+      :confirm-label="$t('simpleIssuer.sendIssue')"
       @confirm="submit"
     />
     <StatusBox v-if="pendingPublication" tone="notice" role="status">

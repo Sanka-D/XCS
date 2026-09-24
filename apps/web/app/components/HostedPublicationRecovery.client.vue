@@ -13,6 +13,7 @@ const { publishHostedPayload } = useXcsApi()
 const jobs = ref<HostedPublicationJob[]>([])
 const busyId = ref('')
 const error = ref('')
+const errorDetails = ref('')
 const publishedLink = ref('')
 const invalidKeys = ref<string[]>([])
 const visibleJobs = computed(() => jobs.value.filter((job) => job.id !== props.excludeId))
@@ -37,6 +38,7 @@ async function publish(job: HostedPublicationJob) {
   if (busyId.value) return
   busyId.value = job.id
   error.value = ''
+  errorDetails.value = ''
   try {
     const journal = new IndexedDbOperationJournal()
     await createHostedPublicationQueue(localStorage).publish(
@@ -56,7 +58,8 @@ async function publish(job: HostedPublicationJob) {
       error.value = t('issue.hosted.journalCleanupFailed')
     }
   } catch (cause) {
-    error.value = `${t('issue.hosted.retryFailed')} ${cause instanceof Error ? cause.message : ''}`
+    error.value = t('issue.hosted.retryFailed')
+    errorDetails.value = cause instanceof Error ? cause.message : ''
   } finally {
     busyId.value = ''
   }
@@ -109,7 +112,13 @@ watch(() => props.excludeId, refresh)
   >
     <h2 class="mb-2 text-xl font-semibold">{{ $t('issue.hosted.recoveryTitle') }}</h2>
     <p class="mb-4 text-sm text-muted">{{ $t('issue.hosted.recoveryDescription') }}</p>
-    <StatusBox v-if="error" tone="error">{{ error }}</StatusBox>
+    <StatusBox v-if="error" tone="error">
+      <p>{{ error }}</p>
+      <details v-if="errorDetails" class="mt-3">
+        <summary class="cursor-pointer">{{ $t('simpleUi.technicalDetails') }}</summary>
+        <p class="break-words">{{ errorDetails }}</p>
+      </details>
+    </StatusBox>
     <StatusBox v-for="key in invalidKeys" :key="key" tone="error">
       <p>{{ $t('issue.hosted.corruptRecovery') }}</p>
       <UButton
@@ -124,15 +133,11 @@ watch(() => props.excludeId, refresh)
     <StatusBox v-if="publishedLink" tone="success">
       <NuxtLinkLocale :to="publishedLink">{{ $t('issue.credentialLink') }}</NuxtLinkLocale>
     </StatusBox>
-    <StatusBox v-for="job in visibleJobs" :key="job.id" tone="notice">
-      <p>
-        <code>{{ job.payload.credentialUri.split('#')[0] }}</code>
-      </p>
+    <StatusBox v-for="(job, index) in visibleJobs" :key="job.id" tone="notice">
+      <p class="font-medium">{{ $t('simpleUi.pendingPublication', { number: index + 1 }) }}</p>
       <p v-if="!job.payload.transactionHash">{{ $t('issue.hosted.signatureMissing') }}</p>
-      <p v-else>
-        <code>{{ job.payload.transactionHash }}</code>
-      </p>
-      <div class="flex flex-wrap gap-2">
+      <p v-else>{{ $t('simpleUi.signedPublicationPending') }}</p>
+      <div class="mt-3 flex flex-wrap gap-2">
         <UButton
           v-if="job.payload.transactionHash"
           :disabled="Boolean(busyId)"
@@ -152,6 +157,15 @@ watch(() => props.excludeId, refresh)
           {{ $t('issue.hosted.downloadRecovery') }}
         </UButton>
       </div>
+      <details class="mt-3" data-testid="publication-technical-details">
+        <summary class="cursor-pointer">{{ $t('simpleUi.technicalDetails') }}</summary>
+        <p class="break-all">
+          <code>{{ job.payload.credentialUri.split('#')[0] }}</code>
+        </p>
+        <p v-if="job.payload.transactionHash" class="break-all">
+          <code>{{ job.payload.transactionHash }}</code>
+        </p>
+      </details>
     </StatusBox>
   </UCard>
 </template>

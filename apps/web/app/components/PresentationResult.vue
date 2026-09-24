@@ -26,9 +26,15 @@ const headline = computed(() =>
 </script>
 <template>
   <article data-testid="presentation-result">
-    <h1 class="text-2xl font-bold" data-testid="presentation-headline">
-      {{ $t(`presentation.headlines.${headline}`) }}
+    <h1 class="text-2xl font-bold">
+      {{ result.credential.schemaName ?? $t('recipient.credential') }}
     </h1>
+    <p class="mt-2 text-lg">
+      {{ $t('simpleUi.issuedBy', { name: result.credential.organizationName }) }}
+    </p>
+    <h2 class="mt-5 text-xl font-semibold" data-testid="presentation-headline">
+      {{ $t(`presentation.headlines.${headline}`) }}
+    </h2>
     <p class="mt-2 text-sm text-muted">{{ $t('presentation.limitation') }}</p>
     <p v-if="result.verification.payload === 'not_checked'" class="mt-2 font-semibold">
       {{ $t('presentation.partialHelp') }}
@@ -57,8 +63,6 @@ const headline = computed(() =>
       >
         <h2 class="font-semibold">{{ $t('roleJourney.ledgerRecipientTitle') }}</h2>
         <p class="mt-2">{{ $t(`roleJourney.ledgerStatuses.${result.credential.status.state}`) }}</p>
-        <p class="mt-3 text-sm">{{ $t('recipient.subjectWallet') }}</p>
-        <p class="mt-1 break-all font-mono text-sm">{{ result.credential.subjectAddress }}</p>
       </section>
       <section
         class="rounded border border-default p-4"
@@ -78,35 +82,23 @@ const headline = computed(() =>
         </p>
       </section>
     </div>
-    <VerificationGrid :report="result.verification" test-id-prefix="presentation" :note="false" />
-    <h2 class="text-xl font-semibold">
-      {{ result.credential.schemaName ?? $t('recipient.credential') }}
-    </h2>
-    <p class="mt-2">{{ result.credential.organizationName }}</p>
+
     <p class="mt-4 font-semibold">
       {{ $t(result.scope === 'full' ? 'presentation.fullFields' : 'presentation.publicFields') }}
     </p>
     <p v-if="!Object.keys(result.claims).length" class="mt-3 text-muted">
       {{ $t('presentation.noFields') }}
     </p>
-    <dl v-else class="mt-3 grid gap-3">
-      <div
-        v-for="(value, key) in result.claims"
-        :key="key"
-        class="rounded border border-default p-3"
-      >
-        <dt class="font-semibold">{{ key }}</dt>
-        <dd class="mt-1 break-words whitespace-pre-wrap">
-          {{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}
-        </dd>
-      </div>
-    </dl>
+    <AttestationFields v-else class="mt-3" :claims="result.claims" />
     <StatusBox v-if="result.requiresAuthorization" class="mt-5">{{
       $t('presentation.authorizationHelp')
     }}</StatusBox>
     <details class="mt-5 rounded border border-default p-4">
-      <summary class="cursor-pointer font-semibold">{{ $t('recipient.evidence') }}</summary>
+      <summary class="cursor-pointer font-semibold">{{ $t('simpleUi.technicalDetails') }}</summary>
+      <VerificationGrid :report="result.verification" test-id-prefix="presentation" :note="false" />
       <MetadataList class="mt-3">
+        <dt>{{ $t('recipient.subjectWallet') }}</dt>
+        <dd class="break-all font-mono">{{ result.credential.subjectAddress }}</dd>
         <dt>{{ $t('recipient.issuerWallet') }}</dt>
         <dd class="break-all font-mono">{{ result.credential.issuerAddress }}</dd>
         <dt>{{ $t('recipient.generation') }}</dt>

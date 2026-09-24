@@ -8,7 +8,7 @@ import {
 definePageMeta({ layout: 'issuer', middleware: ['auth', 'role'], requiredRole: 'issuer' })
 const route = useRoute()
 const localePath = useLocalePath()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const api = useIssuerEngineApi()
 const { user } = useAuth()
 const inviteId = String(route.params.inviteId)
@@ -50,7 +50,7 @@ const context = computed<IssuerIssueEngineContext | undefined>(() => {
     schemaUid: initial.schema.schemaUid,
     schemaName: initial.schema.name,
     subjectAddress: subject,
-    recipientLabel: initial.recipient.displayName ?? initial.recipient.id,
+    recipientLabel: initial.recipient.displayName ?? t('simpleIssuer.recipientFallback'),
     async beforeSign(publisher) {
       assertIssuanceContextUnchanged(initial, await api.issuance(inviteId), subject, publisher)
     },
@@ -71,16 +71,22 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       <UButton :to="localePath('/issuer')" color="neutral" variant="outline">{{
         $t('issuer.engine.back')
       }}</UButton>
-      <StatusBox v-if="error" tone="error">{{ error }}</StatusBox>
+      <StatusBox v-if="error" tone="error"
+        ><p>{{ $t('simpleIssuer.error') }}</p>
+        <details>
+          <summary>{{ $t('simpleIssuer.technical') }}</summary>
+          <code>{{ error }}</code>
+        </details></StatusBox
+      >
       <StatusBox v-else-if="!wallets.length" tone="warning">{{
         $t('issuer.engine.walletRequired')
       }}</StatusBox>
       <UCard v-if="issuance" class="mt-4">
         <p>
-          <strong>{{ $t('issuer.engine.deliveryContact') }} :</strong>
+          <strong>{{ $t('simpleIssuer.contactEmail') }} :</strong>
           {{ issuance.invite.deliveryEmail ?? '—' }}
         </p>
-        <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.deliveryIsContact') }}</p>
+        <p class="mt-2 text-sm text-muted">{{ $t('simpleIssuer.contactHelp') }}</p>
         <p v-if="selectedWallet?.verifiedAt" class="mt-3">
           {{ $t('roleJourney.walletVerifiedAt', { date: date(selectedWallet.verifiedAt) }) }}
         </p>
@@ -89,7 +95,12 @@ useSeoMeta({ robots: 'noindex,nofollow' })
         <USelect
           v-model="subjectAddress"
           :disabled="engineBusy"
-          :items="wallets.map((wallet) => ({ label: wallet.address, value: wallet.address }))"
+          :items="
+            wallets.map((wallet) => ({
+              label: `${wallet.address.slice(0, 6)}…${wallet.address.slice(-4)}`,
+              value: wallet.address,
+            }))
+          "
         />
       </UFormField>
       <UButton v-if="savedLink" class="mt-4" :to="localePath(savedLink)">{{

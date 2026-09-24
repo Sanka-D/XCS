@@ -43,12 +43,15 @@ test('signs in through OIDC, persists a session, denies issuer access, links and
   try {
     await page.reload({ waitUntil: 'commit' })
     await expect(page.getByTestId('linked-wallets').locator('tbody tr')).toHaveCount(1)
-    await expect(page.getByTestId('linked-wallets').getByRole('button')).toBeDisabled()
+    await expect(
+      page.getByTestId('linked-wallets').getByRole('button', { includeHidden: true }),
+    ).toBeDisabled()
     await expect(page.getByTestId('auth-logout')).toBeDisabled()
   } finally {
     releaseScripts()
     await page.unrouteAll({ behavior: 'wait' })
   }
+  await page.locator('summary').filter({ hasText: 'Manage my wallet' }).click()
   await page.getByTestId('linked-wallets').getByRole('button').click()
   await expect(page.getByTestId('linked-wallets')).toHaveCount(0)
   await expect(page.getByTestId('wallet-link-continue')).toHaveCount(0)

@@ -155,17 +155,19 @@ test('requires explicit opening, keeps the bearer out of URLs and reports a publ
   await expect(page.getByRole('heading', { name: 'Partially checked', exact: true })).toBeVisible()
   await expect(page.getByText('Synthetic course', { exact: true })).toBeVisible()
   await expect(page.getByText('Synthetic private person')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Who issued it?', exact: true })).toContainText(
+    'Issuer organization approved for this portal',
+  )
   await expect(
-    page.getByRole('region', { name: 'Commons portal admission', exact: true }),
-  ).toContainText('Issuer organization approved for this portal')
-  await expect(
-    page.getByRole('region', { name: 'Attestation recipient on the ledger', exact: true }),
-  ).toContainText(credential.subjectAddress)
+    page.getByRole('region', { name: 'Has it been accepted?', exact: true }),
+  ).toContainText('The recipient accepted this attestation with their wallet.')
   await expect(
     page.getByText('No signed wallet proof was provided for this link.', { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText('Payload: not checked.', { exact: false })).toBeVisible()
-  const limitation = page.getByText('These checks describe the available technical evidence.', {
+  await expect(
+    page.getByText('Only the shared information is shown.', { exact: false }),
+  ).toBeVisible()
+  const limitation = page.getByText('These checks confirm the available records and signatures.', {
     exact: false,
   })
   expect(
@@ -211,17 +213,17 @@ test('distinguishes Commons approval, ledger acceptance and a dated wallet signa
   await expect(
     page.getByRole('heading', { name: 'Issuer trust not established', exact: true }),
   ).toBeVisible()
-  await expect(
-    page.getByRole('region', { name: 'Commons portal admission', exact: true }),
-  ).toContainText('Issuer organization approved for this portal')
+  await expect(page.getByRole('region', { name: 'Who issued it?', exact: true })).toContainText(
+    'Issuer organization approved for this portal',
+  )
   const ledger = page.getByRole('region', {
-    name: 'Attestation recipient on the ledger',
+    name: 'Has it been accepted?',
     exact: true,
   })
-  await expect(ledger).toContainText(credential.subjectAddress)
+  await expect(ledger).toContainText('The recipient accepted this attestation with their wallet.')
   await expect(ledger).toContainText('accepted')
   const proof = page.getByRole('region', {
-    name: 'Recipient wallet and sharing proof',
+    name: 'Who authorized this link?',
     exact: true,
   })
   await expect(proof).toContainText('Wallet signature verified when this link was authorized')
@@ -609,3 +611,61 @@ test('reopens verifier history through a record reference and removes old claims
   await expect(page.getByTestId('presentation-result')).toHaveCount(0)
   await expect(page.getByText('This record could not be reopened.', { exact: false })).toBeVisible()
 })
+
+for (const locale of ['en', 'fr'] as const) {
+  test(`opens a pasted sharing link without identifiers and hides technical evidence (${locale})`, async ({
+    page,
+  }) => {
+    await session(page, false)
+    let opens = 0
+    await page.route('**/api/presentations/resolve', (route) => {
+      opens += 1
+      expect(route.request().postDataJSON()).toEqual({ token })
+      return route.fulfill({
+        json: {
+          ...publicResult,
+          claims: {
+            course: 'Human readable course',
+            passed: true,
+            modules: ['First module', 'Second module'],
+          },
+        },
+      })
+    })
+    await enter(page, locale === 'fr' ? '/fr/presentations' : '/presentations')
+    const input = page.locator('#received-presentation-link')
+    await expect(input).toBeVisible()
+    await input.fill('https://foreign.example/presentations#' + token)
+    await page
+      .getByRole('button', {
+        name: locale === 'fr' ? 'Vérifier l’attestation' : 'Verify the attestation',
+        exact: true,
+      })
+      .click()
+    await expect(page.getByRole('alert')).toBeVisible()
+    expect(opens).toBe(0)
+    await input.fill(new URL(`/presentations#${token}`, page.url()).href)
+    await page
+      .getByRole('button', {
+        name: locale === 'fr' ? 'Vérifier l’attestation' : 'Verify the attestation',
+        exact: true,
+      })
+      .click()
+    const result = page.getByTestId('presentation-result')
+    await expect(result.getByText('Human readable course', { exact: true })).toBeVisible()
+    await expect(result.getByText(locale === 'fr' ? 'Oui' : 'Yes', { exact: true })).toBeVisible()
+    await expect(result.getByText('First module', { exact: true })).toBeVisible()
+    await expect(result.getByText(credential.subjectAddress, { exact: true })).not.toBeVisible()
+    await expect(result.getByText(generationId, { exact: true })).not.toBeVisible()
+    const details = result.locator('details').first()
+    await details.locator('summary').first().click()
+    await expect(result.getByText(generationId, { exact: true })).toBeVisible()
+    expect(new URL(page.url()).hash).toBe('')
+    expect(
+      await page.evaluate(() =>
+        JSON.stringify({ ...localStorage, ...sessionStorage, history: history.state }),
+      ),
+    ).not.toContain(token)
+    expect(opens).toBe(1)
+  })
+}

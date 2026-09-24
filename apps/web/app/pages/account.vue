@@ -151,10 +151,25 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
 
       <section class="mt-8" aria-labelledby="account-wallets">
         <h2 id="account-wallets" class="text-2xl font-semibold">{{ $t('auth.linkedWallets') }}</h2>
-        <section class="my-5 rounded border border-default p-5" aria-labelledby="wallet-onboarding">
-          <h3 id="wallet-onboarding" class="text-lg font-semibold">
+        <StatusBox v-if="hasLinkedWallet" class="mt-6" tone="success">{{
+          $t('roleJourney.walletReady')
+        }}</StatusBox>
+        <UButton
+          v-if="hasLinkedWallet"
+          :to="returnPath"
+          class="mt-3"
+          data-testid="wallet-link-continue"
+          >{{ $t('roleJourney.continueRecipient') }}</UButton
+        >
+
+        <details
+          class="my-5 rounded border border-default p-5"
+          :open="!hasLinkedWallet && !canLink"
+          aria-labelledby="wallet-onboarding"
+        >
+          <summary id="wallet-onboarding" class="cursor-pointer text-lg font-semibold">
             {{ $t('roleJourney.walletGuide') }}
-          </h3>
+          </summary>
           <ol class="mt-4 list-decimal space-y-4 pl-5">
             <li>
               <strong>{{ $t('roleJourney.setupTitle') }}</strong>
@@ -173,55 +188,66 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
               <p class="mt-1 text-sm text-muted">{{ $t('auth.walletLinkHelp') }}</p>
             </li>
           </ol>
-          <ClientOnly
-            ><div class="mt-5"><WalletButton proof-only test-id-prefix="wallet-link" /></div
-          ></ClientOnly>
-          <p class="mt-3 text-sm text-muted">{{ $t('roleJourney.walletSelectionHelp') }}</p>
-        </section>
+        </details>
+        <ClientOnly
+          ><div class="mt-5"><WalletButton proof-only test-id-prefix="wallet-link" /></div
+        ></ClientOnly>
+        <p v-if="!canLink && !hasLinkedWallet" class="mt-3 text-sm text-muted">
+          {{ $t('roleJourney.walletSelectionHelp') }}
+        </p>
         <p class="mt-3 text-toned">{{ $t('auth.walletLinkHelp') }}</p>
-        <p class="mt-2 text-sm text-muted">{{ $t('auth.masterKeyOnly') }}</p>
+        <details class="mt-2 text-sm text-muted">
+          <summary class="cursor-pointer">{{ $t('simpleRecipient.walletCompatibility') }}</summary>
+          <p class="mt-2">{{ $t('auth.masterKeyOnly') }}</p>
+        </details>
         <p v-if="!user.wallets.length" class="mt-4 text-muted">{{ $t('auth.noWallets') }}</p>
-        <div v-else class="mt-4 overflow-x-auto">
-          <table class="w-full text-left text-sm" data-testid="linked-wallets">
-            <caption class="sr-only">
-              {{
-                $t('auth.linkedWallets')
-              }}
-            </caption>
-            <thead>
-              <tr class="border-b border-default">
-                <th class="p-3" scope="col">{{ $t('auth.walletAddress') }}</th>
-                <th class="p-3" scope="col">{{ $t('auth.network') }}</th>
-                <th class="p-3" scope="col">{{ $t('auth.verifiedAt') }}</th>
-                <th class="p-3" scope="col">{{ $t('auth.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="linked in user.wallets" :key="linked.id" class="border-b border-default">
-                <td class="p-3 font-mono break-all">{{ linked.address }}</td>
-                <td class="p-3">
-                  {{ linked.networkId === 1 ? 'XRPL Testnet' : linked.networkId }}
-                </td>
-                <td class="p-3">{{ formatDate(linked.verifiedAt) }} UTC</td>
-                <td class="p-3">
-                  <UButton
-                    :disabled="!mounted || busy"
-                    color="neutral"
-                    variant="outline"
-                    :aria-label="$t('auth.unlinkAddress', { address: linked.address })"
-                    @click="action(() => auth.unlinkWallet(linked.id), 'auth.walletUnlinked')"
-                    >{{ $t('auth.unlink') }}</UButton
-                  >
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <details v-else class="mt-4 rounded border border-default p-4">
+          <summary class="cursor-pointer font-semibold">
+            {{ $t('simpleRecipient.manageWallet') }}
+          </summary>
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-left text-sm" data-testid="linked-wallets">
+              <caption class="sr-only">
+                {{
+                  $t('auth.linkedWallets')
+                }}
+              </caption>
+              <thead>
+                <tr class="border-b border-default">
+                  <th class="p-3" scope="col">{{ $t('auth.walletAddress') }}</th>
+                  <th class="p-3" scope="col">{{ $t('auth.network') }}</th>
+                  <th class="p-3" scope="col">{{ $t('auth.verifiedAt') }}</th>
+                  <th class="p-3" scope="col">{{ $t('auth.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="linked in user.wallets" :key="linked.id" class="border-b border-default">
+                  <td class="p-3 font-mono break-all">{{ linked.address }}</td>
+                  <td class="p-3">
+                    {{ linked.networkId === 1 ? 'XRPL Testnet' : linked.networkId }}
+                  </td>
+                  <td class="p-3">{{ formatDate(linked.verifiedAt) }} UTC</td>
+                  <td class="p-3">
+                    <UButton
+                      :disabled="!mounted || busy"
+                      color="neutral"
+                      variant="outline"
+                      :aria-label="$t('auth.unlinkAddress', { address: linked.address })"
+                      @click="action(() => auth.unlinkWallet(linked.id), 'auth.walletUnlinked')"
+                      >{{ $t('auth.unlink') }}</UButton
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
         <ClientOnly>
           <div class="mt-5">
-            <p v-if="walletAccount" class="mb-3 break-all font-mono text-sm">
-              {{ walletAccount.address }}
-            </p>
+            <details v-if="walletAccount && !isLinked" class="mb-3 text-sm">
+              <summary class="cursor-pointer">{{ $t('simpleRecipient.walletDetails') }}</summary>
+              <p class="mt-2 break-all font-mono">{{ walletAccount.address }}</p>
+            </details>
             <p v-if="!walletAccount" class="mb-3 text-muted">
               {{ $t('roleJourney.connectFirst') }}
             </p>
@@ -236,16 +262,6 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             >
           </div>
         </ClientOnly>
-        <StatusBox v-if="hasLinkedWallet" class="mt-6" tone="success">{{
-          $t('roleJourney.walletReady')
-        }}</StatusBox>
-        <UButton
-          v-if="hasLinkedWallet"
-          :to="returnPath"
-          class="mt-3"
-          data-testid="wallet-link-continue"
-          >{{ $t('roleJourney.continueRecipient') }}</UButton
-        >
         <UButton
           v-if="onboarding"
           :to="localePath('/account')"

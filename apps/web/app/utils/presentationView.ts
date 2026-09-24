@@ -41,6 +41,21 @@ export function recipientCredentialPath(profileId: string, generationId: string)
   return `/api/recipient/credentials/${encodeURIComponent(profileId)}/${encodeURIComponent(generationId)}`
 }
 
+/** Accept a complete link from this portal, never fetch a pasted foreign URL. */
+export function presentationTokenFromLink(origin: string, input: string): string {
+  const link = new URL(input.trim())
+  if (
+    link.origin !== new URL(origin).origin ||
+    link.username ||
+    link.password ||
+    link.search ||
+    !/^\/(?:fr\/)?presentations$/.test(link.pathname) ||
+    !/^#[A-Za-z0-9_-]{43}$/.test(link.hash)
+  )
+    throw new Error('PRESENTATION_LINK_INVALID')
+  return link.hash.slice(1)
+}
+
 /** The bearer is only part of a browser fragment; it is never a route or query parameter. */
 export function presentationLink(origin: string, pagePath: string, token: string): string {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) throw new Error('PRESENTATION_TOKEN_INVALID')

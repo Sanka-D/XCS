@@ -78,9 +78,11 @@ async function enter(page: Page, path: string) {
 }
 
 async function fillInvitation(page: Page) {
-  await page.getByRole('textbox', { name: 'Delivery email', exact: true }).fill(invitation.email)
   await page
-    .getByRole('combobox', { name: 'Schemas', exact: true })
+    .getByRole('textbox', { name: 'Email address for the invitation', exact: true })
+    .fill(invitation.email)
+  await page
+    .getByRole('combobox', { name: 'Attestation template', exact: true })
     .selectOption({ label: schema.displayName })
   await page
     .getByRole('textbox', { name: 'Optional message', exact: true })
@@ -93,7 +95,9 @@ test('shows organization schemas and invites recipients by named schema without 
   await mockIssuer(page)
   await enter(page, '/issuer')
   await expect(page).toHaveURL(/\/issuer\/schemas$/)
-  await expect(page.getByRole('heading', { name: 'Schemas', exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Attestation templates', exact: true }),
+  ).toBeVisible()
   await expect(page.getByRole('heading', { name: schema.displayName, exact: true })).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'Organization', exact: true })).toHaveValue(
     organizationId,
@@ -105,7 +109,7 @@ test('shows organization schemas and invites recipients by named schema without 
   await expect(page.getByRole('heading', { name: 'Recipients', exact: true })).toBeVisible()
   await expect(
     page
-      .getByRole('combobox', { name: 'Schemas', exact: true })
+      .getByRole('combobox', { name: 'Attestation template', exact: true })
       .getByRole('option', { name: schema.displayName }),
   ).toHaveCount(1)
   await expect(page.getByRole('textbox', { name: /uid/i })).toHaveCount(0)
@@ -174,18 +178,20 @@ test('submits a private application document with CSRF then displays pending rev
   await page
     .getByRole('textbox', { name: 'Contact email', exact: true })
     .fill('responsible@example.test')
-  await page.getByRole('textbox', { name: 'Jurisdiction', exact: true }).fill('France')
   await page
-    .getByRole('textbox', { name: 'About the organization', exact: true })
+    .getByRole('textbox', { name: 'Country or territory of registration', exact: true })
+    .fill('France')
+  await page
+    .getByRole('textbox', { name: 'What does your organization do?', exact: true })
     .fill('A synthetic school for a browser test.')
   await page
-    .getByRole('textbox', { name: 'Purpose of issuing', exact: true })
+    .getByRole('textbox', { name: 'What attestations would you like to issue?', exact: true })
     .fill('Award training qualifications.')
   const document = Buffer.from('%PDF-1.4\nSynthetic application evidence\n')
   await page
     .locator('input[type="file"]')
     .setInputFiles({ name: 'evidence.pdf', mimeType: 'application/pdf', buffer: document })
-  await page.getByRole('button', { name: 'Submit application', exact: true }).click()
+  await page.getByRole('button', { name: 'Send for review', exact: true }).click()
   await expect(page).toHaveURL(
     new RegExp(`/issuer/application\\?organizationId=${organizationId}$`),
   )
@@ -236,9 +242,7 @@ test('sends an invitation and resends only after explicit link replacement confi
   expect(deliveries).toHaveLength(1)
   await page.getByRole('button', { name: 'Replace and resend link', exact: true }).click()
   await page.getByRole('button', { name: 'Confirm', exact: true }).click()
-  await expect(
-    page.getByText('Action recorded. Check delivery and ledger status below.', { exact: true }),
-  ).toBeVisible()
+  await expect(page.getByText('Update saved.', { exact: true })).toBeVisible()
   expect(deliveries).toHaveLength(2)
   expect(deliveries[1]).toEqual({ path: `/api/issuer/invites/${inviteId}/resend`, body: {} })
 })
@@ -254,9 +258,7 @@ test('surfaces a server refusal without reporting a successful invitation', asyn
   await fillInvitation(page)
   await page.getByRole('button', { name: 'Send invitation', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('This action could not be completed.')
-  await expect(
-    page.getByText('Action recorded. Check delivery and ledger status below.', { exact: true }),
-  ).toHaveCount(0)
+  await expect(page.getByText('Update saved.', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: invitation.email, exact: true })).toHaveCount(0)
   expect(requests).toBe(1)
 })
@@ -471,6 +473,7 @@ test('renders the issuer navigation and unconfirmed delivery guidance in French'
   await expect(
     page.getByRole('button', { name: 'Envoyer l’invitation', exact: true }),
   ).toBeVisible()
+  await page.getByText('Détails de l’envoi de l’email', { exact: true }).click()
   await expect(page.getByText('Livraison de l’email: Non confirmé', { exact: true })).toBeVisible()
   await expect(
     page.getByText('La livraison n’a pas pu être confirmée.', { exact: false }),

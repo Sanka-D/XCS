@@ -16,6 +16,7 @@ const files = ref<File[]>([])
 const busy = ref(false)
 const error = ref('')
 function selectFiles(event: Event) {
+  error.value = ''
   files.value = Array.from((event.target as HTMLInputElement).files ?? [])
 }
 function encodeFile(file: File): Promise<{ mimeType: string; base64: string }> {
@@ -47,22 +48,25 @@ async function submit() {
       path: localePath('/issuer/application'),
       query: { organizationId: result.organizationId },
     })
-  } catch {
-    error.value = t('issuer.applicationError')
+  } catch (cause) {
+    error.value =
+      cause instanceof Error && ['DOCUMENT_INVALID', 'DOCUMENT_UNREADABLE'].includes(cause.message)
+        ? t('simpleIssuer.documentError')
+        : t('issuer.applicationError')
   } finally {
     busy.value = false
   }
 }
-useSeoMeta({ title: () => `${t('issuer.apply')} — XCS`, robots: 'noindex,nofollow' })
+useSeoMeta({ title: () => `${t('simpleIssuer.applyTitle')} — XCS`, robots: 'noindex,nofollow' })
 </script>
 
 <template>
   <UContainer class="max-w-3xl py-10">
-    <PageHeader :title="$t('issuer.apply')" :lead="$t('issuer.applyHelp')" />
+    <PageHeader :title="$t('simpleIssuer.applyTitle')" :lead="$t('simpleIssuer.applyLead')" />
     <StatusBox v-if="error" tone="error" role="alert" class="mb-5">{{ error }}</StatusBox>
     <form class="grid gap-5" @submit.prevent="submit">
       <label v-for="field in fields" :key="field" class="font-semibold"
-        >{{ $t(`issuer.fields.${field}`) }}
+        >{{ $t(`simpleIssuer.applicationFields.${field}`) }}
         <textarea
           v-if="field === 'description' || field === 'purpose'"
           v-model="form[field]"
@@ -93,8 +97,18 @@ useSeoMeta({ title: () => `${t('issuer.apply')} — XCS`, robots: 'noindex,nofol
           $t('issuer.documentsHelp')
         }}</span>
       </label>
-      <p class="text-sm text-muted">{{ $t('issuer.reviewPrivacy') }}</p>
-      <UButton type="submit" :loading="busy" :disabled="busy">{{ $t('issuer.submit') }}</UButton>
+      <ul
+        v-if="files.length"
+        class="list-disc pl-5 text-sm"
+        :aria-label="$t('simpleIssuer.documentsReady')"
+      >
+        <li v-for="(file, index) in files" :key="index">{{ file.name }}</li>
+      </ul>
+      <p class="text-sm text-muted">{{ $t('simpleIssuer.applicationPrivacy') }}</p>
+      <p class="text-sm text-muted">{{ $t('simpleIssuer.applicationNext') }}</p>
+      <UButton type="submit" :loading="busy" :disabled="busy">{{
+        $t('simpleIssuer.applySubmit')
+      }}</UButton>
     </form>
     <UButton :to="localePath('/issuer/application')" color="neutral" variant="link" class="mt-5">{{
       $t('issuer.application')
