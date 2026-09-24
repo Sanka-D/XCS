@@ -105,6 +105,7 @@ See [testing](../TESTING.md) for unit, restricted-role PostgreSQL, browser and c
 The connected runtime test submits applications and administrator approvals through real HTTP,
 delivers invitations to local Mailpit and signs messages and transactions through the actual wallet
 SDK with synthetic extension/RPC transports. Sessions, funded ledger accounts and indexed evidence
-are local fixtures; this does not exercise live consensus or a real installed extension. Real Identity
-client registration, external-wallet/mobile return flows, external mail delivery and representative
+are local fixtures; this does not exercise live consensus or a real installed extension. A separate [live Testnet qualification](standalone-live-testnet.md) exercises actual Identity
+registration, installed desktop GemWallet, live consensus and local SMTP with synthetic accounts.
+Other wallets, mobile return flows, external mail delivery and representative production
 user sessions still need operator qualification.
