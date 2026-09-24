@@ -1,22 +1,24 @@
 import {
-  acquireIndexerLease,
   credentialEvents,
   credentialGenerations,
-  haltIndexer as haltDatabaseIndexer,
   ledgerCheckpoints,
-  lockActiveIndexerLease,
   networkProfiles,
-  releaseIndexerLease,
-  renewIndexerLease,
-  runSerializableTransaction,
   schemaEvents,
   schemas,
-  updateIndexerStatus as updateDatabaseIndexerStatus,
+} from '#db/schema'
+import { type XcsDatabase } from './lib/db/client.js'
+import { runSerializableTransaction } from './lib/db/transactions.js'
+import {
   type AcquiredIndexerLease,
   type IndexerLeaseToken,
-  type XcsDatabase,
-} from '@xcs-protocol/db'
-import type { JsonValue } from '@xcs-protocol/core'
+  acquireIndexerLease,
+  haltIndexer as haltDatabaseIndexer,
+  lockActiveIndexerLease,
+  releaseIndexerLease,
+  renewIndexerLease,
+  updateIndexerStatus as updateDatabaseIndexerStatus,
+} from './lib/db/indexer-fencing.js'
+import type { JsonValue } from './lib/xcs/index.js'
 import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 import { assertLedgerContinuity } from './continuity.js'

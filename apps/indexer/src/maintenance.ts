@@ -1,15 +1,14 @@
 import { readFile } from 'node:fs/promises'
 
-import { parseNetworkProfile, type NetworkProfile } from '@xcs-protocol/core'
+import { parseNetworkProfile, type NetworkProfile } from './lib/xcs/index.js'
 import {
-  createDatabaseClient,
   credentialEvents,
   credentialGenerations,
   ledgerCheckpoints,
   schemaEvents,
   schemas,
-  type XcsDatabase,
-} from '@xcs-protocol/db'
+} from '#db/schema'
+import { type XcsDatabase, createDatabaseClient } from './lib/db/client.js'
 import { count, eq } from 'drizzle-orm'
 
 import {

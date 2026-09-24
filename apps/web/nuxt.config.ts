@@ -1,3 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+import { vendoredPrebundleDependencies } from './vendoredPrebundle'
+
+// The OpenAPI document's `info.version` is this package's version; reading it
+// here keeps the single source of truth in `package.json`.
+const apiVersion = (
+  JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')) as {
+    version: string
+  }
+).version
+
 const browserE2eInput = process.env.XCS_BROWSER_E2E
 if (browserE2eInput !== undefined && browserE2eInput !== '0' && browserE2eInput !== '1') {
   throw new Error('XCS_BROWSER_E2E must be exactly "0" or "1".')
@@ -18,14 +31,21 @@ if (localPayloadStoreInput === '1' && process.env.NODE_ENV === 'production') {
   throw new Error('XCS_LOCAL_PAYLOAD_STORE cannot be enabled in production.')
 }
 const localPayloadStoreMode = localPayloadStoreInput === '1' ? 'enabled' : 'disabled'
-const apiInternalToken =
-  process.env.NUXT_API_INTERNAL_TOKEN ??
-  (process.env.NODE_ENV === 'production' ? '' : 'xcs-development-internal-token-0001')
 const production = process.env.NODE_ENV === 'production'
 const cspConnectSources = ["'self'", 'https:', 'wss:', ...(production ? [] : ['http:', 'ws:'])]
 
+// The Drizzle schema in `db/` is shared with the indexer and compiled as a source
+// of this app through `#db/*`. It is server-only: nothing under `app/` imports it.
+const dbDirectory = fileURLToPath(new URL('../../db', import.meta.url))
+
+// The protocol code is vendored under `app/lib/xcs`. `#xcs/*` gives the server
+// and the test suite one specifier for it instead of climbing out of `server/`.
+const xcsDirectory = fileURLToPath(new URL('./app/lib/xcs', import.meta.url))
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-19',
+  alias: { '#db': dbDirectory, '#xcs': xcsDirectory },
+  nitro: { alias: { '#db': dbDirectory, '#xcs': xcsDirectory } },
   css: ['~/assets/css/main.css'],
   devtools: { enabled: false },
   modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/i18n', 'nuxt-security'],
@@ -86,14 +106,15 @@ export default defineNuxtConfig({
       },
     ],
     optimizeDeps: {
-      // These linked workspace packages publish from dist. Force a fresh
-      // pre-bundle on each server start so rebuilt package code cannot be
-      // replaced by Nuxt's persistent dependency cache.
+      // Force a fresh pre-bundle on each server start so a changed dependency
+      // cannot be replaced by Nuxt's persistent dependency cache.
       force: true,
-      // `xrpl` and `xrpl-connect` are pulled in lazily by the wallet adapters, so
-      // Vite only discovers them after the first page load and re-optimizes mid-run,
-      // which 504s the in-flight module requests. Pre-bundle them up front.
-      include: ['@xcs-protocol/core', '@xcs-protocol/sdk', 'xrpl', 'xrpl-connect'],
+      // `xrpl-connect` is reached only from the lazily loaded wallet adapters,
+      // and `vendoredPrebundleDependencies` covers the vendored protocol code
+      // under `app/lib/xcs` (see that module, and the test that keeps it
+      // honest). Without pre-bundling, Vite discovers them after the first page
+      // load and re-optimizes mid-run, which 504s the in-flight requests.
+      include: [...vendoredPrebundleDependencies, 'xrpl-connect'],
       // Served unbundled so the CSS-injection strip above also runs in dev.
       exclude: ['vaul-vue'],
     },
@@ -108,13 +129,10 @@ export default defineNuxtConfig({
     langDir: 'locales',
   },
   runtimeConfig: {
-    apiBaseUrl: 'http://localhost:3001',
-    apiInternalToken,
-    trustedProxyCidrs: process.env.NUXT_TRUSTED_PROXY_CIDRS ?? '',
+    apiVersion,
     browserE2eMode,
     localPayloadStoreMode,
     public: {
-      apiBaseUrl: 'http://localhost:3001',
       profileId: '',
       rpcUrl: 'wss://s.altnet.rippletest.net:51233',
       xamanApiKey: '',
@@ -195,6 +213,18 @@ export default defineNuxtConfig({
     hidePoweredBy: true,
   },
   typescript: {
+    tsConfig: {
+      compilerOptions: {
+        paths: {
+          '#db/*': ['../../../db/*'],
+          '#xcs/*': ['../app/lib/xcs/*'],
+          // `db/` has no package.json, so its own third-party imports must
+          // resolve from this app's dependencies.
+          'drizzle-orm': ['../node_modules/drizzle-orm'],
+          'drizzle-orm/*': ['../node_modules/drizzle-orm/*'],
+        },
+      },
+    },
     strict: true,
     // Keep `nuxt typecheck` and production-build checking without injecting
     // vite-plugin-checker's nonced-unaware error overlay into the dev page.

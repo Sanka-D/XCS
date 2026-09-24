@@ -9,8 +9,49 @@ permissions:
   contents: read
 
 jobs:
-  typescript:
+  # The shared libraries still live in the root pnpm workspace (packages/*).
+  # The two applications are standalone and are installed from their own
+  # lockfiles with --ignore-workspace, because the root pnpm-workspace.yaml is
+  # visible to them but does not list them.
+  packages:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The vendored-copy check reads a retired source (the former
+          # packages/db) with `git show <sha>:<path>`, which the default
+          # depth-1 clone does not contain.
+          fetch-depth: 0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Prettier is configured at the repository root and covers every tracked
+      # file, including both applications.
+      - run: pnpm format:check
+      - name: Lint, typecheck, test and build the shared packages
+        run: pnpm exec turbo run lint typecheck test build
+      # The two applications import no workspace package: they carry hand-made
+      # copies of this code, and nothing else in the build would notice one
+      # drifting. See CONTRIBUTING.md, "The mirroring rule".
+      - name: Check the vendored copies against their sources
+        run: node ops/ci/check-vendored-copies.mjs
+
+      # Both applications compile the vendored db/schema copy, but they install
+      # from independent lockfiles, so nothing else would notice one of them
+      # moving to a different Drizzle.
+      - name: Check the two lockfiles agree on drizzle-orm
+        run: node ops/ci/check-drizzle-parity.mjs
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,15 +63,28 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify
-      - name: Verify generated database baseline is committed
-        run: |
-          pnpm --filter @xcs-protocol/db db:generate
-          git diff --exit-code -- packages/db/drizzle
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm --dir apps/web install --ignore-workspace --frozen-lockfile
+      - run: pnpm --dir apps/web verify
+      - name: Install Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      # Both Playwright configurations start their own web server and set the
+      # environment they need; `verify` above has already produced .output for
+      # the production (security) configuration.
+      - name: Run browser pilot flows
+        run: pnpm --dir apps/web test:e2e
+      - name: Run browser security flows
+        run: pnpm --dir apps/web test:e2e:security
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 14
 
-  postgres:
+  indexer:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18-alpine
@@ -58,31 +112,17 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:postgres
-
-  browser-e2e:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-        with:
-          version: 10.34.4
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Install Chromium
-        run: pnpm --filter @xcs-protocol/web exec playwright install --with-deps chromium
-      - name: Run browser pilot flows
-        run: pnpm test:e2e
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report
-          path: apps/web/playwright-report/
-          retention-days: 14
+          cache-dependency-path: |
+            apps/indexer/pnpm-lock.yaml
+            apps/web/pnpm-lock.yaml
+      - run: pnpm --dir apps/indexer install --ignore-workspace --frozen-lockfile
+      - run: pnpm --dir apps/indexer verify
+      - run: pnpm --dir apps/indexer test:postgres
+      # The web application's PostgreSQL suite reads the same shared schema, so
+      # it runs against this job's service rather than a second database.
+      - run: pnpm --dir apps/web install --ignore-workspace --frozen-lockfile
+      - run: pnpm --dir apps/web test:postgres
+      - name: Verify generated database baseline is committed
+        run: |
+          pnpm --dir apps/indexer db:generate
+          git diff --exit-code -- db/migrations

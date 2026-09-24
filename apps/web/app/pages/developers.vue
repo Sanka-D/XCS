@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { parseCredentialPayload, verifyPayloadIntegrity } from '@xcs-protocol/core'
-import { credentialHexToUri } from '@xcs-protocol/sdk'
+import { parseCredentialPayload, verifyPayloadIntegrity } from '#xcs/core/index.js'
+import { credentialHexToUri } from '#xcs/sdk/index.js'
 import type {
   ApiCredentialGenerationDetail,
   ApiSchemaDetail,
@@ -23,11 +23,11 @@ interface DeveloperEvidence {
   readonly review: CredentialReview
 }
 
-const config = useRuntimeConfig()
 const localePath = useLocalePath()
 const { t } = useI18n()
 const { getActiveNetworkProfile, getCredentialGeneration, getSchema, verify } = useXcsApi()
-const apiBaseUrl = normalizeDeveloperApiBaseUrl(String(config.public.apiBaseUrl))
+// The read API is served by this application, so its base is this origin.
+const apiBaseUrl = normalizeDeveloperApiBaseUrl(useRequestURL().origin)
 const apiDocumentationUrl = computed(() => `${apiBaseUrl}/documentation`)
 
 const {
