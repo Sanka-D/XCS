@@ -42,7 +42,7 @@ export function useAuth() {
       target.pathname !== path ||
       target.search ||
       target.hash ||
-      !/^\/api\/(?:auth|issuer)\//.test(target.pathname)
+      !/^\/api\/(?:auth|issuer|recipient|verifier)\//.test(target.pathname)
     ) {
       throw new Error('AUTH_PATH_INVALID')
     }
@@ -88,6 +88,7 @@ export function useAuth() {
     expiresAt: computed(() => session.value?.expiresAt),
     absoluteExpiresAt: computed(() => session.value?.absoluteExpiresAt),
     unavailable: readonly(unavailable),
+    csrfToken: computed(() => session.value?.csrfToken),
     load,
     mutateApplication,
     hasRole,

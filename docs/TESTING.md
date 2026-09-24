@@ -161,3 +161,26 @@ fixtures; no external mailbox, real Identity client or wallet signature is requi
 The default browser suite also runs `issuer-journal.spec.ts`: two real Chromium tabs contend for
 one invitation in native IndexedDB, then reload/recover it. To run only this test without a Nuxt
 server, use `pnpm --dir apps/web exec playwright test --config playwright.issuer-journal.config.ts`.
+
+## Recipient and verifier workspaces (#32 / #33)
+
+`test:postgres` includes `recipient-postgres.integration.test.ts` and
+`verifier-postgres.integration.test.ts`. These exercise real restricted roles, owner/audience
+isolation, current approval, presentation revocation, public field filtering, trust/freshness,
+metadata-only history and CSV. Run against an isolated cluster, sequentially with other role tests.
+
+`e2e/recipient-verifier.spec.ts` covers EN/FR inbox, consented views, sharing/QR/revocation,
+application/history, response invalidation, anti-CSRF reopening and fragment/console hygiene using
+API fixtures. `recipientPayload.test.ts` checks the private same-origin canonical-byte reader and
+login return allowlist; `auth-http.test.ts` covers secure cookie handoff and CSRF.
+
+After building, run the compiled Nitro/HTTPS/Chromium scenario with the same isolated database:
+
+```sh
+XCS_RECIPIENT_RUNTIME_TEST=1 pnpm --dir apps/web exec vitest run \
+  --no-file-parallelism test/recipient-verifier-runtime.integration.test.ts
+```
+
+The root `test:runtime` script includes this scenario. It uses synthetic sessions and indexed evidence
+through actual routes and restricted roles, without live Identity, external SMTP or wallet signing.
+It checks anonymous/wrong-audience/full disclosure, history reopening, revocation and suspension.

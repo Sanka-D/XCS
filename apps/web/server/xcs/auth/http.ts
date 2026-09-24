@@ -20,9 +20,11 @@ import { readJsonBody } from '../private-body'
 import type { AuthIdentityProvider } from './oidc'
 import { hasRole, type AuthRepository, type Session, type AppRole } from './types'
 import { verifyWalletProof } from './wallet-proof'
+import { authReturnPath } from '../../../app/utils/authReturnPath'
 
 export const SESSION_COOKIE = '__Host-xcs-session'
 const LOGIN_COOKIE = '__Host-xcs-login'
+const LINK_COOKIE = '__Host-xcs-link-handoff'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COOKIE = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' }
 export interface AuthRuntimeOptions {
@@ -120,6 +122,45 @@ export function createAuthHandler(options: AuthRuntimeOptions) {
     '/api/auth/session',
     defineEventHandler(async (event) => sessionResponse(await readAuthSession(event, repository))),
   )
+  router.post(
+    '/api/auth/link-handoff',
+    defineEventHandler(async (event) => {
+      // Pre-authentication handoff: the browser must initiate an explicit same-origin POST.
+      // Merely opening a link cannot set the cookie or claim/disclose anything.
+      const site = getHeader(event, 'sec-fetch-site')
+      if (getHeader(event, 'origin') !== origin || (site && site !== 'same-origin'))
+        failure(403, 'AUTH_CSRF_REJECTED')
+      await mutations.consume(
+        `handoff:${event.context.xcsClientAddress ?? event.node.req.socket.remoteAddress ?? 'unknown'}`,
+      )
+      const input = await body(event)
+      only(input, ['kind', 'token'])
+      if (
+        !['invitation', 'presentation'].includes(String(input.kind)) ||
+        typeof input.token !== 'string' ||
+        !/^[A-Za-z0-9_-]{43}$/.test(input.token)
+      )
+        failure(400, 'AUTH_INPUT_INVALID')
+      setCookie(event, LINK_COOKIE, `${input.kind}.${input.token}`, { ...COOKIE, maxAge: 600 })
+      return { ok: true }
+    }),
+  )
+  router.post(
+    '/api/auth/link-handoff/consume',
+    defineEventHandler(async (event) => {
+      await mutation(event)
+      const input = await body(event)
+      only(input, ['kind'])
+      if (!['invitation', 'presentation'].includes(String(input.kind)))
+        failure(400, 'AUTH_INPUT_INVALID')
+      const stored = getCookie(event, LINK_COOKIE)
+      const match = /^(invitation|presentation)\.([A-Za-z0-9_-]{43})$/.exec(stored ?? '')
+      // A different page must not destroy a still-pending link of the other kind.
+      if (!match || match[1] !== input.kind) return { token: null }
+      deleteCookie(event, LINK_COOKIE, COOKIE)
+      return { token: match[2] }
+    }),
+  )
   router.get(
     '/api/auth/login',
     defineEventHandler(async (event) => {
@@ -127,7 +168,7 @@ export function createAuthHandler(options: AuthRuntimeOptions) {
         `login:${event.context.xcsClientAddress ?? event.node.req.socket.remoteAddress ?? 'unknown'}`,
       )
       const query = getQuery(event)
-      const returnTo = query.returnTo === '/fr/account' ? '/fr/account' : '/account'
+      const returnTo = authReturnPath(query.returnTo)
       const state = createAppToken(),
         browser = createAppToken()
       const nonce = createAppToken().token,
@@ -207,6 +248,7 @@ export function createAuthHandler(options: AuthRuntimeOptions) {
       const session = await mutation(event)
       await repository.logout(session.id)
       deleteCookie(event, SESSION_COOKIE, COOKIE)
+      deleteCookie(event, LINK_COOKIE, COOKIE)
       return { ok: true }
     }),
   )

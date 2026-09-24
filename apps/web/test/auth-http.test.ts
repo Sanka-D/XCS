@@ -366,3 +366,99 @@ describe('XCS authentication HTTP boundary', () => {
     ).toBe(415)
   })
 })
+
+describe('private link OIDC handoff', () => {
+  const token = 'A'.repeat(43)
+  const linkCookie = '__Host-xcs-link-handoff'
+  it('requires explicit same-origin JSON and never returns the bearer from the anonymous save', async () => {
+    const denied = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff',
+      headers: { origin: 'https://other.test' },
+      payload: { kind: 'invitation', token },
+    })
+    expect(denied.statusCode).toBe(403)
+    const saved = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff',
+      headers: { origin, 'sec-fetch-site': 'same-origin' },
+      payload: { kind: 'invitation', token },
+    })
+    expect(saved.statusCode).toBe(200)
+    expect(saved.json()).toEqual({ ok: true })
+    expect(saved.body).not.toContain(token)
+    expect(saved.headers['cache-control']).toBe('private, no-store')
+    const header = String(saved.headers['set-cookie'])
+    for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Max-Age=600', 'Path=/'])
+      expect(header).toContain(flag)
+    const anonymous = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff/consume',
+      headers: { origin, cookie: cookie(saved, linkCookie) },
+      payload: { kind: 'invitation' },
+    })
+    expect(anonymous.statusCode).toBe(401)
+  })
+  it('consumes only the intended link after session and CSRF validation and clears the cookie', async () => {
+    const saved = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff',
+      headers: { origin },
+      payload: { kind: 'presentation', token },
+    })
+    const signed = await app.login()
+    const headers = {
+      origin,
+      cookie: `${signed.sessionCookie}; ${cookie(saved, linkCookie)}`,
+      'x-xcs-csrf': signed.session.csrfToken,
+    }
+    const forbidden = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff/consume',
+      headers: { ...headers, 'x-xcs-csrf': 'wrong' },
+      payload: { kind: 'presentation' },
+    })
+    expect(forbidden.statusCode).toBe(403)
+    const other = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff/consume',
+      headers,
+      payload: { kind: 'invitation' },
+    })
+    expect(other.json()).toEqual({ token: null })
+    expect(other.headers['set-cookie']).toBeUndefined()
+    const consumed = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff/consume',
+      headers,
+      payload: { kind: 'presentation' },
+    })
+    expect(consumed.json()).toEqual({ token })
+    expect(String(consumed.headers['set-cookie'])).toContain('Max-Age=0')
+  })
+  it('returns from OIDC only to an allowlisted token-free route', async () => {
+    const start = await app.request({
+      url: '/api/auth/login?returnTo=%2Ffr%2Frecipient%2Finvitations',
+    })
+    const state = new URL(String(start.headers.location)).searchParams.get('state')!
+    const callback = await app.request({
+      url: `/api/auth/callback?state=${state}&code=valid`,
+      headers: { cookie: cookie(start, '__Host-xcs-login') },
+    })
+    expect(callback.headers.location).toBe('/fr/recipient/invitations')
+  })
+  it.each([
+    { kind: 'other', token },
+    { kind: 'invitation', token: '../unsafe' },
+    { kind: 'invitation', token, extra: true },
+  ])('rejects malformed or extended handoff bodies', async (payload) => {
+    const response = await app.request({
+      method: 'POST',
+      url: '/api/auth/link-handoff',
+      headers: { origin },
+      payload,
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.headers['set-cookie']).toBeUndefined()
+  })
+})

@@ -2,7 +2,8 @@
 
 This is the implemented database model and server-side helper boundary.
 [ADR 0005](adr/0005-role-based-application.md) records the accepted policy. Optional authentication
-is implemented in #27, admin review in #30 and issuer mutations/private delivery in #31; see the
+is implemented in #27, admin review in #30, issuer mutations/private delivery in #31, and recipient
+presentations/verifier history in #32–#33; see the
 [issuer runbook](runbooks/issuer.md) for deployment and remaining release checks.
 
 ## Ownership and authority
@@ -20,6 +21,13 @@ hashes persist in invitations; delivery rows contain no raw invitation bearer. I
 revocation delivery records are unique per invitation and event kind to prevent automatic resend.
 The dedicated `xcs_issuer` role cannot approve organizations, grant admins or write projection rows.
 
+`0007_recipient_verifier.sql` adds only `app_verifier_history`. Existing presentation rows retain
+their unlimited, revocable authorization; there are no expiry or consumption columns. Migrations
+0000–0006 remain unchanged. The recipient and verifier handlers reuse the restricted portal pool:
+`xcs_issuer` additionally reads ledger checkpoints/integrity status, creates presentations, updates
+only their `revoked_at` column, and reads/appends verifier history. Authentication, public API and
+administrator roles receive no new private-payload or verifier-history grants.
+
 An organization has one responsible human account, not a shared login. Issuer and verifier
 applications are independent. Personal roles are `admin` and `recipient`; organization roles are
 `issuer` and `verifier`. Application approval never proves the validity of a ledger transaction or
@@ -27,7 +35,7 @@ the truth of a claim.
 
 Ledger references are `(profile_id, schema_uid)` and `(profile_id, generation_id)`. They deliberately
 have no foreign key into the disposable ledger projection: rebuilding it must not destroy accounts,
-invitations or sharing grants. Future issuance handlers must verify fresh ledger evidence, schema
+invitations or sharing grants. Issuance handlers validate indexed ledger evidence, schema
 publisher ownership and wallet control before recording metadata. Database references and hashes
 alone are not cryptographic evidence. No mutable `accepted`/`revoked` lifecycle mirror is stored in
 the application model; current state is read from validated ledger evidence. Invitations exist
@@ -48,6 +56,9 @@ erDiagram
     app_invites o|--o| app_credential_metadata : leads_to
     app_credential_metadata ||--o{ app_presentations : shared_as
     app_organizations o|--o{ app_presentations : designated_verifier
+    app_presentations ||--o{ app_verifier_history : checked_as
+    app_users ||--o{ app_verifier_history : consulted
+    app_organizations ||--o{ app_verifier_history : verifier
 ```
 
 The diagram omits reviewer/uploader/creator references for readability. All foreign keys use
@@ -231,6 +242,39 @@ Indexes: `(recipient_user_id, created_at)`, `verifier_organization_id`. There is
 consumption timestamp or per-issuer allowlist. Public-scope presentations do not require a verifier;
 full private access always does. Invite expiry, session expiry and credential expiry are independent.
 
+The recipient API permits at most 200 active presentations per credential. Creation takes a
+transaction advisory lock for the recipient and exact credential, then rechecks ownership,
+current session, ledger state and the quota under `READ COMMITTED` isolation. A full quota returns
+`409` with `error: RECIPIENT_PRESENTATION_LIMIT`; revoking an active presentation frees a slot.
+Per-credential lists place active grants before revoked history so all active grants remain
+reachable for revocation. The unfiltered list is a bounded view of 200 entries, also prioritizing
+active grants; use the credential filter for complete active-grant management.
+
+### `app_verifier_history`
+
+| Columns                       | Type / default          | Meaning                                                        |
+| ----------------------------- | ----------------------- | -------------------------------------------------------------- |
+| `id`                          | uuid PK                 | One explicit verification consultation                         |
+| `verifier_organization_id`    | uuid FK → organizations | Approved organization acting as verifier                       |
+| `verifier_user_id`            | uuid FK → users         | Responsible account at consultation time                       |
+| `presentation_id`             | uuid FK → presentations | Exact sharing grant consulted                                  |
+| `profile_id`, `generation_id` | text, text hash         | Exact credential generation; no projection FK                  |
+| `scope`                       | text                    | Actual `public` or `full` disclosure                           |
+| `on_chain`                    | text                    | `not_found`, `pending`, `active`, `expired` or `deleted`       |
+| `schema_status`               | text                    | `valid` or `unknown`                                           |
+| `payload_status`              | text                    | `valid`, `unavailable`, `tampered`, `invalid` or `not_checked` |
+| `issuer_trust`                | text                    | `trusted`, `untrusted` or `unknown`                            |
+| `checked_at`                  | timestamp, now          | Evidence observation time, not a durable access grant          |
+
+Indexes cover `(verifier_user_id, checked_at, id)` and `(verifier_organization_id, checked_at, id)`.
+There are no claim values, raw presentation tokens, email addresses or payload bytes in these rows.
+History insertion rechecks the current session, responsible organization, approval and presentation
+inside the disclosure transaction. Anonymous visitors and callers lacking the full presentation's
+authorization do not create history. Reads and CSV exports require the same responsible account's
+current approval; they return at most 500 evidence summaries. Reopening a history entry resolves
+the presentation again, including revocation and current approval checks, rather than reading
+cached private claims.
+
 ## Server-side visibility boundary
 
 `getCredentialAccess(db, { profileId, generationId, viewerUserId, presentationToken? })` reads the
@@ -248,7 +292,7 @@ statement. `viewerUserId` must come from verified server authentication, never f
 No credential metadata means null, not access. Approval and grant revocation are rechecked per call;
 do not cache this result as a durable permission or evaluate it only at sign-in. A caller may have
 several relationships: an owner does not lose their ownership access because an unrelated grant
-is invalid. This helper is not a presentation-link resolver: future routes must separately reject
+is invalid. This helper is not a presentation-link resolver: presentation routes separately reject
 invalid/revoked links and verify current ledger state. Neither an access result nor stored metadata
 means the credential itself is valid or accepted.
 
@@ -264,10 +308,33 @@ mean “all private claims.” No cryptographic selective-disclosure proof is im
 public output; SQL also rejects non-array/non-string shapes. Limits: 256 selectors, 1024 characters
 per pointer, 32 path segments. Unknown access scopes throw rather than returning the full payload.
 
-Tokens use Node's standard `randomBytes(32)` and SHA-256, with no custom cryptography. Raw bearer
-tokens belong only in the delivery/link response, never database columns, logs or analytics. Private
-object storage, authenticated delivery, request limits and CSRF are enforced by the issuer endpoints;
-these helpers alone do not implement those protections. Presentation routes remain separate work.
+Tokens use Node's standard `randomBytes(32)` and SHA-256, with no custom cryptography. A created
+presentation returns its raw token once in `/presentations#TOKEN`; lists contain no token or hash.
+The fragment is exchanged only by explicit same-origin JSON `POST /api/presentations/resolve`.
+Signed-in consultations additionally require CSRF. An optional login handoff uses a ten-minute
+Secure/HttpOnly cookie, consumed through an authenticated CSRF-protected POST. Raw tokens never
+enter application database columns, query strings, logs or analytics.
+
+Presentation resolution takes a share lock on the grant to serialize disclosure with revocation.
+It revalidates account/organization approval and reads canonical stored bytes, exact-generation
+ledger state, schema evidence and the configured ledger freshness/trust policy in one transaction.
+It performs no external payload fetch or public `/v1/verify` request. A valid full link opened by an
+anonymous or unauthorized caller returns only public claims with `requiresAuthorization: true`.
+Recipient/issuer ownership and administrator status do not widen the presentation's scope. For a
+private credential, public scope uses `public_fields`; for an already-public credential, all claims
+are public. Responses contain claims, not a private payload envelope. A filtered public result
+reports payload `not_checked` after internal canonical validation because the projection cannot
+prove the full payload digest; tampered/invalid bytes instead produce their actual failure status
+and no claims. Approval remains separate from the configured issuer trust decision.
+
+Recipient workspace/detail responses contain metadata and ledger events, never private claims.
+Private claims require the separate explicit owner-authorized payload request. Accept, reject and
+remove reconciliation validate the exact indexed transaction and a currently linked subject wallet;
+rejection/removal never loads payload bytes. In-app issuance/revocation notifications derive from
+durable credential events, including issuer revocations outside the portal. Email delivery remains
+the issuer workflow's separate delivery record. Lists are bounded to 200 credentials/invitations/
+notifications and 100 detail events; unavailable/stale ledger evidence yields an unknown inbox
+state and blocks authoritative private disclosure.
 
 ## PII, deletion and deployment
 
@@ -285,15 +352,26 @@ shortcut. The lifetime of residual identifiers and backups, operational purge sc
 required retention are **not decided or implemented by this issue**. Do not claim complete account
 erasure merely because fields can be nulled.
 
-The forward migration grants no new runtime privileges. Existing projection readers/indexer and
+The forward SQL migration itself grants no runtime privileges. Existing projection readers/indexer and
 public-payload writers must not be reused as unrestricted application writers. Issue #27 now provisions an optional, restricted `xcs_app` role and server-only connection for authentication;
 see the [authentication runbook](runbooks/authentication.md). Nothing here
 enables production private hosting or converts a public payload into a private one.
 
+For 0007, apply the additive migration, reprovision the restricted portal grants, then deploy the
+updated application. There is no data backfill or destructive DDL. An application rollback can
+leave the new table and history intact; do not drop relationship history as a rollback shortcut.
+Grant provisioning remains separate from migration application. Existing deployments may continue
+using the previous application against the expanded schema during this sequence.
+
 ## Verification
 
-Unit tests: `test/app-visibility.test.ts`. Actual SQL, migration upgrade/fresh creation, invitation
-concurrency, access decisions and constraints: `test/app-model.integration.test.ts`.
+Visibility tests: `apps/indexer/test/db/app-visibility.test.ts`. Actual SQL, invitation concurrency,
+access decisions and constraints: `apps/indexer/test/db/app-model.integration.test.ts`.
+`apps/indexer/test/db/migrations.integration.test.ts` covers fresh creation and the 0006→0007 upgrade,
+including unchanged accounts, presentation columns and applied migration history.
+`apps/web/test/recipient-http.test.ts`, `recipient-postgres.integration.test.ts` and the verifier tests
+cover CSRF, ownership, current approval, private/public projection, freshness, trust, quota races,
+rejection without payload reads and restricted SQL grants.
 
 ```sh
 pnpm --dir apps/indexer typecheck
@@ -305,4 +383,4 @@ pnpm --dir apps/indexer db:generate
 ```
 
 Generation after the checked-in artifacts must produce no new migration. Independent maintainer
-review, endpoint authorization tests and real identity/wallet flows remain subsequent gates.
+review and real identity/wallet flows remain release gates beyond synthetic authorization tests.

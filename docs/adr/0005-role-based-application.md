@@ -1,7 +1,7 @@
 # ADR 0005: role-based application boundary
 
-Status: accepted. Optional authentication, admin approval and issuer workspace are implemented;
-full recipient/presentation and verifier interfaces remain deferred.
+Status: accepted. Optional authentication, admin approval, issuer, recipient/presentation and
+verifier workspaces are implemented.
 
 Date: 2026-09-23
 
@@ -12,8 +12,8 @@ Tracks [issue #24](https://github.com/XRPL-Commons/XCS/issues/24).
 [ADR 0002](0002-public-product-and-discovery.md) defines the public discovery and accountless Studio
 boundary. Optional accounts and operator-approved roles now coexist with those public routes.
 This record distinguishes accepted access decisions from their implementation: authentication,
-admin review, issuer onboarding/issuance and minimal invitation claiming are implemented; the full
-recipient inbox, private acceptance, presentations and verifier workspace remain separate work.
+admin review, issuer onboarding/issuance, recipient acceptance/sharing and verifier history are
+implemented alongside the accountless public routes.
 
 ## Accepted decision: portal approval, not protocol permission
 
@@ -160,28 +160,41 @@ credential generation, schema, issuer wallet and recipient wallet before disclos
 For private credentials, the issuer's current responsible account and the recipient may retrieve
 full bytes. Anonymous requests receive only the issuer-selected public claim fields after validated
 issuance; full payload digests cannot be verified from this projection. Administrator status confers
-no extra access. Verifier presentation endpoints remain #33 and must use the same authorization
-boundary, including the recipient's designated audience and revocation.
+no extra access. Verifier presentation endpoints use the same authorization boundary, including
+the recipient's designated audience, current approval and revocation.
 
 Private bytes are never written to the accountless public hosting endpoint or browser recovery
 storage. This is application authorization, not end-to-end encryption: database administrators and
 backups can contain full payloads. Public disclosure is irreversible in practice; a later setting
 cannot recall copies. Keep private backups and document their retention with the deployment.
 
-The optional issuer workspace implements managed payload storage as described above. Recipient
-presentation management and verifier interfaces remain separate work. Existing accountless Studio
-routes and previously public payloads retain their public behavior.
+The recipient workspace reviews private bytes only after explicit consent, using same-origin
+authenticated reads and local digest/schema checks. Private claims never pass through `/v1/verify`.
+Existing accountless Studio routes and previously public payloads retain their public behavior.
 
 Issue #25 implements the [application data model and server-side helpers](../database-app.md).
 Issue #27 adds optional authentication, sessions and wallet linking; see the [authentication runbook](../runbooks/authentication.md).
 Issues #30 and #31 add admin approval and the issuer workspace, including authorization-aware
 private payload reads and role-protected mutations; see the [issuer runbook](../runbooks/issuer.md).
-Recipient presentation management and verifier interfaces remain separate work.
+Issues #32 and #33 add recipient presentations and verifier application/history; see the
+[recipient/verifier runbook](../runbooks/recipient-verifier.md).
 
-## Implementation handoff
+## Presentation boundary (#32 / #33)
 
-Continue applying these decisions to the remaining recipient and verifier interfaces. Existing issuer
-mutations enforce ownership and current approval server-side; hiding buttons is not authorization.
-Recipient-authorized presentations and designated-verifier access are accepted requirements, not a
-claim that the corresponding interfaces are already available. Public Studio remains accountless;
-ADR 0002's discovery rules continue to apply alongside these optional portal flows.
+Recipients create public projections or full presentations for a designated verifier organization.
+A private credential's public presentation always contains only issuer-selected public fields, even
+for its owner. Already-public credentials retain their public claims. Anonymous or wrong-audience
+viewers of a full grant receive the public projection and an authorization hint. Revoked or unknown
+grants return the same unavailable response. Successful authorized resolution holds the grant lock
+through disclosure and metadata-history insertion, serializing revocation against that disclosure.
+
+The recipient sees all active links for each credential and can revoke them. Creation is limited to
+200 active links per credential under a transaction lock; revoked history is bounded. Tokens are
+returned once and stored only as hashes. `/presentations#token` removes the fragment before an
+explicit POST. Login handoff uses a ten-minute Secure, HttpOnly, SameSite=Lax cookie; its expiry
+is independent of the unlimited sharing grant. No token or private claim enters browser recovery.
+
+Verifier history and CSV contain metadata and verification dimensions, never claims or bearer tokens.
+Reopening history is an authenticated CSRF-protected POST that rechecks current grant and approval.
+Portal approval remains distinct from issuer trust. Projected public claims cannot prove full-payload
+integrity: successful internal validation is exposed as `not_checked` for that partial view.

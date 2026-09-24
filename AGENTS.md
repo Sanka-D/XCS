@@ -1,6 +1,6 @@
 # Repository Codex Instructions
 
-- Before reading paths from an earlier architecture or another XCS checkout, resolve them with `rg --files` in the active worktree; source and deployment layouts differ between worktrees.
+- Before reading paths from an earlier architecture, another XCS checkout, or another agent’s planned file list, resolve them with `rg --files` in the active worktree; layouts differ between worktrees and concurrent implementations can choose different final paths.
 - The Compose stack is local development only. Before pushing changes to it, render the exact overlays with every referenced profile and, when a Docker engine is available, build `apps/web/Dockerfile` and `apps/indexer/Dockerfile` with the repository root as build context and start the stack under the `node` runtime user; configuration rendering alone does not validate the build context or the shared `db/` and `config/` copies the images depend on.
 - Every per-app pnpm command that resolves dependencies — `install`, `audit`, `licenses list` — must carry `--ignore-workspace`. Without it, `pnpm --dir apps/web install` silently operates on the root workspace and still exits 0.
 - When cryptographically checking an XRPL transaction returned by `tx`, request `binary: true` and verify the canonical `tx_blob`; API v2 `tx_json` can rename serialized fields (for example, `Amount` is exposed as `DeliverMax`) and is not the canonical object to re-encode for signature verification.

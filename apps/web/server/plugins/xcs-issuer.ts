@@ -6,6 +6,7 @@ import { createIssuerHandler } from '../xcs/issuer/http'
 import { IssuerRepository } from '../xcs/issuer/repository'
 import { PrivateDocumentStorage } from '../xcs/issuer/storage'
 import { createLocalSmtpTransport, sendIssuerNotification } from '../xcs/issuer/notifications'
+import type { IssuerServices } from '../xcs/issuer/services'
 
 export default defineNitroPlugin((nitroApp) => {
   const config = loadIssuerConfig(process.env)
@@ -30,8 +31,10 @@ export default defineNitroPlugin((nitroApp) => {
       return event.context.xcsReadSession(event)
     },
   })
+  const services: IssuerServices = { database, repository, config }
   nitroApp.hooks.hook('request', (event) => {
     event.context.xcsIssuer = handler
+    event.context.xcsIssuerServices = services
   })
   nitroApp.hooks.hook('close', async () => {
     transport.close()

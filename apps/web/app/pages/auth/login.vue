@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import { authReturnPath } from '~/utils/authReturnPath'
 const { t } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()
 const { load, enabled, user, unavailable } = useAuth()
 await load()
-if (user.value) await navigateTo(localePath('/account'), { replace: true })
-const loginUrl = computed(
-  () => `/api/auth/login?returnTo=${encodeURIComponent(localePath('/account'))}`,
-)
+const returnTo = computed(() => authReturnPath(route.query.returnTo ?? localePath('/account')))
+if (user.value) await navigateTo(returnTo.value, { replace: true })
+const loginUrl = computed(() => `/api/auth/login?returnTo=${encodeURIComponent(returnTo.value)}`)
 useSeoMeta({ title: () => `${t('auth.signIn')} — XCS`, robots: 'noindex,nofollow' })
 </script>
 

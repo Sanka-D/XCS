@@ -32,6 +32,8 @@ const navigation = computed(() => [
   ...(auth.hasRole('admin') ? [{ label: t('admin.title'), to: localePath('/admin') }] : []),
   ...(issuerEnabled && auth.user.value
     ? [
+        { label: t('recipient.title'), to: localePath('/recipient') },
+        { label: t('verifier.title'), to: localePath('/verifier') },
         {
           label: t('auth.issuerSpace'),
           to: localePath(auth.hasRole('issuer') ? '/issuer' : '/issuer/application'),

@@ -188,3 +188,31 @@ The payload and quota records persist in PostgreSQL. Include these tables in bac
 XRPL cannot reconstruct off-chain payload bytes. Quota or availability failures can occur after
 the ledger transaction succeeds; the browser's publication recovery retries the same signed
 transaction without creating another credential. See [web recovery](../apps/web/README.md#hosted-https-payloads).
+
+## Optional recipient and verifier APIs
+
+These same-origin `/api` routes share the enabled issuer service and its restricted application pool.
+They are private, `no-store` and `no-referrer`, with session authorization, bounded request bodies and
+rate limits. Authenticated mutations require CSRF. They are separate from the public `/v1` contract.
+
+| Route                                                     | Purpose                                                               |
+| --------------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /api/recipient/workspace`                            | Owned invitations, credentials and event notifications                |
+| `GET /api/recipient/verifiers`                            | Eligible approved verifier organizations                              |
+| `GET /api/recipient/credentials/:profileId/:generationId` | Owned exact credential and disclosure metadata                        |
+| `GET …/payload`                                           | Explicit authenticated full payload review/report                     |
+| `POST …/reconcile`                                        | Check exact indexed accept/reject/remove transaction                  |
+| `GET /api/recipient/presentations`                        | Own grants, optionally filtered by profile/generation                 |
+| `POST /api/recipient/presentations`                       | Create public or designated-verifier grant                            |
+| `POST /api/recipient/presentations/:id/revoke`            | Revoke own grant                                                      |
+| `POST /api/presentations/resolve`                         | Explicit token resolution; full access rechecks audience and approval |
+| `GET /api/verifier/workspace`                             | Application status and metadata-only history                          |
+| `POST /api/verifier/applications`                         | Submit organization and review documents                              |
+| `GET /api/verifier/history.csv`                           | Approved actor's metadata export                                      |
+| `POST /api/verifier/history/:id/presentation`             | Reauthorize and record reopening; empty JSON body                     |
+| `POST /api/auth/link-handoff`                             | Same-origin invitation/presentation token cookie before login         |
+| `POST /api/auth/link-handoff/consume`                     | Authenticated, CSRF-protected one-time cookie retrieval               |
+
+Bearer links use fragments, then explicit JSON POSTs, never token query parameters. Unknown/revoked
+presentations are indistinguishable. Wrong-audience full grants disclose only the public projection.
+See [recipient/verifier boundaries and limits](runbooks/recipient-verifier.md).

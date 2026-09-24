@@ -102,7 +102,7 @@ export class IssuerRepository {
     }
   }
 
-  async apply(session: Session, input: ApplicationInput) {
+  async apply(session: Session, input: ApplicationInput, role: 'issuer' | 'verifier' = 'issuer') {
     const stored: Awaited<ReturnType<IssuerDocumentStore['write']>>[] = []
     const applicationId = randomUUID()
     let transactionStarted = false
@@ -121,10 +121,10 @@ export class IssuerRepository {
         const id = applicationId
         await sql`INSERT INTO app_organizations(id,responsible_user_id,name) VALUES (${id},${session.userId},${input.name})`
         await sql`INSERT INTO app_organization_applications(organization_id,role,website,contact,jurisdiction,description,purpose)
-          VALUES (${id},'issuer',${input.website},${input.contact},${input.jurisdiction},${input.description},${input.purpose})`
+          VALUES (${id},${role},${input.website},${input.contact},${input.jurisdiction},${input.description},${input.purpose})`
         for (const document of stored)
           await sql`INSERT INTO app_documents(id,organization_id,application_role,storage_key,mime_type,byte_length,sha256,uploaded_by)
-          VALUES (${randomUUID()},${id},'issuer',${document.storageKey},${document.mimeType},${document.byteLength},${document.sha256},${session.userId})`
+          VALUES (${randomUUID()},${id},${role},${document.storageKey},${document.mimeType},${document.byteLength},${document.sha256},${session.userId})`
         return { organizationId: id, status: 'pending' }
       })
       for (const document of stored) this.options.documents.release?.(document.storageKey)

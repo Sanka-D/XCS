@@ -165,6 +165,24 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
     ])
   })
 
+  it('upgrades 0006 without rewriting accounts or existing presentation columns', async () => {
+    await migrateDatabase(database, await fixture(7))
+    await database.sql`INSERT INTO app_users(identity_issuer,identity_subject,display_name) VALUES ('https://identity.test','migration-recipient','Retained recipient')`
+    const users = await database.sql`SELECT * FROM app_users`
+    const columns =
+      await database.sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='app_presentations' ORDER BY ordinal_position`
+    const history = await journalRows()
+    expect(await exists('public.app_verifier_history')).toBe(false)
+    await migrateDatabase(database)
+    expect(await database.sql`SELECT * FROM app_users`).toEqual(users)
+    expect(
+      await database.sql`SELECT column_name,data_type FROM information_schema.columns WHERE table_name='app_presentations' ORDER BY ordinal_position`,
+    ).toEqual(columns)
+    expect((await journalRows()).slice(0, history.length)).toEqual(history)
+    expect(await exists('public.app_verifier_history')).toBe(true)
+    expect(await database.sql`SELECT * FROM app_verifier_history`).toEqual([])
+  })
+
   it.each(['tampered', 'future', 'nonprefix'] as const)(
     'rejects %s history before executing pending DDL',
     async (variant) => {

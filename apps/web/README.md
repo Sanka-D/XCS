@@ -502,7 +502,7 @@ rather than either private indexer source.
 The public issuance and acceptance flows support public HTTPS payloads, either externally hosted or
 published through the optional signed-upload service above. The ledger projection does not contain
 claims; enabled payload services store them separately. Managed issuer private payloads follow the
-authorization rules below and are not a private acceptance implementation. The payload host must
+authorization rules below; the recipient workspace uses a separate authenticated private reader. The payload host must
 allow the web origin through CORS and return `application/json` (or a `+json` media type). Acceptance
 first displays only indexed metadata, the URI and its host. The subject must explicitly consent
 before the browser contacts that host. Consent stays in memory and is bound to the displayed
@@ -648,8 +648,9 @@ The optional issuer workspace provides onboarding, owned schemas, recipient invi
 and revocation. It reuses the public transaction engine with server-derived organization, schema and
 claimant context, a linked issuer wallet and renewed approval checks before signing. The delivery
 email is not identity evidence: review the actual authenticated claimant and their verified wallet.
-A bearer link can be claimed by any authenticated holder. The minimal claim page is implemented;
-the full recipient inbox, private acceptance/presentations and verifier workspace remain later work.
+A bearer link can be claimed by any authenticated holder. The recipient inbox provides consented
+private acceptance through the same wallet engine and revocable presentation links/QR codes.
+Approved verifiers open designated full presentations and retain metadata-only history/CSV.
 See the [issuer runbook](../../docs/runbooks/issuer.md) for provisioning and delivery semantics.
 
 Managed issuance defaults to private. The issuer reviews the complete authorized view and selected
@@ -665,3 +666,7 @@ without signing again. Pending or unknown journal outcomes remain blocked. An ex
 matching durable proof of expiry or a validated failing transaction; it never treats a timeout as
 proof that signing is safe again. Browser-local recovery is lost when site data is cleared. Email
 notification status is separate from successful ledger recording and cannot undo it.
+
+See the [recipient/verifier runbook](../../docs/runbooks/recipient-verifier.md) for routes, grants,
+login handoff and upgrade order. These workspaces reuse the restricted issuer pool; they add no new
+connection URL. Presentation scope and current approval are checked server-side on each disclosure.

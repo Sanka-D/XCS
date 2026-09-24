@@ -1,44 +1,143 @@
 <script setup lang="ts">
+import { purgePrivateLinkFragment } from '~/utils/privateLinkHistory'
+
 const auth = useAuth()
+const handoff = usePrivateLinkHandoff()
 const localePath = useLocalePath()
+const route = useRoute()
 const { t } = useI18n()
 const token = ref('')
+const usableToken = computed(() => /^[A-Za-z0-9_-]{43}$/.test(token.value))
 const loaded = ref(false)
 const failed = ref(false)
 const busy = ref(false)
 const claimed = ref(false)
 const preview = ref<{ organizationName?: string; schemaName?: string } | null>(null)
-onMounted(async () => {
-  token.value = window.location.hash.slice(1)
-  // Drop the bearer from the visible URL; do not persist it or include it in requests until explicit preview.
-  window.history.replaceState(
-    window.history.state,
-    '',
-    window.location.pathname + window.location.search,
-  )
-  await auth.load(true)
-  if (auth.user.value && /^[A-Za-z0-9_-]{43}$/.test(token.value)) {
-    try {
-      preview.value = await auth.mutateApplication('/api/issuer/invitations/preview', {
-        token: token.value,
-      })
-    } catch {
-      failed.value = true
-    }
-  } else if (auth.user.value) failed.value = true
-  loaded.value = true
-})
-async function claim() {
-  if (busy.value) return
-  busy.value = true
+let revision = 0
+let initialized = false
+let disposed = false
+function resetView() {
+  revision += 1
+  preview.value = null
+  claimed.value = false
+  failed.value = false
+  busy.value = false
+  loaded.value = false
+}
+function current(attempt: number, identity?: string) {
+  return !disposed && attempt === revision && identity === auth.user.value?.id
+}
+async function loadPreview(refreshSession: boolean) {
+  const attempt = revision
+  if (refreshSession) await auth.load(true)
+  if (disposed || attempt !== revision) return
+  const identity = auth.user.value?.id
+  const requestToken = token.value
+  if (!/^[A-Za-z0-9_-]{43}$/.test(requestToken)) {
+    failed.value = true
+    loaded.value = true
+    return
+  }
+  if (!identity) {
+    loaded.value = true
+    return
+  }
   try {
-    await auth.mutateApplication('/api/issuer/invitations/claim', { token: token.value })
+    const result = await auth.mutateApplication<{ organizationName?: string; schemaName?: string }>(
+      '/api/issuer/invitations/preview',
+      { token: requestToken },
+    )
+    if (current(attempt, identity)) preview.value = result
+  } catch {
+    if (current(attempt, identity)) failed.value = true
+  } finally {
+    if (current(attempt, identity)) loaded.value = true
+  }
+}
+function captureFragment() {
+  const fragment = window.location.hash
+  if (!fragment) return
+  // Native and router hash navigation can reuse this page. Reading the live URL prevents
+  // duplicate consumption; clearing the prior revision prevents late preview/claim responses.
+  purgePrivateLinkFragment()
+  resetView()
+  token.value = fragment.slice(1)
+  if (initialized) void loadPreview(true)
+}
+watch(
+  () => route.hash,
+  () => {
+    if (import.meta.client) captureFragment()
+  },
+)
+watch(
+  () => auth.user.value?.id,
+  () => {
+    if (!initialized || disposed) return
+    resetView()
+    void loadPreview(false)
+  },
+)
+onMounted(async () => {
+  window.addEventListener('hashchange', captureFragment)
+  captureFragment()
+  await auth.load(true)
+  if (disposed) return
+  if (auth.user.value && !token.value) {
+    const attempt = revision
+    const identity = auth.user.value.id
+    try {
+      const restored = await handoff.consume('invitation')
+      if (current(attempt, identity)) token.value = restored ?? ''
+    } catch {
+      if (current(attempt, identity)) failed.value = true
+    }
+  }
+  if (disposed) return
+  initialized = true
+  await loadPreview(false)
+})
+onBeforeUnmount(() => {
+  disposed = true
+  resetView()
+  token.value = ''
+  window.removeEventListener('hashchange', captureFragment)
+})
+async function signIn() {
+  if (busy.value || !loaded.value || !/^[A-Za-z0-9_-]{43}$/.test(token.value)) return
+  busy.value = true
+  const attempt = revision
+  const identity = auth.user.value?.id
+  const requestToken = token.value
+  try {
+    await handoff.save('invitation', requestToken)
+    if (!current(attempt, identity)) return
+    await navigateTo({
+      path: localePath('/auth/login'),
+      query: { returnTo: localePath('/recipient/invitations') },
+    })
+  } catch {
+    if (current(attempt, identity)) failed.value = true
+  } finally {
+    if (current(attempt, identity)) busy.value = false
+  }
+}
+async function claim() {
+  if (busy.value || !preview.value || !auth.user.value || !/^[A-Za-z0-9_-]{43}$/.test(token.value))
+    return
+  busy.value = true
+  const attempt = revision
+  const identity = auth.user.value.id
+  const requestToken = token.value
+  try {
+    await auth.mutateApplication('/api/issuer/invitations/claim', { token: requestToken })
+    if (!current(attempt, identity)) return
     claimed.value = true
     token.value = ''
   } catch {
-    failed.value = true
+    if (current(attempt, identity)) failed.value = true
   } finally {
-    busy.value = false
+    if (current(attempt, identity)) busy.value = false
   }
 }
 useSeoMeta({
@@ -53,13 +152,19 @@ useSeoMeta({
     <p v-if="!loaded">{{ $t('issuer.loading') }}</p>
     <template v-else-if="!auth.user.value">
       <p class="mb-4">{{ $t('issuer.claimLogin') }}</p>
-      <UButton :to="localePath('/auth/login')">{{ $t('auth.signIn') }}</UButton>
+      <StatusBox v-if="failed" tone="error">{{ $t('issuer.claimUnavailable') }}</StatusBox>
+      <UButton :loading="busy" :disabled="busy || !usableToken" @click="signIn">{{
+        $t('auth.signIn')
+      }}</UButton>
     </template>
     <StatusBox v-else-if="failed" tone="error">{{ $t('issuer.claimUnavailable') }}</StatusBox>
     <template v-else-if="claimed">
       <StatusBox tone="success">{{ $t('issuer.claimedHelp') }}</StatusBox>
       <UButton class="mt-5" :to="localePath('/account')">{{
         $t('auth.linkCurrentWallet')
+      }}</UButton>
+      <UButton class="mt-5 ml-3" :to="localePath('/recipient')" variant="outline">{{
+        $t('recipient.title')
       }}</UButton>
     </template>
     <template v-else-if="preview">

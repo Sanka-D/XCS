@@ -27,8 +27,8 @@ integrators.
   receipts still use browser-local recovery, lost on site-data clearing or a device change.
 - Issuance is one Credential at a time through a supported wallet. Batch issuance, team membership,
   fine-grained team permissions, hosted automation and GraphQL remain outside this implementation.
-  The minimal recipient invitation claim page exists; the full recipient inbox, private acceptance,
-  presentations and verifier workspace remain future work.
+  Recipient inbox, consented private acceptance, revocable presentations and verifier history are
+  implemented. Real-user usability sessions and live wallet/OIDC qualification remain release gates.
 - `@xcs-protocol/core`, `@xcs-protocol/sdk`, and `@xcs-protocol/cli` have reproducible tarball and
   isolated-consumer gates, but they are not registry-installable until XRPL Commons completes the
   one-time npm scope bootstrap. Developers guidance therefore remains explicitly monorepo-local.
@@ -237,8 +237,8 @@ remains a browser-boundary risk. Private or sensitive claims must not enter this
   full digest remain public. Public disclosure cannot recall downloaded copies.
 - Public payload readers omit session credentials. Filtered responses carry
   `x-xcs-claim-scope: public` and produce `PAYLOAD_SCOPE_RESTRICTED`, not a false digest-tampering
-  result or a claim of verified full integrity. The current public acceptance flow does not implement
-  authorized private acceptance; the full recipient flow is deferred.
+  result or a claim of verified full integrity. Authenticated recipient acceptance uses the separate
+  same-origin private reader and never submits private claims to the public verification endpoint.
 - Private canonical claims never enter the public publication queue or browser recovery storage.
   Issuer recovery retains nonsecret references, transaction hashes and visibility selections only.
   Confirmed ledger operations reconcile application metadata without requesting another signature.
@@ -251,3 +251,19 @@ remains a browser-boundary risk. Private or sensitive claims must not enter this
 - Notification failure cannot undo issuance or revocation. Ambiguous SMTP acknowledgements are
   recorded as uncertain and require review rather than automatic retry. Application records,
   document files and private payload storage need backups independently of the rebuildable indexer.
+
+- Recipient sharing has no automatic expiry or single-use consumption. Revocation and verifier
+  suspension prevent future disclosure, but cannot erase copies already downloaded. Each credential
+  is limited to 200 active grants; recent workspace/history lists are bounded, not archival exports.
+  Issuance/revocation emails use the existing issuer flow; external ledger revocations appear in the
+  recipient's in-app notifications without triggering an additional email delivery service.
+- The dependency license gate still requires maintainer decisions for GemWallet, WalletConnect and
+  Nodemailer MIT-0. Vaul's missing MIT license file is restored from its exact published source;
+  see [license evidence](runbooks/dependency-licenses.md).
+
+- Recovery of an already signed `CredentialAccept` rechecks exact generation/lifecycle and indexer
+  readiness, but does not re-run issuer-trust consent or portal session authorization. A pending
+  signed transaction can therefore be retried after trust policy or session changes. It contains no
+  claims; new private reads still require current authorization. Explicit failed post-signature
+  validation clears the recoverable blob, but interrupted signing/revalidation remains a qualification
+  case for wallet recovery.

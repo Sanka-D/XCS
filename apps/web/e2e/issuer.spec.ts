@@ -305,11 +305,158 @@ test('keeps the invitation bearer out of URLs and browser storage and claims onl
     ])
     expect(urls.every((url) => !url.includes(token))).toBe(true)
     const stored = await page.evaluate(() =>
-      JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }),
+      JSON.stringify({
+        local: { ...localStorage },
+        session: { ...sessionStorage },
+        history: history.state,
+      }),
     )
     expect(stored).not.toContain(token)
     expect(consoleMessages.join('\n')).not.toContain(token)
   }
+})
+
+test('replaces a claimed invitation with successive native and router links in the same tab', async ({
+  page,
+}) => {
+  const first = 'B'.repeat(43),
+    second = 'C'.repeat(43),
+    third = 'D'.repeat(43)
+  const names = {
+    [first]: 'First invitation',
+    [second]: 'Second invitation',
+    [third]: 'Third invitation',
+  }
+  const claims: string[] = []
+  await mockIssuer(page)
+  await page.route('**/api/issuer/invitations/**', (route) => {
+    const { token } = route.request().postDataJSON() as { token: string }
+    if (route.request().url().endsWith('/claim')) {
+      claims.push(token)
+      return route.fulfill({ json: { claimed: true } })
+    }
+    return route.fulfill({
+      json: { organizationName: organization.name, schemaName: names[token] },
+    })
+  })
+  await enter(page, `/recipient/invitations#${first}`)
+  await expect(page.getByRole('heading', { name: names[first], exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
+  await expect(
+    page.getByText(
+      'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
+      { exact: true },
+    ),
+  ).toBeVisible()
+  await page.evaluate((token) => {
+    window.location.hash = token
+  }, second)
+  await expect(page.getByRole('heading', { name: names[second], exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/recipient\/invitations$/)
+  expect(claims).toEqual([first])
+  await page.evaluate(async (token) => {
+    const root = document.querySelector('#__nuxt') as Element & {
+      __vue_app__: {
+        config: { globalProperties: { $router: { push: (path: string) => Promise<void> } } }
+      }
+    }
+    await root.__vue_app__.config.globalProperties.$router.push(`/recipient/invitations#${token}`)
+  }, third)
+  await expect(page.getByRole('heading', { name: names[third], exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: names[second], exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/\/recipient\/invitations$/)
+  expect(claims).toEqual([first])
+  await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
+  await expect.poll(() => claims).toEqual([first, third])
+  for (const value of [first, second, third])
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain(value)
+  await page.evaluate(async () => {
+    const root = document.querySelector('#__nuxt') as Element & {
+      __vue_app__: {
+        config: { globalProperties: { $router: { push: (path: string) => Promise<void> } } }
+      }
+    }
+    await root.__vue_app__.config.globalProperties.$router.push('/')
+  })
+  for (const value of [first, second, third])
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain(value)
+})
+
+test('ignores an old claim response after a different invitation arrived in the same tab', async ({
+  page,
+}) => {
+  const first = 'E'.repeat(43),
+    second = 'F'.repeat(43)
+  const claims: string[] = []
+  let claimStarted!: () => void, releaseClaim!: () => Promise<void>
+  const started = new Promise<void>((resolve) => {
+    claimStarted = resolve
+  })
+  await mockIssuer(page)
+  await page.route('**/api/issuer/invitations/**', (route) => {
+    const { token } = route.request().postDataJSON() as { token: string }
+    if (route.request().url().endsWith('/claim')) {
+      claims.push(token)
+      if (token === first) {
+        releaseClaim = () => route.fulfill({ json: { claimed: true } })
+        claimStarted()
+        return
+      }
+      return route.fulfill({ json: { claimed: true } })
+    }
+    return route.fulfill({
+      json: {
+        organizationName: organization.name,
+        schemaName: token === first ? 'Delayed claim invitation' : 'Current unclaimed invitation',
+      },
+    })
+  })
+  await enter(page, `/recipient/invitations#${first}`)
+  await expect(
+    page.getByRole('heading', { name: 'Delayed claim invitation', exact: true }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
+  await started
+  await page.evaluate((token) => {
+    window.location.hash = token
+  }, second)
+  await expect(
+    page.getByRole('heading', { name: 'Current unclaimed invitation', exact: true }),
+  ).toBeVisible()
+  const response = page.waitForResponse((response) =>
+    response.url().endsWith('/api/issuer/invitations/claim'),
+  )
+  await releaseClaim()
+  await (await response).finished()
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  )
+  await expect(
+    page.getByRole('heading', { name: 'Current unclaimed invitation', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText(
+      'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
+      { exact: true },
+    ),
+  ).toHaveCount(0)
+  expect(claims).toEqual([first])
+  await expect(
+    page.getByRole('button', { name: 'Claim with this account', exact: true }),
+  ).toBeEnabled()
+  await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
+  await expect.poll(() => claims).toEqual([first, second])
+  for (const value of [first, second])
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain(value)
+  await expect(
+    page.getByText(
+      'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
+      { exact: true },
+    ),
+  ).toBeVisible()
 })
 
 test('renders the issuer navigation and unconfirmed delivery guidance in French', async ({

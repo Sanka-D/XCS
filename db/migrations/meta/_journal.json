@@ -50,6 +50,13 @@
       "when": 1790199613077,
       "tag": "0006_issuer_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790254197326,
+      "tag": "0007_recipient_verifier",
+      "breakpoints": true
     }
   ]
 }

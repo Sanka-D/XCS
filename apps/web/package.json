@@ -14,13 +14,13 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:security": "playwright test --config playwright.security.config.ts",
-    "test:postgres": "NODE_ENV=development XCS_BROWSER_E2E=0 XCS_LOCAL_PAYLOAD_STORE=0 nuxt prepare && XCS_REQUIRE_POSTGRES_TESTS=1 vitest run --no-file-parallelism test/postgres.integration.test.ts test/auth-postgres.integration.test.ts test/admin-postgres.integration.test.ts test/issuer-postgres.integration.test.ts",
+    "test:postgres": "NODE_ENV=development XCS_BROWSER_E2E=0 XCS_LOCAL_PAYLOAD_STORE=0 nuxt prepare && XCS_REQUIRE_POSTGRES_TESTS=1 vitest run --no-file-parallelism test/postgres.integration.test.ts test/auth-postgres.integration.test.ts test/admin-postgres.integration.test.ts test/issuer-postgres.integration.test.ts test/recipient-postgres.integration.test.ts test/verifier-postgres.integration.test.ts",
     "typecheck": "NODE_ENV=development XCS_BROWSER_E2E=0 XCS_LOCAL_PAYLOAD_STORE=0 nuxt typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm test && pnpm build",
     "admin:notify": "tsx scripts/admin-notifier.ts",
     "admin:fixtures": "tsx scripts/admin-fixtures.ts",
     "test:e2e:auth": "playwright test --config playwright.auth.config.ts",
-    "test:runtime": "XCS_REQUIRE_RUNTIME_TESTS=1 XCS_ADMIN_RUNTIME_TEST=1 XCS_ISSUER_RUNTIME_TEST=1 vitest run --no-file-parallelism test/api/runtime.integration.test.ts test/admin-postgres.integration.test.ts test/issuer-runtime.integration.test.ts --testNamePattern \"exempts Nitro|serves SSR, readiness|serves four real|uploads a private application\""
+    "test:runtime": "XCS_REQUIRE_RUNTIME_TESTS=1 XCS_ADMIN_RUNTIME_TEST=1 XCS_ISSUER_RUNTIME_TEST=1 XCS_RECIPIENT_RUNTIME_TEST=1 vitest run --no-file-parallelism test/api/runtime.integration.test.ts test/admin-postgres.integration.test.ts test/issuer-runtime.integration.test.ts test/recipient-verifier-runtime.integration.test.ts --testNamePattern \"exempts Nitro|serves SSR, readiness|serves four real|uploads a private application|filters anonymous and wrong-audience views\""
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.135",
@@ -51,7 +51,8 @@
     "openid-client": "6.8.8",
     "rate-limiter-flexible": "^7.3.1",
     "ripple-keypairs": "3.0.0",
-    "h3": "1.15.11"
+    "h3": "1.15.11",
+    "uqr": "0.1.3"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
@@ -85,7 +86,8 @@
       "svgo@>=4.0.0 <4.1.0": ">=4.1.0"
     },
     "patchedDependencies": {
-      "xrpl-connect@1.0.0-rc.2": "patches/xrpl-connect@1.0.0-rc.2.patch"
+      "xrpl-connect@1.0.0-rc.2": "patches/xrpl-connect@1.0.0-rc.2.patch",
+      "vaul-vue@0.4.1": "patches/vaul-vue@0.4.1.patch"
     }
   }
 }
