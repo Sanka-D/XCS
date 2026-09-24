@@ -87,6 +87,15 @@ references and raw failure diagnostics. The existing journal and saved content a
   exact selected fields appeared before signing; creation remained disabled without a connected
   wallet. No new link or signature was created; the prior sharing tab was preserved.
   These issuer/recipient checks used actual accounts and stored Testnet evidence without mocks.
+- CI exposed obsolete selectors in the compiled issuer and connected-journey tests after the
+  wording and disclosure changes. The tests now use current locale keys and explicitly open the
+  technical controls, preserving signature, recipient-address, disclosure and revocation assertions.
+  All six compiled runtime scenarios then passed locally against fresh, isolated PostgreSQL18 and
+  Mailpit services; nine unrelated cases were excluded by the runtime script’s test-name filter.
+  Real database/SMTP/HTTP boundaries are exercised here with synthetic sessions and XRPL transports,
+  separately from the manual live Testnet qualification. The isolated test services were stopped.
+  CI web, package and Docker jobs passed on the preceding UI commit; the existing license-policy
+  failure was confirmed unchanged. The final test-only correction is revalidated by the next CI run.
 
 Other wallet compatibility and external email delivery were not requalified by this UI change.
 The optional Crossmark live configuration's selectors were updated but that separate wallet-specific

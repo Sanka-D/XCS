@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Wallet } from 'xrpl'
+import en from '../i18n/locales/en.json'
 import { expect as browserExpect, type Page } from '@playwright/test'
 import { describe, expect, it } from 'vitest'
 import { canonicalJson, encodeHexUtf8 } from '#xcs/core/index.js'
@@ -168,21 +169,29 @@ describe.skipIf(!enabled)(
           'data-client-ready',
           'true',
         )
-        await page.getByLabel('Organization name', { exact: true }).fill('Synthetic runtime school')
-        await page.getByLabel('Website', { exact: true }).fill('https://school.example.test')
-        await page.getByLabel('Contact email', { exact: true }).fill('responsible@example.test')
-        await page.getByLabel('Jurisdiction', { exact: true }).fill('France')
         await page
-          .getByLabel('About the organization', { exact: true })
+          .getByLabel(en.simpleIssuer.applicationFields.name, { exact: true })
+          .fill('Synthetic runtime school')
+        await page
+          .getByLabel(en.simpleIssuer.applicationFields.website, { exact: true })
+          .fill('https://school.example.test')
+        await page
+          .getByLabel(en.simpleIssuer.applicationFields.contact, { exact: true })
+          .fill('responsible@example.test')
+        await page
+          .getByLabel(en.simpleIssuer.applicationFields.jurisdiction, { exact: true })
+          .fill('France')
+        await page
+          .getByLabel(en.simpleIssuer.applicationFields.description, { exact: true })
           .fill('Synthetic application for runtime verification')
         await page
-          .getByLabel('Purpose of issuing', { exact: true })
+          .getByLabel(en.simpleIssuer.applicationFields.purpose, { exact: true })
           .fill('Issue synthetic completion records')
         const proof = Buffer.from('%PDF-1.4\nSynthetic private evidence\n%%EOF')
         await page
           .locator('input[type=file]')
           .setInputFiles({ name: 'proof.pdf', mimeType: 'application/pdf', buffer: proof })
-        await page.getByRole('button', { name: 'Submit application', exact: true }).click()
+        await page.getByRole('button', { name: en.simpleIssuer.applySubmit, exact: true }).click()
         await browserExpect(page).toHaveURL(/\/issuer\/application\?organizationId=/)
         const organizationId = new URL(page.url()).searchParams.get('organizationId')!
         await browserExpect(
@@ -246,10 +255,7 @@ describe.skipIf(!enabled)(
         expect(new URL(page.url()).hash).toBe('')
         await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
         await browserExpect(
-          page.getByText(
-            'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
-            { exact: true },
-          ),
+          page.getByText(en.simpleRecipient.invitationReady, { exact: true }),
         ).toBeVisible()
         const [claimed] =
           await database.sql`SELECT claimed_by FROM app_invites WHERE id=${inviteId}`

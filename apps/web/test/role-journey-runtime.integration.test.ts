@@ -246,6 +246,8 @@ describe.skipIf(!enabled)(
           await connectWallet('wallet-link')
           await browserExpect(page.getByTestId('auth-link-wallet')).toBeEnabled()
           await page.getByTestId('auth-link-wallet').click()
+          await page.getByText(en.simpleRecipient.manageWallet, { exact: true }).click()
+          await browserExpect(page.getByTestId('linked-wallets')).toBeVisible()
           await browserExpect(page.getByTestId('linked-wallets')).toContainText(
             wallet.classicAddress,
           )
@@ -359,19 +361,26 @@ describe.skipIf(!enabled)(
         walletTransport.select(issuerWallet)
         await page.goto(runtime.origin + `/issuer/issue/${inviteId}`)
         await connectWallet()
-        await page.getByRole('button', { name: en.issue.jsonClaims, exact: true }).click()
+        await page.getByText(en.simpleIssuer.advanced, { exact: true }).click()
+        await page.getByRole('button', { name: en.simpleIssuer.editJson, exact: true }).click()
         await page
           .locator('#claims')
           .fill(
             JSON.stringify({ course: 'Public runtime course', secret: 'PRIVATE RUNTIME CLAIM' }),
           )
         await page.getByRole('checkbox', { name: 'course', exact: true }).check()
-        await page.getByRole('button', { name: en.issue.prepare, exact: true }).click()
-        await browserExpect(page.getByTestId('transaction-preview')).toContainText(
+        await page.getByRole('button', { name: en.simpleIssuer.reviewIssue, exact: true }).click()
+        await page.getByTestId('transaction-technical-details').locator('summary').click()
+        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveAttribute(
+          'open',
+          '',
+        )
+        await browserExpect(page.getByTestId('transaction-technical-details')).toContainText(
           'CredentialCreate',
         )
+        await page.getByTestId('transaction-technical-details').locator('summary').click()
         await page
-          .getByRole('checkbox', { name: en.issuer.engine.visibilityReviewed, exact: true })
+          .getByRole('checkbox', { name: en.simpleIssuer.visibilityReviewed, exact: true })
           .check()
         await page.getByTestId('raw-signing-consent').check()
         const recording = page.waitForResponse(
@@ -399,9 +408,15 @@ describe.skipIf(!enabled)(
           'PRIVATE RUNTIME CLAIM',
         )
         await page.getByTestId('issuer-trust-acknowledgement').getByRole('checkbox').check()
-        await browserExpect(page.getByTestId('transaction-preview')).toContainText(
+        await page.getByTestId('transaction-technical-details').locator('summary').click()
+        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveAttribute(
+          'open',
+          '',
+        )
+        await browserExpect(page.getByTestId('transaction-technical-details')).toContainText(
           'CredentialAccept',
         )
+        await page.getByTestId('transaction-technical-details').locator('summary').click()
         await page.getByTestId('raw-signing-consent').check()
         const reconciliation = page.waitForResponse(
           (response) =>
@@ -485,8 +500,23 @@ describe.skipIf(!enabled)(
           name: en.roleJourney.ledgerRecipientTitle,
           exact: true,
         })
-        await browserExpect(ledgerSection).toContainText(subjectAddress)
         await browserExpect(ledgerSection).toContainText(en.roleJourney.ledgerStatuses.active)
+        const presentationDetails = page
+          .getByTestId('presentation-result')
+          .locator('details')
+          .filter({
+            has: page.locator('summary').filter({ hasText: en.simpleUi.technicalDetails }),
+          })
+          .first()
+        await browserExpect(presentationDetails).not.toHaveAttribute('open', '')
+        expect(await page.getByTestId('presentation-result').innerText()).not.toContain(
+          subjectAddress,
+        )
+        await presentationDetails.locator(':scope > summary').click()
+        await browserExpect(presentationDetails).toHaveAttribute('open', '')
+        await browserExpect(presentationDetails).toContainText(subjectAddress)
+        await browserExpect(presentationDetails).toContainText(issuerAddress)
+        await presentationDetails.locator(':scope > summary').click()
         const proofDate = await page.evaluate(
           (value) =>
             new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
