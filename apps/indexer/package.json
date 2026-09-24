@@ -41,6 +41,7 @@
     "jsonc-parser": "3.3.1",
     "multiformats": "14.0.5",
     "postgres": "^3.4.7",
+    "ripple-binary-codec": "2.11.0",
     "tr46": "4.1.1",
     "xrpl": "^5.0.0"
   },

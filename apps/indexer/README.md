@@ -75,6 +75,22 @@ the selected registry policy on both sources, and prints no endpoint or credenti
 procedures — healthy state, recovery, deterministic rebuild and evidence capture — are in the
 [indexer runbook](../../docs/runbooks/indexer.md).
 
+Ledger transport requests the complete transaction set with `transactions: true`, `expand: true`
+and `binary: true`. Large expanded JSON responses can exceed a provider's WebSocket limit even
+when that provider retains the ledger. The official binary codec decodes the header, transaction
+bytes and metadata locally; XRPL hash helpers validate the header and derive transaction IDs.
+Protocol pseudo-transactions use the standard unsigned transaction-ID domain. Canonical serialized
+fields such as `Payment.Amount` are preserved instead of API v2 JSON aliases such as `DeliverMax`.
+See the [XRPL ledger API](https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/ledger-methods/ledger).
+
+Both independently operated sources must still agree on the complete normalized header and every
+transaction/metadata object. Malformed blobs, conflicting hashes, missing transactions and a source
+without the required history remain fatal. The transport change neither skips checkpoints nor
+resets a projection or reduces the quorum. `ripple-binary-codec@2.11.0` is a direct dependency for
+its official ledger-header decoder, matching the version already used transitively by `xrpl`.
+An existing database with a different migration journal still requires its own reviewed upgrade;
+rebuilding the indexer image does not authorize rewriting that history.
+
 ## Tests
 
 ```sh
