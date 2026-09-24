@@ -1,6 +1,10 @@
 <script setup lang="ts">
 const { locale, locales, setLocale, t } = useI18n()
 const localePath = useLocalePath()
+const { account } = useWallet()
+const auth = useAuth()
+const issuerEnabled = String(useRuntimeConfig().public.issuerEnabled) === '1'
+await auth.load()
 const clientReady = ref(false)
 
 const localeItems = computed(() =>
@@ -15,7 +19,25 @@ const navigation = computed(() => [
   { label: t('nav.explorer'), to: localePath('/schemas') },
   { label: t('nav.create'), to: localePath('/studio') },
   { label: t('nav.verify'), to: localePath('/verify') },
+  ...(account.value
+    ? [
+        {
+          label: t('nav.wallet'),
+          to: localePath('/credentials'),
+          'data-testid': 'wallet-space-link',
+        },
+      ]
+    : []),
   { label: t('nav.docs'), to: localePath('/developers') },
+  ...(auth.hasRole('admin') ? [{ label: t('admin.title'), to: localePath('/admin') }] : []),
+  ...(issuerEnabled && auth.user.value
+    ? [
+        {
+          label: t('auth.issuerSpace'),
+          to: localePath(auth.hasRole('issuer') ? '/issuer' : '/issuer/application'),
+        },
+      ]
+    : []),
 ])
 
 const footerLinks = computed(() => [
@@ -78,6 +100,16 @@ onMounted(() => {
           />
         </div>
         <WalletButton />
+        <UButton
+          v-if="auth.enabled.value"
+          :to="localePath(auth.user.value ? '/account' : '/auth/login')"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          data-testid="auth-account-link"
+        >
+          {{ $t(auth.user.value ? 'auth.account' : 'auth.signIn') }}
+        </UButton>
       </template>
 
       <template #body>

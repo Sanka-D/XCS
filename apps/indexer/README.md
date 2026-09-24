@@ -40,14 +40,22 @@ The indexer owns every database command. `drizzle-kit` and the migration runner 
 devDependencies; the web app has none of them.
 
 ```sh
-pnpm --dir apps/indexer db:generate    # regenerate db/migrations after editing db/schema — commit the result
+pnpm --dir apps/indexer db:generate    # add a migration after editing db/schema — retain applied files
 pnpm --dir apps/indexer db:migrate     # apply migrations to an existing database (idempotent)
 pnpm --dir apps/indexer db:bootstrap   # migrate + provision xcs_indexer / xcs_api / xcs_monitor
 ```
 
-`db:bootstrap` runs once against a fresh database and needs `XCS_BOOTSTRAP_DATABASE_URL`,
-`XCS_DATABASE_CLUSTER_SCOPE=dedicated` and the three runtime passwords. It is idempotent, which is
-also how a runtime password is rotated. PostgreSQL is provisioned outside this repository; see
+Use `db:bootstrap` for initial provisioning on a dedicated cluster. It needs
+`XCS_BOOTSTRAP_DATABASE_URL`, `XCS_DATABASE_CLUSTER_SCOPE=dedicated` and the required runtime
+passwords; optional application-role passwords enable the auth/admin/issuer services. Re-running
+bootstrap applies the supported migration history and updates grants/passwords. Supply all enabled
+role passwords: omitting an optional password disables that role.
+
+`db:migrate` applies pending migrations without provisioning roles. The committed 0000–0006 history
+supports populated-baseline upgrades and repeated runs; integration tests check preservation of
+profiles and legacy payload bytes/locators. Never rewrite an applied migration. This is not an
+upgrader for arbitrary schema drift or the former Nuxt MVP. See the [shared database contract](../../db/README.md).
+PostgreSQL is provisioned outside this repository; see
 [`docs/database.md`](../../docs/database.md) and the
 [deployment runbook](../../docs/runbooks/deployment.md).
 

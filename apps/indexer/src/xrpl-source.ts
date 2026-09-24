@@ -97,10 +97,18 @@ function normalizeTransaction(value: unknown): LedgerTransaction {
   delete cleanTransaction.metaData
   delete cleanTransaction.hash
 
+  // Nodes add these API conveniences at request time; they are not hashed ledger metadata.
+  const cleanMetadata = { ...metadata }
+  delete cleanMetadata.nftoken_id
+  delete cleanMetadata.nftoken_ids
+  delete cleanMetadata.offer_id
+  delete cleanMetadata.mpt_issuance_id
+  delete cleanMetadata.delivered_amount
+
   return {
     hash: transactionHash,
     transaction: cleanTransaction,
-    metadata: { ...metadata },
+    metadata: cleanMetadata,
     transactionIndex,
   }
 }

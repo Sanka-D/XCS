@@ -25,7 +25,7 @@ import {
   singleRouteQueryValue,
 } from '~/utils/operationLinks'
 import { LOCAL_PAYLOAD_LOCATION } from '~/utils/localPayloadStore'
-import { parseWalletCredentialTransactionError } from '~/utils/walletCompatibility'
+import { walletTransactionErrorMessage } from '~/utils/walletCompatibility'
 
 const route = useRoute()
 const localePath = useLocalePath()
@@ -67,16 +67,17 @@ const message = ref('')
 const result = shallowRef<WalletSubmissionResult | null>(null)
 const busy = computed(() => walletBusy.value || reviewBusy.value)
 const messageDisplay = computed(() => {
+  if (message.value === 'PAYLOAD_DIGEST_MISMATCH') return t('accept.payloadMismatch')
+  if (
+    message.value.startsWith('PAYLOAD_') ||
+    message.value === 'CREDENTIAL_PAYLOAD_REVIEW_FAILED'
+  ) {
+    return t('accept.payloadUnavailable')
+  }
   if (message.value === 'CREDENTIAL_LINK_SUBJECT_WALLET_MISMATCH') {
     return t('accept.subjectWalletMismatch')
   }
-  const walletTransactionError = parseWalletCredentialTransactionError(message.value)
-  return walletTransactionError
-    ? t('wallet.errors.credentialUnsupported', {
-        wallet: walletTransactionError.walletName,
-        transactionType: walletTransactionError.transactionType,
-      })
-    : message.value
+  return walletTransactionErrorMessage(message.value, t) ?? message.value
 })
 const messageIsLocalized = computed(
   () => message.value.length > 0 && messageDisplay.value !== message.value,
@@ -182,7 +183,7 @@ watch(
   },
 )
 
-function setPayloadConsent(granted: boolean) {
+async function setPayloadConsent(granted: boolean) {
   if (!granted) {
     payloadConsent.value = false
     payloadConsentToken.value = null
@@ -197,6 +198,7 @@ function setPayloadConsent(granted: boolean) {
     payloadConsentToken.value = createPayloadFetchConsentToken(acceptanceReview.value)
     payloadConsent.value = true
     message.value = ''
+    await buildPreview()
   } catch (error) {
     payloadConsent.value = false
     payloadConsentToken.value = null
@@ -204,7 +206,7 @@ function setPayloadConsent(granted: boolean) {
   }
 }
 
-function setIssuerTrustAcknowledgement(granted: boolean) {
+async function setIssuerTrustAcknowledgement(granted: boolean) {
   if (!granted) {
     issuerTrustAcknowledgementToken.value = null
     if (transaction.value === null) return
@@ -222,6 +224,7 @@ function setIssuerTrustAcknowledgement(granted: boolean) {
       reviewProfileId.value,
     )
     message.value = ''
+    if (payloadConsent.value) await buildPreview()
   } catch (error) {
     issuerTrustAcknowledgementToken.value = null
     message.value = error instanceof Error ? error.message : String(error)
@@ -380,6 +383,7 @@ async function assertLinkedGenerationCoordinates(input: {
 }
 
 async function buildPreview() {
+  if (busy.value) return
   previewRevision += 1
   transaction.value = null
   message.value = ''
@@ -428,7 +432,7 @@ async function buildPreview() {
     reviewProfileId.value = profile.profileId
     schemaDetail.value = loaded.schema
     if (selectedAction === 'accept' && !consent) {
-      message.value = payloadHostBlockReason.value ?? 'CREDENTIAL_PAYLOAD_CONSENT_REQUIRED'
+      message.value = payloadHostBlockReason.value ?? ''
       return
     }
     const reason = credentialActionBlockReason(
@@ -437,6 +441,8 @@ async function buildPreview() {
       trustAcknowledgement ?? undefined,
       profile.profileId,
     )
+    // The next visible step asks for this acknowledgement. It is not an error.
+    if (reason === 'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED') return
     if (reason) throw new Error(reason)
 
     const raw =
@@ -659,8 +665,6 @@ async function submit() {
       :title="$t('accept.title')"
       :lead="$t('accept.description')"
     />
-    <StatusBox tone="warning">{{ $t('accept.notTruth') }}</StatusBox>
-
     <UCard class="mb-6">
       <div class="grid gap-5">
         <UFormField :label="$t('accept.action')">
@@ -687,26 +691,26 @@ async function submit() {
           />
         </UFormField>
         <div>
-          <UButton :disabled="busy" @click="buildPreview">
-            {{
-              busy
-                ? $t('common.working')
-                : action === 'accept' && review && payloadConsent
-                  ? $t('accept.fetchAndPrepare')
-                  : $t('accept.review')
-            }}
+          <UButton type="button" :disabled="busy" @click="buildPreview">
+            {{ busy ? $t('common.working') : $t('accept.review') }}
           </UButton>
         </div>
       </div>
     </UCard>
 
-    <StatusBox v-if="message" tone="error" data-testid="accept-error" :title="messageDisplay">
+    <StatusBox
+      v-if="message && (!review || result)"
+      tone="error"
+      role="alert"
+      data-testid="accept-error"
+      :title="messageDisplay"
+    >
       <p v-if="messageIsLocalized">
         <code>{{ message }}</code>
       </p>
     </StatusBox>
-
-    <UCard v-if="review" class="mb-6">
+    <!-- The review is a pre-signing snapshot, not the state after ledger validation. -->
+    <UCard v-if="review && !result" class="mb-6" data-testid="credential-subject-review">
       <template #header>
         <h2 class="text-xl font-semibold">{{ $t('accept.exactCredential') }}</h2>
       </template>
@@ -721,31 +725,15 @@ async function submit() {
         </dd>
         <dt>Schema</dt>
         <dd>
-          <strong v-if="schemaDetail">{{ schemaDetail.name }}</strong>
-          <code>{{ review.schemaUid }}</code>
+          <strong>{{ schemaDetail?.name ?? review.schemaUid }}</strong>
         </dd>
         <dt>{{ $t('accept.expiration') }}</dt>
         <dd>{{ review.expiration ?? $t('accept.noExpiration') }}</dd>
-        <dt>URI</dt>
-        <dd>
-          <code>{{ review.uri ?? '—' }}</code>
-        </dd>
-        <dt>{{ $t('accept.generation') }}</dt>
-        <dd>
-          <code>{{ review.generationId }}</code>
-        </dd>
         <dt>{{ $t('accept.state') }}</dt>
         <dd><StatusPill :value="review.state" /></dd>
-        <dt>{{ $t('accept.acceptedFlag') }}</dt>
-        <dd>
-          <code>{{ review.accepted }}</code>
-        </dd>
       </MetadataList>
 
-      <!-- The legacy accept verification grid had no trust note. -->
-      <VerificationGrid v-if="acceptanceReview" :report="acceptanceReview.report" :note="false" />
-
-      <StatusBox v-if="action === 'accept' && !acceptanceReview?.claims" tone="warning">
+      <StatusBox v-if="action === 'accept' && !acceptanceReview?.claims" tone="notice">
         <p>
           {{
             $t(
@@ -756,9 +744,9 @@ async function submit() {
             )
           }}
         </p>
-        <StatusBox v-if="payloadHostBlockReason" tone="error">
-          {{ payloadHostBlockMessage }}
-        </StatusBox>
+        <StatusBox v-if="payloadHostBlockReason" tone="error">{{
+          payloadHostBlockMessage
+        }}</StatusBox>
         <UCheckbox
           v-else
           data-testid="payload-consent"
@@ -770,44 +758,109 @@ async function submit() {
           @update:model-value="setPayloadConsent(Boolean($event))"
         />
       </StatusBox>
+      <p v-if="reviewBusy" role="status" aria-live="polite">{{ $t('accept.checking') }}</p>
+      <template v-if="action === 'accept' && acceptanceReview?.claims">
+        <h2 class="mt-6 mb-2 text-xl font-semibold">{{ $t('accept.publicClaims') }}</h2>
+        <MetadataList data-testid="credential-claims">
+          <template v-for="(value, key) in acceptanceReview.claims" :key="key">
+            <dt>{{ key }}</dt>
+            <dd>{{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}</dd>
+          </template>
+        </MetadataList>
+      </template>
       <StatusBox
         v-if="action === 'accept' && acceptanceReview?.report.issuerTrust === 'unknown'"
-        tone="warning"
+        tone="notice"
         data-testid="issuer-trust-acknowledgement"
       >
         <p>{{ $t('accept.issuerUnknown') }}</p>
         <UCheckbox
           :model-value="issuerTrustAcknowledgementToken !== null"
-          :disabled="busy"
+          :disabled="busy || !acceptanceReview?.claims"
           :label="$t('accept.issuerAcknowledgement')"
           @update:model-value="setIssuerTrustAcknowledgement(Boolean($event))"
         />
       </StatusBox>
-      <template v-if="action === 'accept'">
-        <h2 class="mt-6 mb-2 text-xl font-semibold">{{ $t('accept.publicClaims') }}</h2>
-        <JsonBlock
-          v-if="acceptanceReview?.claims"
-          :code="JSON.stringify(acceptanceReview.claims, null, 2)"
-        />
-        <StatusBox v-else-if="acceptanceReview?.payloadReviewError" tone="error">
-          {{ $t('accept.payloadUnavailable') }}
-          <code>{{ acceptanceReview.payloadReviewError }}</code>
-        </StatusBox>
-        <p v-if="acceptanceReview?.payloadDigestHex" class="text-sm break-words text-muted">
-          {{ acceptanceReview.payloadByteLength }} bytes ·
-          <code>{{ acceptanceReview.payloadDigestHex }}</code>
-        </p>
-      </template>
-      <StatusBox v-if="blockReasonMessage" tone="error">{{ blockReasonMessage }}</StatusBox>
-      <StatusBox v-else-if="action === 'reject'" tone="warning">
-        {{ $t('accept.rejectSafety') }}
+      <p v-if="action === 'accept'" class="text-sm text-muted">{{ $t('accept.notTruth') }}</p>
+      <p v-if="blockReason === 'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED'" class="text-sm text-muted">
+        {{ blockReasonMessage }}
+      </p>
+      <StatusBox v-else-if="blockReasonMessage" tone="error">{{ blockReasonMessage }}</StatusBox>
+      <StatusBox v-else-if="action === 'reject'" tone="warning">{{
+        $t('accept.rejectSafety')
+      }}</StatusBox>
+      <StatusBox v-else-if="action === 'remove'" tone="warning">{{
+        $t('accept.removeSafety')
+      }}</StatusBox>
+      <StatusBox
+        v-if="message"
+        tone="error"
+        role="alert"
+        data-testid="accept-error"
+        :title="messageDisplay"
+      >
+        <details v-if="messageIsLocalized">
+          <summary>{{ $t('accept.technicalDetails') }}</summary>
+          <code>{{ message }}</code>
+        </details>
       </StatusBox>
-      <StatusBox v-else-if="action === 'remove'" tone="warning">
-        {{ $t('accept.removeSafety') }}
-      </StatusBox>
+      <TransactionPreview
+        v-if="action === 'accept'"
+        :transaction="transaction"
+        :busy="busy"
+        compact
+        :confirm-label="$t('accept.acceptInWallet')"
+        @confirm="submit"
+      />
+      <p v-if="action === 'accept' && transaction" class="text-sm text-muted">
+        {{ $t('accept.walletNext') }}
+      </p>
+      <UButton
+        v-if="
+          action === 'accept' && payloadConsent && !transaction && !busy && message && !blockReason
+        "
+        color="neutral"
+        variant="outline"
+        type="button"
+        @click="buildPreview"
+        >{{ $t('accept.retry') }}</UButton
+      >
+      <details class="mt-5 rounded-lg p-4 ring-1 ring-default">
+        <summary class="cursor-pointer font-semibold">{{ $t('accept.technicalDetails') }}</summary>
+        <MetadataList class="mt-4">
+          <dt>Schema UID</dt>
+          <dd>
+            <code>{{ review.schemaUid }}</code>
+          </dd>
+          <dt>URI</dt>
+          <dd>
+            <code>{{ review.uri ?? '—' }}</code>
+          </dd>
+          <dt>{{ $t('accept.generation') }}</dt>
+          <dd>
+            <code>{{ review.generationId }}</code>
+          </dd>
+          <dt>{{ $t('accept.acceptedFlag') }}</dt>
+          <dd>
+            <code>{{ review.accepted }}</code>
+          </dd>
+          <template v-if="acceptanceReview?.payloadDigestHex">
+            <dt>SHA-256</dt>
+            <dd>
+              <code>{{ acceptanceReview.payloadDigestHex }}</code>
+            </dd>
+          </template>
+        </MetadataList>
+        <VerificationGrid v-if="acceptanceReview" :report="acceptanceReview.report" :note="false" />
+      </details>
     </UCard>
 
-    <TransactionPreview :transaction="transaction" :busy="busy" @confirm="submit" />
+    <TransactionPreview
+      v-if="action !== 'accept'"
+      :transaction="transaction"
+      :busy="busy"
+      @confirm="submit"
+    />
     <BusinessFinality
       v-if="result"
       :tx-hash="result.txHash"

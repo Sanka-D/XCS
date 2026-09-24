@@ -102,6 +102,41 @@ describe('normalizeLedgerResponse', () => {
     })
   })
 
+  it.each<[string, unknown]>([
+    ['nftoken_id', FIRST_TX_HASH],
+    ['nftoken_ids', [FIRST_TX_HASH]],
+    ['offer_id', FIRST_TX_HASH],
+    ['mpt_issuance_id', '1'.repeat(48)],
+    ['delivered_amount', '1'],
+  ])(
+    'ignores the synthetic API metadata field %s without mutating the response',
+    (field, value) => {
+      const decorated = response()
+      const metadata = record(transactions(decorated)[0]!.meta)
+      metadata[field] = value
+
+      expect(normalizeLedgerResponse(decorated)).toEqual(normalizeLedgerResponse(response()))
+      expect(metadata[field]).toEqual(value)
+    },
+  )
+
+  it.each<[string, unknown]>([
+    ['DeliveredAmount', '1'],
+    ['AffectedNodes', [{ ModifiedNode: { LedgerEntryType: 'AccountRoot' } }]],
+    ['TransactionResult', 'tecFAILED'],
+    ['FutureCanonicalField', 'preserved'],
+  ])('preserves %s for the quorum to detect canonical metadata differences', (field, value) => {
+    const changed = response()
+    const metadata = record(transactions(changed)[0]!.meta)
+    metadata[field] = value
+    metadata.delivered_amount = '1'
+
+    const normalized = normalizeLedgerResponse(changed)
+    expect(normalized).not.toEqual(normalizeLedgerResponse(response()))
+    expect(normalized.transactions[1]!.metadata[field]).toEqual(value)
+    expect(normalized.transactions[1]!.metadata).not.toHaveProperty('delivered_amount')
+  })
+
   it('rejects a ledger that is not marked validated or closed', () => {
     const unvalidated = response()
     unvalidated.validated = false

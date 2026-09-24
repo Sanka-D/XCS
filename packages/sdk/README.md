@@ -33,6 +33,15 @@ seeds, or private keys. Browser and service hosts can persist a validated signed
 that hook rejects, the SDK keeps the journal stage `signed` so the host's persisted artifact remains
 recoverable instead of being mislabeled as a terminal signing failure.
 
+`getTransactionStatus` returns `not_found`, not `expired`, when the node cannot find a hash.
+An open ledger beyond `LastLedgerSequence` does not prove that the transaction failed: it may
+still validate in the preceding ledger or be missing from this node's history. Polling keeps
+reconciling until a validated result or the timeout; a timeout remains `pending`. The current
+journal does not store the submission-window start needed to prove final absence, so it does
+not automatically release an unresolved operation's business lock. `LastLedgerSequence` still
+prevents XRPL from validating the signed blob in a later ledger. See
+[XRPL reliable submission](https://xrpl.org/docs/concepts/transactions/reliable-transaction-submission).
+
 ## Network safety
 
 `connectAndValidateNetwork` checks the connected network ID, required amendment, and profile
