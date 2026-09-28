@@ -16,6 +16,11 @@ For a real profile:
 6. copy the example to `testnet.json` and replace every placeholder;
 7. publish the exact file and its SHA-256 digest.
 
+[`docs/runbooks/blackhole-ceremony.md`](../../docs/runbooks/blackhole-ceremony.md) walks an operator
+through exactly those steps, stage by stage, with the guards and the recovery path. The stages are
+`pnpm --dir apps/indexer ceremony <stage>`; they reuse the indexer's own preflight checks, so the
+script cannot drift from what the indexer enforces at start-up.
+
 Never reuse a `profileId` after a Testnet reset or after changing any profile field, and never copy
 its registry address into a Mainnet profile. Publish a new profile and activation boundary instead
 of editing the prior profile in place.

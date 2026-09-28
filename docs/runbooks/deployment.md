@@ -61,6 +61,10 @@ reach a steady state until an operator supplies a profile naming a genuinely bla
 account, whose blackhole ceremony has been completed and independently audited as described in
 `config/networks/README.md`.
 
+Run the ceremony with [`blackhole-ceremony.md`](./blackhole-ceremony.md), which drives each stage as
+`pnpm --dir apps/indexer ceremony <stage>`, proves receivability with a real one-drop payment, emits
+`config/networks/testnet.json` and prints the digest to publish.
+
 Save a normal audited result as `config/networks/testnet.json` and point `XCS_NETWORK_PROFILE` at it.
 Do not edit a profile after indexing starts: a Testnet reset or a changed profile field requires a
 new profile ID and a new database history. Set `XCS_DATABASE_SCOPE=exclusive-profile` so one database
