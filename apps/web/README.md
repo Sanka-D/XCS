@@ -173,22 +173,22 @@ used by every visitor of that XCS deployment. Register the deployment origin wit
 as an exact redirect URI in the Xaman Developer Console. XCS uses that stable root callback from
 every page; it never uses the current route as the OAuth callback.
 
-The two third-party wallet licences that are not on the dependency allowlist are recorded in
-`ops/security/license-acceptances.json`, which the licence CI job reads alongside
-`ops/security/license-overrides.json`. The GemWallet permission, granted by Florent Bouron in
-January 2026, covers public and beta use of the GemWallet API, which its dual `LICENSE` otherwise
-reserves (its MIT-like arm allows only personal, educational and non-public research use). The
-WalletConnect Community License Agreement is accepted on its attribution and usage-threshold
-conditions: attribution is carried by `packages/xrpl-connect/THIRD_PARTY_NOTICES.md` upstream in
-`XRPL-Commons/xrpl-connect`, and the XCS maintainer attested on 2026-09-28 that XRPL Commons is below
-the agreement's usage thresholds. Each entry pins the reviewed licence file by SHA-256, so the gate
-reopens if upstream changes its terms. Reclassifying either licence as MIT, returning to `0.8.2` or
-deleting the declared dependencies would only hide the same bundled code from the licence scanner; it
+Two third-party wallet licences are not plain permissive SPDX identifiers, and
+`docs/third-party-licenses.md` records why XCS may ship them. The GemWallet permission, granted by
+Florent Bouron in January 2026, covers public and beta use of the GemWallet API, which its dual
+`LICENSE` otherwise reserves (its MIT-like arm allows only personal, educational and non-public
+research use). The WalletConnect Community License Agreement is covered by its attribution and
+usage-threshold conditions: attribution is carried by `packages/xrpl-connect/THIRD_PARTY_NOTICES.md`
+upstream in `XRPL-Commons/xrpl-connect`, and the XCS maintainer attested on 2026-09-28 that XRPL
+Commons is below the agreement's usage thresholds. No CI job verifies any of this, so re-read that
+note before a release that changes wallet dependencies. Reclassifying either licence as MIT,
+returning to `0.8.2` or deleting the declared dependencies would only hide the same bundled code; it
 is not a compliant workaround, and the upstream adapter packages are not yet published separately.
 
 `vaul-vue@0.4.1` arrives through Nuxt UI's drawer component, reports no licence and ships no licence
 file, so `patches/vaul-vue@0.4.1.patch` adds the verbatim upstream MIT text (Copyright (c) 2025
-unovue) and an ordinary override records it as MIT against that file's digest.
+unovue). Keep that patch: distributing the component without its licence text would breach the MIT
+notice condition.
 
 The workspace applies `patches/xrpl-connect@1.0.0-rc.0.patch` while that release candidate is
 pinned. Xaman's OAuth provider serializes `network_id` as a decimal string and may omit optional

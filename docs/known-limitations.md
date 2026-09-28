@@ -124,14 +124,12 @@ integrators.
 - `--ignore-workspace` is mandatory on every per-app pnpm command that resolves dependencies
   (`install`, `audit`, `licenses list`). Without it pnpm silently operates on the root workspace and
   still exits 0, so an audit or licence report can appear to pass while covering the wrong lockfile.
-- The licence CI job passes for all three dependency graphs, and the three non-allowlisted wallet
-  licences are recorded rather than waved through. `ops/security/license-acceptances.json` holds the
-  GemWallet permission and the WalletConnect Community License compliance review;
-  `ops/security/license-overrides.json` holds `vaul-vue`, whose upstream MIT text is restored by
-  `apps/web/patches/vaul-vue@0.4.1.patch` because the published package ships no licence file. Every
-  entry pins the reviewed licence text by SHA-256, so the job turns red again the moment upstream
-  changes its terms or an entry outlives its dependency. The allowlist itself must not be widened to
-  absorb a non-standard licence.
+- No CI job checks dependency licences. The self-imposed licence policy gate was removed once the
+  questions it existed to surface had been answered; those answers now live in
+  `docs/third-party-licenses.md`, which records each non-permissive licence, the permission or
+  review behind it, and the SHA-256 of the exact text that was reviewed. Nothing recomputes those
+  digests, so a change to upstream terms will pass unnoticed. Re-read that note before a release
+  that changes wallet dependencies.
 - PostgreSQL is provisioned outside this repository. The Compose stack — including the `monitoring`
   and `demo-pinning` profiles — is local development only: it carries no secret-file mechanism and
   passes Grafana's admin password and the exporter's database password as plain container
@@ -155,8 +153,8 @@ integrators.
   application identifier removes the corresponding adapter. Each self-hosted origin still needs a
   Xaman application registration; the Commons public application ID cannot authorize arbitrary
   third-party redirect origins.
-- The two wallet licence gates are closed by recorded acceptances in
-  `ops/security/license-acceptances.json`, not by reclassification. GemWallet's `LICENSE` is dual: its
+- The two wallet licences are covered by permission and review, recorded in
+  `docs/third-party-licenses.md`, not by reclassification. GemWallet's `LICENSE` is dual: its
   MIT-like arm covers personal, educational and non-public research use only, and public, commercial
   or beta use needs GemWallet's permission. Commons holds that permission, granted by Florent Bouron
   in January 2026, and it covers public and beta use of the GemWallet API. The WalletConnect
