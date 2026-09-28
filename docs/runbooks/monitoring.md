@@ -35,10 +35,19 @@ cannot prove those external conditions by configuration alone.
 
 ## Enable the profile
 
-Requires Docker Compose `2.24.4` or newer. In `.env` (copied from `.env.compose.example`):
+Requires Docker Compose `2.24.4` or newer.
+
+The metrics routes are a feature flag, so they live in checked-in code rather than in the deployment
+contract. Turn them on in `apps/web/server/xcs/settings.ts` and rebuild the web image:
+
+```ts
+XCS_METRICS_ENABLED: 'true',
+```
+
+Without that edit the two `/internal/metrics*` routes are not registered at all and answer `404`
+whatever token is presented. Then, in `.env` (copied from `.env.compose.example`):
 
 ```dotenv
-XCS_METRICS_ENABLED=true
 XCS_METRICS_TOKEN=<32+ URL-safe random characters>
 XCS_MONITOR_DATABASE_PASSWORD=<the value db:bootstrap provisioned for xcs_monitor>
 XCS_GRAFANA_ADMIN_USER=xcs_admin

@@ -25,6 +25,7 @@ import { computeProjectionDigest } from './projection-digest.js'
 import { QuorumLedgerSource } from './quorum-ledger-source.js'
 import { loadReplayTarget, type ReplayTarget } from './replay-target.js'
 import { PostgresIndexerRepository } from './repository.js'
+import { indexerEnvironment } from './settings.js'
 import { sourceErrorCode } from './source-errors.js'
 import { IndexerWorker } from './worker.js'
 import { XrplLedgerSource } from './xrpl-source.js'
@@ -42,8 +43,12 @@ class MaintenanceError extends Error {
   }
 }
 
+// Operator commands read the same settings-applied environment as the worker,
+// so a checked-in setting cannot be bypassed by running a maintenance command.
+const environment = indexerEnvironment()
+
 function requiredEnvironment(name: string): string {
-  const value = process.env[name]
+  const value = environment[name]
   if (value === undefined || value.trim().length === 0) {
     throw new MaintenanceError('MAINTENANCE_USAGE_INVALID', `${name} is required`)
   }

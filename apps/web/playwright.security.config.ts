@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig, devices } from '@playwright/test'
 
 const baseURL = 'http://127.0.0.1:3101'
@@ -30,7 +32,11 @@ export default defineConfig({
       NITRO_PORT: '3101',
       NUXT_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_BROWSER_E2E_MODE: 'disabled',
-      NUXT_PUBLIC_PROFILE_ID: 'commons-testnet-xcs-v0.1-controlled-pilot',
+      // The browser-visible profile identifier is derived from this file's
+      // `profileId`; there is no separate variable for it.
+      XCS_NETWORK_PROFILE: fileURLToPath(
+        new URL('./test/fixtures/network-profiles/controlled-pilot.json', import.meta.url),
+      ),
       XCS_BROWSER_E2E: '0',
       XCS_LOCAL_PAYLOAD_STORE: '0',
       // The production build boots the real API context; the address is

@@ -113,11 +113,12 @@ third-party integrator call. It reads the indexer's PostgreSQL projection as the
 | `POST` | `/v1/pinning/challenges`                                                                |
 | `POST` | `/v1/pinning/pins`                                                                      |
 
-The two pinning routes answer `404` unless `XCS_DEMO_PINNING_ENABLED=true` for the requested profile.
+The two pinning routes answer `404` unless demo pinning is turned on for the requested profile in
+`server/xcs/settings.ts`. It is off in the checked-in settings.
 
 Authoritative ledger-derived routes fail closed: they return `503` when the indexer's writer lease,
 source agreement, checkpoint, transaction-root evidence or freshness
-(`XCS_READINESS_MAX_LEDGER_AGE_SECONDS`, default 120 seconds) do not hold. Discovery is deliberately
+(`readinessMaxLedgerAgeSeconds` in `server/xcs/settings.ts`, 120 seconds) do not hold. Discovery is deliberately
 exact — there is no subject feed, account-wide enumeration or claims search.
 
 ### OpenAPI
@@ -140,8 +141,8 @@ process — and restrict all three at the ingress to the load balancer and monit
 
 ### Metrics
 
-`XCS_METRICS_ENABLED=true` exposes two routes, both requiring `Authorization: Bearer
-$XCS_METRICS_TOKEN`, both `Cache-Control: no-store`, neither consuming the public rate-limit budget:
+Turning `XCS_METRICS_ENABLED` on in `server/xcs/settings.ts` exposes two routes, both requiring
+`Authorization: Bearer $XCS_METRICS_TOKEN`, both `Cache-Control: no-store`, neither consuming the public rate-limit budget:
 
 - `GET /internal/metrics` — a bounded JSON operator snapshot (schema version 1);
 - `GET /internal/metrics/prometheus` — the Prometheus exposition Prometheus scrapes.
@@ -356,13 +357,18 @@ XRPL WSS endpoint.
 
 ## Configuration
 
-The complete contract is [`.env.example`](./.env.example). A minimal deployment sets:
+The complete contract is [`.env.example`](./.env.example): secrets and per-deployment values only.
+Behavioural settings and feature flags -- payload fetching, demo pinning, the metrics routes, the
+IPFS endpoints, the readiness threshold and the static issuer trust policy -- are checked-in code in
+[`server/xcs/settings.ts`](./server/xcs/settings.ts), with the same parsing and the same error
+messages as before. Changing one is a reviewed code change and an image rebuild, and a deployment
+variable of the same name has no effect. A minimal deployment sets:
 
 ```bash
 XCS_DATABASE_URL=postgres://xcs_api:...@db.example:5432/xcs
 XCS_ALLOWED_ORIGINS=https://xcs.example
 XCS_TRUSTED_PROXY_CIDRS=10.42.0.2/32
-NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
+XCS_NETWORK_PROFILE=/workspace/config/networks/testnet.json
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_XAMAN_API_KEY=optional-public-xaman-application-id
 NUXT_PUBLIC_XAMAN_REDIRECT_URL=https://xcs.example/
@@ -380,8 +386,14 @@ behind an undeclared proxy.
 
 The active network profile is read from this application's own `/v1` API, parsed locally and matched
 against the RPC server's reported `network_id` before autofill and again before signing or recovery.
-This alpha rejects profiles other than XRPL Testnet (`networkId: 1`). If `NUXT_PUBLIC_PROFILE_ID` is
-omitted, exactly one Testnet profile must be available.
+This alpha rejects profiles other than XRPL Testnet (`networkId: 1`).
+
+The browser-visible profile identifier is the `profileId` inside the profile file named by
+`XCS_NETWORK_PROFILE` -- the same published file the indexer indexes -- rather than a variable of its
+own. The retired `NUXT_PUBLIC_PROFILE_ID` duplicated that value with nothing checking the two agreed,
+so a mismatch could have labelled one network's data with another network's name. A named profile is
+parsed at start-up and fails closed. If `XCS_NETWORK_PROFILE` is omitted the identifier is empty, and
+then exactly one Testnet profile must be available.
 
 `NUXT_PUBLIC_XAMAN_API_KEY` and `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` are optional public
 application identifiers. Omitting either variable removes only that adapter; it does not prevent the

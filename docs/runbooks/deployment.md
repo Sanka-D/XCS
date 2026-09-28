@@ -87,7 +87,12 @@ XCS_REGISTRY_POLICY=controlled-testnet-pilot
 XCS_CONTROLLED_PILOT_ACK=DISPOSABLE_PROFILE_AND_DATABASE
 ```
 
-and the web app serves it with `NUXT_PUBLIC_PROFILE_ID=commons-testnet-xcs-v0.1-controlled-pilot`.
+plus `XCS_DATABASE_SCOPE=exclusive-profile`, and both services name the pilot's profile file in
+`XCS_NETWORK_PROFILE`. The web app derives the browser-visible identifier
+(`commons-testnet-xcs-v0.1-controlled-pilot`) from that file; there is no separate variable for it.
+These four are the only settings the environment may still override -- the safe defaults
+(`blackholed`, `shared`, no acknowledgement) live in `apps/indexer/src/settings.ts`, and the
+acknowledgement itself has no default.
 
 This registry, profile and database cannot be promoted. Before public beta, create a different
 registry, complete and independently audit the normal blackhole ceremony, publish a new profile ID
@@ -217,8 +222,10 @@ five are read by `db:bootstrap` alone and must not be given to the service.
   logged. Distinct URLs alone are not evidence of independent operation; record the two operators in
   the deployment review. Plain `ws://` is accepted only on loopback for local development. Clio is
   not a supported source.
-- Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes, and at least three times the
-  polling interval.
+- The polling interval, the writer-lease duration and the batch size are checked-in settings in
+  `apps/indexer/src/settings.ts`, not deployment inputs. The lease stays between 10 seconds and 5
+  minutes and at least three times the polling interval; the same validation rejects a bad edit at
+  start-up.
 - Run the preflight before enabling the service:
 
   ```sh
@@ -237,9 +244,12 @@ five are read by `db:bootstrap` alone and must not be given to the service.
   discard incoming forwarding headers and write its own canonical client address. Leave it empty for
   direct exposure; never use a wildcard or a catch-all `/0`. An undeclared proxy is safe but
   collapses its visitors into one shared rate-limit budget.
-- `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` (default 120) governs readiness and every authoritative
-  ledger-derived route. Stale, inconsistent or implausibly future evidence returns `503`.
-- `NUXT_PUBLIC_PROFILE_ID` is the profile this deployment serves.
+- The readiness staleness threshold (120 seconds) is a checked-in setting in
+  `apps/web/server/xcs/settings.ts`, and it governs readiness and every authoritative ledger-derived
+  route. Stale, inconsistent or implausibly future evidence returns `503`.
+- `XCS_NETWORK_PROFILE` names the profile file this deployment serves -- the same published file the
+  indexer indexes. The browser-visible profile identifier is that file's `profileId`, so it cannot
+  disagree with the profile the indexer writes.
 - `NUXT_PUBLIC_RPC_URL` is browser-visible and is used for wallet submission only. It must be a
   genuinely public endpoint with no embedded credentials — never a private indexer source. The
   server rejects userinfo and non-TLS public endpoints at startup (`ws://` is loopback-only), but it
@@ -250,17 +260,20 @@ five are read by `db:bootstrap` alone and must not be given to the service.
   trailing slash — in the Xaman Developer Console; each self-hosted origin needs its own Xaman
   application. Omitting an identifier removes only that adapter and leaves the six self-configuring
   XRPL Connect adapters registered.
-- `XCS_METRICS_ENABLED` / `XCS_METRICS_TOKEN` gate the operational snapshot; see
-  [`monitoring.md`](./monitoring.md).
+- `XCS_METRICS_TOKEN` guards the operational snapshot, which the `XCS_METRICS_ENABLED` setting in
+  `apps/web/server/xcs/settings.ts` turns on. See [`monitoring.md`](./monitoring.md).
 
 For both the private controlled pilot and the Commons-hosted Testnet beta, also enforce the product
 boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):
 
-- leave `XCS_TRUSTED_ISSUERS` and `XCS_UNTRUSTED_ISSUERS` empty so Commons publishes no trust badge
+The three settings that carry that boundary are already checked in with the safe values in
+`apps/web/server/xcs/settings.ts`, so a deployment cannot cross it from a secret store:
+
+- `XCS_TRUSTED_ISSUERS` and `XCS_UNTRUSTED_ISSUERS` are empty, so Commons publishes no trust badge
   or issuer allowlist decision;
-- keep `XCS_PAYLOAD_FETCH_ENABLED=false`; the browser retrieves issuer-hosted HTTPS payloads only
+- `XCS_PAYLOAD_FETCH_ENABLED` is `false`; the browser retrieves issuer-hosted HTTPS payloads only
   after consent and sends parsed content for validation without server-side resolution;
-- keep `XCS_DEMO_PINNING_ENABLED=false`; the issuer, not Commons, operates the public HTTPS payload
+- `XCS_DEMO_PINNING_ENABLED` is `false`; the issuer, not Commons, operates the public HTTPS payload
   host;
 - do not add a subject feed, account-wide Credential export or claims ingestion to the deployment.
 
@@ -390,14 +403,21 @@ schema and requires no database rollback. Never route around an adapter failure 
 
 ## Optional Testnet demo pinning
 
-Pinning is disabled by default. It is only intended for public, non-sensitive Testnet examples. To
-enable it on the web app, set all of the following:
+Pinning is disabled by default. It is only intended for public, non-sensitive Testnet examples.
+Because it is a feature flag, enabling it is a reviewed code change in
+`apps/web/server/xcs/settings.ts` followed by an image rebuild, not a deployment variable:
+
+```ts
+XCS_DEMO_PINNING_ENABLED: 'true',
+XCS_PINNING_NETWORKS: '<exact-profile-id>',
+XCS_IPFS_API_URL: '<kubo-rpc-endpoint>',
+```
+
+The one value that stays in the deployment contract is the secret, which is read only once the flag
+above is on:
 
 ```dotenv
-XCS_DEMO_PINNING_ENABLED=true
-XCS_PINNING_NETWORKS=<exact-profile-id>
 XCS_PINNING_IP_HASH_SECRET=<at-least-32-random-bytes>
-XCS_IPFS_API_URL=<kubo-rpc-endpoint>
 ```
 
 Locally, the `demo-pinning` Compose profile provides an isolated Kubo node:
@@ -406,8 +426,8 @@ Locally, the `demo-pinning` Compose profile provides an isolated Kubo node:
 docker compose --profile demo-pinning up --build
 ```
 
-If server-side verification should read from that node, also set `XCS_PAYLOAD_FETCH_ENABLED=true` and
-point `XCS_IPFS_GATEWAY_URL` at it. The wallet challenge, per-wallet/IP quotas, 64 KiB demo limit,
+If server-side verification should read from that node, also set `XCS_PAYLOAD_FETCH_ENABLED` to
+`'true'` in the same settings module and point `XCS_IPFS_GATEWAY_URL` there at it. The wallet challenge, per-wallet/IP quotas, 64 KiB demo limit,
 90-day retention and cleanup job reduce abuse; they cannot detect all personal data. Never pin PII,
 secrets or production credentials.
 

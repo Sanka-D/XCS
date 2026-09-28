@@ -1,6 +1,8 @@
 import { isIP } from 'node:net'
 import { isValidClassicAddress } from 'xrpl'
 
+import { apiEnvironment, apiSettings } from './settings'
+
 export interface ApiConfig {
   databaseUrl: string
   trustedProxyCidrs: string[]
@@ -27,7 +29,11 @@ export interface ApiConfig {
 }
 
 function operationalMetrics(environment: NodeJS.ProcessEnv): ApiConfig['operationalMetrics'] {
-  const enabled = strictBoolean(environment.XCS_METRICS_ENABLED, false, 'XCS_METRICS_ENABLED')
+  const enabled = strictBoolean(
+    environment.XCS_METRICS_ENABLED ?? apiSettings.XCS_METRICS_ENABLED,
+    false,
+    'XCS_METRICS_ENABLED',
+  )
   if (!enabled) return { enabled: false }
 
   const token = required(environment, 'XCS_METRICS_TOKEN')
@@ -37,10 +43,13 @@ function operationalMetrics(environment: NodeJS.ProcessEnv): ApiConfig['operatio
   return { enabled: true, token }
 }
 
-function required(environment: NodeJS.ProcessEnv, name: string): string {
-  const value = environment[name]
+function requiredValue(value: string | undefined, name: string): string {
   if (value === undefined || value.trim().length === 0) throw new Error(`${name} is required`)
   return value
+}
+
+function required(environment: NodeJS.ProcessEnv, name: string): string {
+  return requiredValue(environment[name], name)
 }
 
 function compatibleRequired(
@@ -121,9 +130,10 @@ function origins(value: string | undefined): string[] {
   })
 }
 
-export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+export function loadApiConfig(environment: NodeJS.ProcessEnv = apiEnvironment()): ApiConfig {
   const readinessMaxLedgerAgeSeconds = Number(
-    environment.XCS_READINESS_MAX_LEDGER_AGE_SECONDS ?? '120',
+    environment.XCS_READINESS_MAX_LEDGER_AGE_SECONDS ??
+      apiSettings.XCS_READINESS_MAX_LEDGER_AGE_SECONDS,
   )
   if (
     !Number.isInteger(readinessMaxLedgerAgeSeconds) ||
@@ -133,20 +143,29 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     throw new Error('XCS_READINESS_MAX_LEDGER_AGE_SECONDS must be an integer between 10 and 3600')
   }
   const demoPinningEnabled = strictBoolean(
-    environment.XCS_DEMO_PINNING_ENABLED,
+    environment.XCS_DEMO_PINNING_ENABLED ?? apiSettings.XCS_DEMO_PINNING_ENABLED,
     false,
     'XCS_DEMO_PINNING_ENABLED',
   )
   const demoPinning = demoPinningEnabled
     ? {
         enabled: true as const,
-        kuboRpcUrl: required(environment, 'XCS_IPFS_API_URL'),
+        kuboRpcUrl: requiredValue(
+          environment.XCS_IPFS_API_URL ?? apiSettings.XCS_IPFS_API_URL,
+          'XCS_IPFS_API_URL',
+        ),
         ipHashSecret: required(environment, 'XCS_PINNING_IP_HASH_SECRET'),
-        networks: list(environment.XCS_PINNING_NETWORKS),
+        networks: list(environment.XCS_PINNING_NETWORKS ?? apiSettings.XCS_PINNING_NETWORKS),
       }
     : ({ enabled: false } as const)
-  const trustedIssuers = addressList(environment.XCS_TRUSTED_ISSUERS, 'XCS_TRUSTED_ISSUERS')
-  const untrustedIssuers = addressList(environment.XCS_UNTRUSTED_ISSUERS, 'XCS_UNTRUSTED_ISSUERS')
+  const trustedIssuers = addressList(
+    environment.XCS_TRUSTED_ISSUERS ?? apiSettings.XCS_TRUSTED_ISSUERS,
+    'XCS_TRUSTED_ISSUERS',
+  )
+  const untrustedIssuers = addressList(
+    environment.XCS_UNTRUSTED_ISSUERS ?? apiSettings.XCS_UNTRUSTED_ISSUERS,
+    'XCS_UNTRUSTED_ISSUERS',
+  )
   if (trustedIssuers.some((issuer) => untrustedIssuers.includes(issuer))) {
     throw new Error('XCS_TRUSTED_ISSUERS and XCS_UNTRUSTED_ISSUERS must not overlap')
   }
@@ -154,12 +173,14 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     databaseUrl: compatibleRequired(environment, 'XCS_DATABASE_URL', 'DATABASE_URL'),
     trustedProxyCidrs: trustedProxyCidrs(environment.XCS_TRUSTED_PROXY_CIDRS),
     ipfsGateway:
-      environment.XCS_IPFS_GATEWAY_URL ?? environment.IPFS_GATEWAY_URL ?? 'https://ipfs.io/',
+      environment.XCS_IPFS_GATEWAY_URL ??
+      environment.IPFS_GATEWAY_URL ??
+      apiSettings.XCS_IPFS_GATEWAY_URL,
     trustedIssuers,
     untrustedIssuers,
     allowedOrigins: origins(environment.XCS_ALLOWED_ORIGINS),
     payloadFetchEnabled: strictBoolean(
-      environment.XCS_PAYLOAD_FETCH_ENABLED,
+      environment.XCS_PAYLOAD_FETCH_ENABLED ?? apiSettings.XCS_PAYLOAD_FETCH_ENABLED,
       false,
       'XCS_PAYLOAD_FETCH_ENABLED',
     ),

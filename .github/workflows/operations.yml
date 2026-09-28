@@ -18,11 +18,14 @@ jobs:
       XCS_INDEXER_DATABASE_PASSWORD: compose-ci-indexer-password-0001
       XCS_API_DATABASE_PASSWORD: compose-ci-api-password-000000001
       XCS_MONITOR_DATABASE_PASSWORD: compose-ci-monitor-password-000001
-      XCS_METRICS_ENABLED: 'true'
       XCS_METRICS_TOKEN: compose-ci-metrics-token-000000000001
       XCS_RPC_URL_PRIMARY: wss://primary.invalid.example
       XCS_RPC_URL_SECONDARY: wss://secondary.invalid.example
-      XCS_NETWORK_PROFILE: /workspace/config/networks/testnet.example.json
+      # XCS_NETWORK_PROFILE is deliberately unset. The only committed profile,
+      # config/networks/testnet.example.json, is an invalid template, and both
+      # services now read this file: the indexer (not started here) would refuse
+      # it at preflight and the web service, which derives the browser-visible
+      # profile identifier from it, would refuse to start.
       XCS_PUBLIC_RPC_URL: wss://submission.invalid.example
       XCS_INDEXER_IMAGE: xcs-indexer:ci
       XCS_WEB_IMAGE: xcs-web:ci
@@ -162,12 +165,21 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health/live > /dev/null
           READY_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/health/ready)"
           test "$READY_STATUS" = '503'
-          UNAUTHENTICATED_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/internal/metrics/prometheus)"
-          test "$UNAUTHENTICATED_STATUS" = '401'
-          curl --fail --silent --show-error \
-            --header "Authorization: Bearer $XCS_METRICS_TOKEN" \
-            http://127.0.0.1:3000/internal/metrics/prometheus \
-            | grep --fixed-strings 'xcs_database_available'
+          # The metrics routes are a checked-in feature flag in
+          # apps/web/server/xcs/settings.ts, off by default, so the image this job
+          # builds does not serve them at all and no token can reach them. Assert
+          # the routes are absent rather than gated; turning the flag on is a code
+          # change, and apps/web/test/server/handlers.test.ts covers the enabled
+          # behaviour.
+          for METRICS_PATH in /internal/metrics /internal/metrics/prometheus; do
+            METRICS_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              "http://127.0.0.1:3000${METRICS_PATH}")"
+            test "$METRICS_STATUS" = '404'
+            AUTHENTICATED_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header "Authorization: Bearer $XCS_METRICS_TOKEN" \
+              "http://127.0.0.1:3000${METRICS_PATH}")"
+            test "$AUTHENTICATED_STATUS" = '404'
+          done
 
           if "${COMPOSE[@]}" ps --services --status running | grep --extended-regexp '^(prometheus|grafana|postgres-exporter|node-exporter|ipfs)$'; then
             echo 'A non-core profile service started unexpectedly' >&2
