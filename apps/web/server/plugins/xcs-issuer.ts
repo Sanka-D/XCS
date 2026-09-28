@@ -2,6 +2,7 @@ import { defineNitroPlugin } from 'nitropack/runtime'
 import { createError } from 'h3'
 import { createDatabaseClient } from '../lib/db/index.js'
 import { loadIssuerConfig } from '../xcs/issuer/config'
+import { apiEnvironment } from '../xcs/settings'
 import { createIssuerHandler } from '../xcs/issuer/http'
 import { IssuerRepository } from '../xcs/issuer/repository'
 import { PrivateDocumentStorage } from '../xcs/issuer/storage'
@@ -11,7 +12,7 @@ import type { IssuerServices } from '../xcs/issuer/services'
 import { createPrivateDocumentBackend } from '../xcs/documents/storage'
 
 export default defineNitroPlugin((nitroApp) => {
-  const config = loadIssuerConfig(process.env)
+  const config = loadIssuerConfig(apiEnvironment())
   if (!config) return
   const database = createDatabaseClient(config.databaseUrl, { onNotice: () => undefined })
   const { transport, sender } = createSmtpDelivery(process.env)

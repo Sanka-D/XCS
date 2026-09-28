@@ -42,10 +42,10 @@ requiring a second service.
 
 ## Operational metrics
 
-Set `XCS_METRICS_ENABLED=true` and a dedicated `XCS_METRICS_TOKEN` to expose
-`GET /internal/metrics`. The token must contain 32–256 URL-safe characters and is presented as
+Set a dedicated `XCS_METRICS_TOKEN` to expose `GET /internal/metrics`. Its presence is the only
+enablement switch. The token must contain 32–256 URL-safe characters and is presented as
 `Authorization: Bearer <token>`. The route is absent
-when disabled, hidden from OpenAPI, non-cacheable, and outside public request budgets. Restrict it
+when the token is absent, hidden from OpenAPI, non-cacheable, and outside public request budgets. Restrict it
 to the monitoring network at the ingress even though the token is mandatory.
 
 The versioned JSON snapshot reports each enabled profile's source tips, ledger lag, current
@@ -168,11 +168,13 @@ tuple. Transaction hashes supplied in uppercase are accepted and returned as low
 
 ## Optional hosted Testnet payloads
 
-Disabled by default. Enable with `XCS_HOSTED_PAYLOADS_ENABLED=true`, a short HTTPS origin in
-`XCS_PUBLIC_PAYLOAD_BASE_URL` (no path or trailing slash), comma-separated profile IDs in
-`XCS_HOSTED_PAYLOAD_NETWORKS`, and a distinct `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` of at least
-32 bytes. Docker uses the secret-file overlay described in the deployment runbook.
-The origin must keep the complete credential URI within XRPL's 128-byte limit.
+Disabled when its deployment contract is absent. Supplying any hosted-payload value requires the
+complete contract: a short HTTPS origin in `XCS_PUBLIC_PAYLOAD_BASE_URL` (no path or trailing slash),
+comma-separated profile IDs in `XCS_HOSTED_PAYLOAD_NETWORKS`, a distinct
+`XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` of at least 32 bytes and the `xcs_payload_writer` connection in
+`XCS_PAYLOAD_DATABASE_URL`. The browser-visible origin is derived from that same validated contract;
+there is no second public setting to keep synchronized. The origin must keep the complete credential
+URI within XRPL's 128-byte limit.
 
 - `POST /v1/payloads/:locator` accepts `network`, `payloadBase64` and `signedTransactionBlob`.
   It verifies the signature, exact URI/digest, issuer, subject, resolved schema and indexed

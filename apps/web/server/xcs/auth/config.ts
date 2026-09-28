@@ -1,5 +1,7 @@
 import { readFileSync, statSync } from 'node:fs'
 
+import { apiSettings } from '../settings'
+
 export interface AuthConfig {
   origin: string
   issuerUrl: string
@@ -31,10 +33,16 @@ function seconds(value: string | undefined, fallback: number, max: number): numb
 }
 
 export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig | undefined {
-  if (env.XCS_AUTH_ENABLED !== undefined && !['0', '1'].includes(env.XCS_AUTH_ENABLED)) {
-    throw new Error('XCS_AUTH_ENABLED must be 0 or 1')
-  }
-  if (env.XCS_AUTH_ENABLED !== '1') return undefined
+  const supplied = [
+    'XCS_AUTH_ORIGIN',
+    'XCS_IDENTITY_CLIENT_ID',
+    'XCS_IDENTITY_CLIENT_ID_FILE',
+    'XCS_IDENTITY_CLIENT_SECRET',
+    'XCS_IDENTITY_CLIENT_SECRET_FILE',
+    'NUXT_APP_DATABASE_URL',
+    'NUXT_APP_DATABASE_URL_FILE',
+  ].some((name) => (env[name] ?? '').trim().length > 0)
+  if (!supplied) return undefined
   const clientId = secret(env, 'XCS_IDENTITY_CLIENT_ID')
   const clientSecret = secret(env, 'XCS_IDENTITY_CLIENT_SECRET')
   const databaseUrl = secret(env, 'NUXT_APP_DATABASE_URL')
@@ -42,7 +50,7 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig | undefined {
   let origin: URL, issuer: URL, database: URL
   try {
     origin = new URL(env.XCS_AUTH_ORIGIN ?? '')
-    issuer = new URL(env.XCS_IDENTITY_ISSUER ?? 'https://account.xrpl.in')
+    issuer = new URL(env.XCS_IDENTITY_ISSUER ?? apiSettings.XCS_IDENTITY_ISSUER)
     database = new URL(databaseUrl)
   } catch {
     throw new Error('AUTH_CONFIGURATION_INVALID')
@@ -73,8 +81,16 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig | undefined {
   ) {
     throw new Error('AUTH_APPLICATION_DATABASE_ROLE_REQUIRED')
   }
-  const idleSeconds = seconds(env.XCS_AUTH_IDLE_SECONDS, 1800, 86400)
-  const absoluteSeconds = seconds(env.XCS_AUTH_MAX_SECONDS, 28800, 604800)
+  const idleSeconds = seconds(
+    env.XCS_AUTH_IDLE_SECONDS ?? apiSettings.XCS_AUTH_IDLE_SECONDS,
+    1800,
+    86400,
+  )
+  const absoluteSeconds = seconds(
+    env.XCS_AUTH_MAX_SECONDS ?? apiSettings.XCS_AUTH_MAX_SECONDS,
+    28800,
+    604800,
+  )
   if (idleSeconds > absoluteSeconds) throw new Error('AUTH_DURATION_INVALID')
   return {
     origin: origin.origin,

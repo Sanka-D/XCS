@@ -54,16 +54,11 @@ Inspect applied and pending migrations without DDL using `pnpm --dir apps/indexe
 pnpm --dir apps/indexer db:bootstrap
 ```
 
-Applies migrations and provisions the cluster-wide roles `xcs_indexer`, `xcs_api`,
-`xcs_payload_writer` and `xcs_monitor`. Set `XCS_INDEXER_DATABASE_PASSWORD`,
-`XCS_API_DATABASE_PASSWORD`, `XCS_PAYLOAD_DATABASE_PASSWORD` and `XCS_MONITOR_DATABASE_PASSWORD`,
-directly or through their `_FILE` variants. `XCS_DATABASE_CLUSTER_SCOPE=dedicated` is required
-because these roles are cluster-wide.
-
-Optional `XCS_APP_DATABASE_PASSWORD`, `XCS_ADMIN_DATABASE_PASSWORD`,
-`XCS_NOTIFIER_DATABASE_PASSWORD` and `XCS_ISSUER_DATABASE_PASSWORD` enable the restricted
-`xcs_app`, `xcs_admin_app`, `xcs_notifier` and `xcs_issuer` roles respectively. Omitted optional
-passwords disable those roles and remove their privileges. All passwords must be distinct.
+Before running it, create all eight users through the managed database service: `xcs_indexer`,
+`xcs_api`, `xcs_payload_writer`, `xcs_monitor`, `xcs_app`, `xcs_admin_app`, `xcs_notifier` and
+`xcs_issuer`. The bootstrap requires only the administrator URL and
+`XCS_DATABASE_CLUSTER_SCOPE=dedicated`. It checks every user before DDL, applies migrations and
+least-privilege grants atomically, and never creates a role or reads, changes or rotates a password.
 The operator-only `pnpm --dir apps/indexer admin:bootstrap` command grants the first administrator
 to an existing exact OIDC issuer/subject and writes an audit record; it never matches by email.
 
@@ -76,9 +71,9 @@ signature. The complete deployment journal is therefore `0000`–`0008`. Schemas
 clients, grants and application helpers remain local to each application.
 
 `pnpm --dir apps/indexer test:postgres` runs the migrated DB suites and indexer suite sequentially.
-Use only an isolated disposable cluster configured through `XCS_TEST_DATABASE_URL`: bootstrap
-tests change cluster-wide role passwords. The regular `test` command runs the unit suites and skips
-database integration when that URL is absent.
+Use only an isolated disposable cluster configured through `XCS_TEST_DATABASE_URL`: the tests create
+and remove cluster-wide stand-ins for the managed users. The regular `test` command skips database
+integration when that URL is absent.
 
 ### Never edit an applied migration
 

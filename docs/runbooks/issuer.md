@@ -10,25 +10,22 @@ external delivery and extension-wallet approvals are separate release checks.
 
 ## Provision and enable
 
-Apply migration `0006_issuer_workspace` after auth 0004 and admin 0005, using the existing migration
-runbook. Bootstrap with all existing enabled runtime passwords plus `XCS_ISSUER_DATABASE_PASSWORD`
-or its `_FILE` equivalent. Omitting this password on a later bootstrap disables the issuer role.
+Apply migration `0006_issuer_workspace` after auth 0004 and admin 0005. Create the managed
+`xcs_issuer` user in DigitalOcean, store its generated URL as `NUXT_ISSUER_DATABASE_URL`, then run
+the grants-only bootstrap. Supplying the complete issuer and auth contracts enables the workspace.
 The restricted `xcs_issuer` pool cannot approve applications, grant admins or modify the projection.
 
 | Variable                             | Purpose                                                     |
 | ------------------------------------ | ----------------------------------------------------------- |
-| `XCS_ISSUER_ENABLED=1`               | Enable server routes after auth provisioning                |
-| `NUXT_PUBLIC_ISSUER_ENABLED=1`       | Show issuer navigation to signed-in accounts                |
 | `NUXT_ISSUER_DATABASE_URL` / `_FILE` | Private `xcs_issuer` connection                             |
 | `XCS_DOCUMENT_STORAGE_DRIVER`        | `filesystem` locally; `s3` in production                    |
 | `XCS_DOCUMENT_FILESYSTEM_DIRECTORY`  | Absolute local-only directory shared with admin review      |
 | `XCS_DOCUMENT_S3_*`                  | Private bucket endpoint, region, prefix and object key      |
-| `XCS_ISSUER_INVITE_DAYS`             | Claim lifetime, default 7 days, bounded to 1–30             |
 | `XCS_SMTP_*`                         | TLS mode, credentials and verified sender for external SMTP |
 | `XCS_AUTH_ORIGIN`                    | Exact HTTPS origin for invitation and payload URLs          |
 
-Never expose credentials in `NUXT_PUBLIC_*`. The navigation flag contains no secret. Payload URIs
-must fit XRPL's 128-byte limit including the digest; use a short HTTPS origin.
+Never expose credentials in `NUXT_PUBLIC_*`. Browser navigation is derived from the validated server
+contract. Payload URIs must fit XRPL's 128-byte limit including the digest; use a short HTTPS origin.
 
 For local validation, supply the variables named by `docker-compose.application.yml`, then render:
 
@@ -36,8 +33,8 @@ For local validation, supply the variables named by `docker-compose.application.
 docker compose -f docker-compose.yml -f docker-compose.application.yml config --quiet
 ```
 
-Bootstrap all enabled role passwords with the PRE_DEPLOY component or the standalone indexer command
-`db:bootstrap`. Production uses managed PostgreSQL, a private S3-compatible bucket and an external
+Run the grants-only PRE_DEPLOY component after DigitalOcean has created all eight users. Production
+uses managed PostgreSQL, a private S3-compatible bucket and an external
 SMTP provider with `starttls` or `tls`; filesystem storage and Mailpit remain local-only. Use a bucket
 key limited to Read/Write/Delete Objects, keep the bucket private and back up its objects together
 with database metadata. Qualify the sender domain and provider delivery before inviting users. The

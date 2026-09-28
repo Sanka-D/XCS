@@ -20,20 +20,7 @@ Object.assign(fixture, {
   XCS_HOSTED_PAYLOAD_NETWORKS: 'xrpl-testnet-xcs-v0.1',
   XCS_GRAFANA_ADMIN_PASSWORD: 'compose-fixture-grafana-password',
 })
-for (const role of [
-  'POSTGRES_ADMIN',
-  'INDEXER',
-  'API',
-  'PAYLOAD',
-  'MONITOR',
-  'APP',
-  'ADMIN',
-  'NOTIFIER',
-  'ISSUER',
-]) {
-  fixture[`XCS_${role}${role === 'POSTGRES_ADMIN' ? '' : '_DATABASE'}_PASSWORD`] =
-    `compose-fixture-${role.toLowerCase()}-password-00001`
-}
+fixture.XCS_POSTGRES_ADMIN_PASSWORD = 'compose-fixture-admin-password-00001'
 
 function check(condition, label) {
   assert.ok(condition, label)
@@ -65,6 +52,12 @@ for (const app of ['web', 'indexer']) {
       )
     }
   }
+}
+
+// The notifier and bootstrap are deliberately thin runtime images compiled from
+// the web and indexer applications. They have their own Dockerfiles and contracts,
+// but no duplicate package manifest that could drift from the owning application.
+for (const app of ['web', 'indexer', 'notifier', 'db-bootstrap']) {
   const dockerfile = readFileSync(`apps/${app}/Dockerfile`, 'utf8')
   check(
     !/^COPY\s+(?:--\S+\s+)*(?:\.\s|packages\b|pnpm-workspace\.yaml\b|package\.json\b|pnpm-lock\.yaml\b)/m.test(
@@ -107,14 +100,9 @@ for (const application of [false, true]) {
         check(config.networks.database.internal === true, 'database network must be internal')
         check(config.networks.monitoring.internal === true, 'monitoring network must be internal')
         role(services.web.environment, 'XCS_DATABASE_URL', 'xcs_api')
-        role(services.web.environment, 'XCS_PAYLOAD_DATABASE_URL', 'xcs_payload_writer')
+        if (hosted) role(services.web.environment, 'XCS_PAYLOAD_DATABASE_URL', 'xcs_payload_writer')
         role(services.indexer.environment, 'XCS_INDEXER_DATABASE_URL', 'xcs_indexer')
         role(services['db-bootstrap'].environment, 'XCS_BOOTSTRAP_DATABASE_URL', 'xcs_admin')
-        check(
-          services['db-bootstrap'].environment.XCS_PAYLOAD_DATABASE_PASSWORD ===
-            fixture.XCS_PAYLOAD_DATABASE_PASSWORD,
-          'bootstrap must provision the payload role even without hosted publishing',
-        )
         for (const name of ['web', 'indexer']) {
           check(
             services[name].build.context === resolve('.'),
@@ -155,22 +143,15 @@ for (const application of [false, true]) {
         if (application) {
           const environment = services.web.environment
           check(
-            environment.XCS_AUTH_ENABLED === '1' &&
-              environment.XCS_ADMIN_ENABLED === '1' &&
-              environment.XCS_ISSUER_ENABLED === '1' &&
-              environment.NUXT_PUBLIC_ISSUER_ENABLED === '1',
-            'application overlay must enable the authenticated issuer UI and backend',
+            environment.XCS_AUTH_ORIGIN === fixture.XCS_AUTH_ORIGIN &&
+              environment.XCS_IDENTITY_CLIENT_ID === fixture.XCS_IDENTITY_CLIENT_ID &&
+              Boolean(environment.XCS_IDENTITY_CLIENT_SECRET),
+            'application overlay must supply the complete authentication contract',
           )
           role(environment, 'NUXT_APP_DATABASE_URL', 'xcs_app')
           role(environment, 'NUXT_ADMIN_DATABASE_URL', 'xcs_admin_app')
           role(environment, 'NUXT_ISSUER_DATABASE_URL', 'xcs_issuer')
           role(services['admin-notifier'].environment, 'XCS_NOTIFIER_DATABASE_URL', 'xcs_notifier')
-          for (const name of ['APP', 'ADMIN', 'NOTIFIER', 'ISSUER'])
-            check(
-              services['db-bootstrap'].environment[`XCS_${name}_DATABASE_PASSWORD`] ===
-                fixture[`XCS_${name}_DATABASE_PASSWORD`],
-              `bootstrap must provision the ${name} role`,
-            )
           check(
             config.networks['application-mail'].internal === true,
             'SMTP network must be internal',
@@ -181,13 +162,9 @@ for (const application of [false, true]) {
           )
           check(!services['admin-notifier'].networks.edge, 'notifier must not join edge')
           check(
-            services['admin-notifier'].image === services.web.image,
-            'notifier must reuse the web image',
+            services['admin-notifier'].build.dockerfile === 'apps/notifier/Dockerfile',
+            'notifier must use its standalone image',
           )
-          assert.deepEqual(services['admin-notifier'].command, [
-            'node',
-            'dist/admin/admin-notifier.js',
-          ])
           check(
             services['admin-notifier'].user === 'node' &&
               services['admin-notifier'].read_only === true,
@@ -215,23 +192,12 @@ for (const application of [false, true]) {
               !services.web.environment.NUXT_ISSUER_DATABASE_URL,
             'base stack must not enable private application pools',
           )
-          check(
-            !services.web.environment.XCS_AUTH_ENABLED &&
-              !services.web.environment.XCS_ISSUER_ENABLED,
-            'base stack must keep application features disabled',
-          )
         }
         if (hosted) {
           check(
-            services.web.environment.XCS_HOSTED_PAYLOADS_ENABLED === 'true',
-            'hosted overlay must enable public payloads',
-          )
-          check(
             services.web.environment.XCS_PUBLIC_PAYLOAD_BASE_URL ===
-              fixture.XCS_PUBLIC_PAYLOAD_BASE_URL &&
-              services.web.environment.NUXT_PUBLIC_PAYLOAD_BASE_URL ===
-                fixture.XCS_PUBLIC_PAYLOAD_BASE_URL,
-            'browser and server must use the same hosted payload origin',
+              fixture.XCS_PUBLIC_PAYLOAD_BASE_URL,
+            'hosted payload origin must be explicit',
           )
           check(
             services.web.environment.XCS_PAYLOAD_STORAGE_IP_HASH_SECRET ===
@@ -240,11 +206,16 @@ for (const application of [false, true]) {
                 fixture.XCS_HOSTED_PAYLOAD_NETWORKS,
             'public payload quota secret and network allowlist must be explicit',
           )
-        } else
+        } else {
           check(
-            !services.web.environment.XCS_HOSTED_PAYLOADS_ENABLED,
+            !services.web.environment.XCS_PUBLIC_PAYLOAD_BASE_URL,
             'base stack must keep hosted publishing disabled',
           )
+          check(
+            !services.web.environment.XCS_PAYLOAD_DATABASE_URL,
+            'base stack must not receive the payload writer pool',
+          )
+        }
         rendered += 1
       }
     }

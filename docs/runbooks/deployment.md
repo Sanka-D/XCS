@@ -89,7 +89,9 @@ XCS_REGISTRY_POLICY=controlled-testnet-pilot
 XCS_CONTROLLED_PILOT_ACK=DISPOSABLE_PROFILE_AND_DATABASE
 ```
 
-and the web app serves it with `NUXT_PUBLIC_PROFILE_ID=commons-testnet-xcs-v0.1-controlled-pilot`.
+Both services receive the same profile file through `XCS_NETWORK_PROFILE`; the web app derives the
+browser-visible ID from the parsed file. The pilot also requires
+`XCS_DATABASE_SCOPE=exclusive-profile`.
 
 This registry, profile and database cannot be promoted. Before public beta, create a different
 registry, complete and independently audit the normal blackhole ceremony, publish a new profile ID
@@ -109,19 +111,16 @@ script do not need it.
 pnpm --dir apps/indexer install --ignore-workspace --frozen-lockfile
 ```
 
-### Bootstrap once, on a fresh database
+### Create managed users, then bootstrap
+
+Create all eight runtime users in the DigitalOcean database control panel or with `doctl`:
+`xcs_indexer`, `xcs_api`, `xcs_payload_writer`, `xcs_monitor`, `xcs_app`, `xcs_admin_app`,
+`xcs_notifier` and `xcs_issuer`. Store the eight generated connection URLs in the corresponding
+component secrets. XCS never receives the individual passwords during bootstrap.
 
 ```sh
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@db.example:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… \
-  XCS_API_DATABASE_PASSWORD=… \
-  XCS_PAYLOAD_DATABASE_PASSWORD=… \
-  XCS_MONITOR_DATABASE_PASSWORD=… \
-  XCS_APP_DATABASE_PASSWORD=… \
-  XCS_ADMIN_DATABASE_PASSWORD=… \
-  XCS_NOTIFIER_DATABASE_PASSWORD=… \
-  XCS_ISSUER_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
@@ -129,11 +128,10 @@ Hosted deployments run the same command as the `apps/db-bootstrap` PRE_DEPLOY jo
 machine command remains useful for local recovery and is exactly what Compose's `db-bootstrap`
 service executes.
 
-Bootstrap applies the committed migrations and then provisions the fixed runtime roles in one
-administrative transaction. It first checks the managed-service provisioner and every pre-existing
-runtime role, then applies migrations and grants atomically. It is idempotent: a second run reapplies
-passwords and grants, which is also how a runtime password is rotated. Give every identity a
-distinct, long, URL-safe password.
+Bootstrap first checks that all eight users exist, then applies migrations 0000–0008 and grants in
+one administrative transaction. It is grants-only and idempotent: it never creates a role and never
+reads, sets, resets or rotates a password. Rotate credentials in DigitalOcean, update only the
+affected component URL, then restart that component; bootstrap does not participate in rotation.
 
 | Identity              | Runtime use                                        |
 | --------------------- | -------------------------------------------------- |
@@ -149,28 +147,26 @@ distinct, long, URL-safe password.
 
 `XCS_DATABASE_CLUSTER_SCOPE=dedicated` is mandatory: PostgreSQL login roles are cluster-wide, so
 bootstrap must only ever run on a cluster dedicated to XCS. A DigitalOcean-style non-superuser
-administrator is supported on PostgreSQL 16+ when it has `CREATEROLE`, database/schema DDL rights and
-can administer every existing XCS runtime role. Bootstrap rejects dangerous attributes, unexpected
-memberships and unsafe `createrole_self_grant` settings instead of trying to normalize them. Grants
-and `PUBLIC` revocations remain scoped to the selected database.
+administrator is supported on PostgreSQL 16+ when it owns the target database and schema objects and
+can grant `pg_monitor`. Before touching the schema, bootstrap checks that all eight managed users
+exist, have `LOGIN`, carry no elevated role attributes and have no unexpected memberships. It fails
+closed on drift instead of trying to alter provider-owned users. Grants and `PUBLIC` revocations
+remain scoped to the selected database; only `pg_monitor` membership for `xcs_monitor` is added.
 
-Bootstrap overrides any caller-supplied `password_encryption` with transaction-local
-`scram-sha-256`, writes runtime passwords, and restores `LOGIN` only after every grant
-succeeds. Configure the matching `pg_hba.conf` entries with `scram-sha-256` as well, and restrict
-each runtime role to the XCS database: verifier storage does not replace an authentication policy.
-Bootstrap reports role names or a stable failure code, never URLs or password values.
+Bootstrap never issues `ALTER ROLE`, so it leaves password verifiers, `VALID UNTIL`, connection
+limits and role defaults under DigitalOcean's control. Configure client transport and authentication
+at the managed database boundary, and restrict each runtime role to the XCS database: verifier
+storage does not replace an authentication policy. Failures expose only role names and the stable
+`DATABASE_ROLES_MISSING` or `DATABASE_ROLES_UNSAFE` code, never URLs or password values.
 
 Treat the PostgreSQL administrator and reviewed migrations as trusted administrative inputs.
 Bootstrap is not an anti-administrator attestation: it does not audit ownership or ACLs outside the
 selected database, which is why the dedicated-cluster requirement is part of the security boundary.
 
-Bootstrap also resets operational role defaults: `xcs_indexer` receives a 5-minute statement timeout
-and 30-second lock and idle-in-transaction timeouts; `xcs_api` receives 30-second statement/idle and
-15-second lock timeouts; `xcs_monitor` receives 30-second statement/idle and 10-second lock timeouts.
-These PostgreSQL settings are `USERSET`, so a client holding the runtime secret can override them;
-they are not security ceilings. Keep independently enforced connection/query/resource quotas. The
-residual denial-of-service boundary, including SQL `LISTEN`/`NOTIFY`, is documented in
-[`threat-model.md`](../threat-model.md).
+Each application pool is bounded to ten connections in code. Set stricter connection, query and
+resource quotas through DigitalOcean when the selected plan supports them; bootstrap cannot enforce
+cluster-level ceilings on provider-owned users. The residual denial-of-service boundary, including
+SQL `LISTEN`/`NOTIFY`, is documented in [`threat-model.md`](../threat-model.md).
 
 ### Migrate on every later schema change
 
@@ -246,8 +242,9 @@ exist only in `apps/db-bootstrap/.env.example`.
   logged. Distinct URLs alone are not evidence of independent operation; record the two operators in
   the deployment review. Plain `ws://` is accepted only on loopback for local development. Clio is
   not a supported source.
-- Keep `XCS_INDEXER_LEASE_DURATION_MS` between 10 seconds and 5 minutes, and at least three times the
-  polling interval.
+- Polling, lease and batch settings are checked-in in `apps/indexer/src/settings.ts`; changing them is
+  a reviewed image change. Validation keeps the lease between 10 seconds and 5 minutes and at least
+  three times the polling interval.
 - Run the preflight before enabling the service:
 
   ```sh
@@ -266,9 +263,11 @@ exist only in `apps/db-bootstrap/.env.example`.
   discard incoming forwarding headers and write its own canonical client address. Leave it empty for
   direct exposure; never use a wildcard or a catch-all `/0`. An undeclared proxy is safe but
   collapses its visitors into one shared rate-limit budget.
-- `XCS_READINESS_MAX_LEDGER_AGE_SECONDS` (default 120) governs readiness and every authoritative
-  ledger-derived route. Stale, inconsistent or implausibly future evidence returns `503`.
-- `NUXT_PUBLIC_PROFILE_ID` is the profile this deployment serves.
+- The checked-in readiness threshold in `apps/web/server/xcs/settings.ts` governs readiness and every
+  authoritative ledger-derived route. Stale, inconsistent or implausibly future evidence returns
+  `503`.
+- `XCS_NETWORK_PROFILE` names the same published profile file used by the indexer. The browser ID is
+  derived from it.
 - `NUXT_PUBLIC_RPC_URL` is browser-visible and is used for wallet submission only. It must be a
   genuinely public endpoint with no embedded credentials — never a private indexer source. The
   server rejects userinfo and non-TLS public endpoints at startup (`ws://` is loopback-only), but it
@@ -279,7 +278,7 @@ exist only in `apps/db-bootstrap/.env.example`.
   trailing slash — in the Xaman Developer Console; each self-hosted origin needs its own Xaman
   application. Omitting an identifier removes only that adapter and leaves the six self-configuring
   XRPL Connect adapters registered.
-- `XCS_METRICS_ENABLED` / `XCS_METRICS_TOKEN` gate the operational snapshot; see
+- The presence of a valid `XCS_METRICS_TOKEN` enables and guards the operational snapshot; see
   [`monitoring.md`](./monitoring.md).
 - Production document uploads require `XCS_DOCUMENT_STORAGE_DRIVER=s3` and a private
   S3-compatible bucket such as DigitalOcean Spaces. Set its exact HTTPS endpoint, region, bucket,
@@ -471,8 +470,8 @@ secrets or production credentials.
   compatible with the already-applied forward migrations; never roll the database journal backward.
 - Before production, an incompatible schema change means rebuilding and replaying the database; never
   skip a ledger.
-- Rerun `db:bootstrap` after a runtime-password rotation, then restart the affected application with
-  the matching credentials. Keep `xcs_admin` credentials out of runtime services and logs.
+- Rotate a runtime password in DigitalOcean, replace the affected component URL, then restart that
+  component. Do not rerun bootstrap for password rotation. Keep `xcs_admin` out of runtime services.
 - Retain a `pg_hba.conf` role-to-database allowlist as defense in depth.
 - Record the deployed repository revision and the component `COMMIT_SHA` values. A protocol change
   mirrored into only one application remains a real failure mode (see
@@ -480,10 +479,10 @@ secrets or production credentials.
 
 ## Optional authenticated workspaces and hosted payloads
 
-The same web app enables auth, admin review, issuer, recipient and verifier workflows through its
-environment contract. The PRE_DEPLOY job applies migrations 0000–0008 and provisions `xcs_app`,
-`xcs_admin_app`, `xcs_notifier`, `xcs_issuer` and `xcs_payload_writer` with separate passwords. The
-public API continues to use `xcs_api`. Never grant one runtime role to another.
+The same web app enables auth, admin review, issuer, recipient and verifier workflows when each
+deployment contract is complete. The PRE_DEPLOY job applies migrations 0000–0008 and grants access
+to the eight DigitalOcean-managed users. The public API continues to use `xcs_api`. Never grant one
+runtime role to another.
 
 The notification worker runs `node dist/admin/admin-notifier.js` from its dedicated component and
 requires no XRPL signing key. Production uploads live in the private S3/Spaces bucket; PostgreSQL

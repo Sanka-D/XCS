@@ -12,6 +12,7 @@ import {
   loadLedgerRpcConfig,
 } from '../src/config.js'
 import { sha256Hex } from '../src/serialization.js'
+import { indexerEnvironment, indexerSettings } from '../src/settings.js'
 
 const paths: string[] = []
 
@@ -315,5 +316,76 @@ describe('indexer configuration', () => {
         }),
       ),
     ).resolves.toMatchObject({ pollIntervalMs: 10_000, leaseDurationMs: 30_000 })
+  })
+})
+
+describe('checked-in indexer settings', () => {
+  it('pins the tuning values in code and ignores a deployment variable of the same name', async () => {
+    const config = await loadIndexerConfig(
+      indexerEnvironment(
+        await environment({
+          XCS_INDEXER_POLL_INTERVAL_MS: '250',
+          XCS_INDEXER_LEASE_DURATION_MS: '300000',
+          XCS_INDEXER_BATCH_SIZE: '100',
+        }),
+      ),
+    )
+
+    expect(config).toMatchObject({ pollIntervalMs: 4_000, leaseDurationMs: 30_000, batchSize: 20 })
+    expect(indexerSettings).toEqual({
+      XCS_INDEXER_POLL_INTERVAL_MS: '4000',
+      XCS_INDEXER_LEASE_DURATION_MS: '30000',
+      XCS_INDEXER_BATCH_SIZE: '20',
+    })
+  })
+
+  it('defaults to the safe registry and database posture', async () => {
+    await expect(loadIndexerConfig(indexerEnvironment(await environment()))).resolves.toMatchObject(
+      { registryPolicy: 'blackholed', databaseScope: 'shared' },
+    )
+  })
+
+  it('ignores a blank override so an empty platform value cannot defeat a safe default', () => {
+    expect(indexerEnvironment({ XCS_REGISTRY_POLICY: '', XCS_DATABASE_SCOPE: '  ' })).toMatchObject(
+      { XCS_REGISTRY_POLICY: 'blackholed', XCS_DATABASE_SCOPE: 'shared' },
+    )
+  })
+
+  it('still lets the ADR 0003 controlled pilot express its exception through the environment', async () => {
+    const controlledProfile = await profilePath({
+      profileId: 'commons-testnet-xcs-v0.1-controlled-pilot',
+    })
+    await expect(
+      loadIndexerConfig(
+        indexerEnvironment(
+          await environment({
+            XCS_NETWORK_PROFILE: controlledProfile,
+            XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+            XCS_CONTROLLED_PILOT_ACK: CONTROLLED_PILOT_ACKNOWLEDGEMENT,
+            XCS_DATABASE_SCOPE: 'exclusive-profile',
+          }),
+        ),
+      ),
+    ).resolves.toMatchObject({
+      registryPolicy: 'controlled-testnet-pilot',
+      databaseScope: 'exclusive-profile',
+    })
+  })
+
+  it('still refuses the pilot posture without the exact acknowledgement', async () => {
+    const controlledProfile = await profilePath({
+      profileId: 'commons-testnet-xcs-v0.1-controlled-pilot',
+    })
+    await expect(
+      loadIndexerConfig(
+        indexerEnvironment(
+          await environment({
+            XCS_NETWORK_PROFILE: controlledProfile,
+            XCS_REGISTRY_POLICY: 'controlled-testnet-pilot',
+            XCS_DATABASE_SCOPE: 'exclusive-profile',
+          }),
+        ),
+      ),
+    ).rejects.toThrow('XCS_CONTROLLED_PILOT_ACK')
   })
 })

@@ -11,23 +11,20 @@ import {
 } from '../server/xcs/issuer/types'
 
 const environment = {
-  XCS_AUTH_ENABLED: '1',
-  XCS_ISSUER_ENABLED: '1',
   NUXT_ISSUER_DATABASE_URL: 'postgres://xcs_issuer:synthetic@localhost/xcs',
   XCS_AUTH_ORIGIN: 'https://xcs.test',
+  XCS_IDENTITY_CLIENT_ID: 'test-client',
+  XCS_IDENTITY_CLIENT_SECRET: 'test-secret',
+  NUXT_APP_DATABASE_URL: 'postgres://xcs_app:synthetic@localhost/xcs',
   XCS_DOCUMENT_STORAGE_DRIVER: 'filesystem',
   XCS_DOCUMENT_FILESYSTEM_DIRECTORY: '/var/lib/xcs-review',
 }
 describe('issuer opt-in configuration and request validation', () => {
-  it('remains disabled without the exact flag and requires authentication', () => {
+  it('is disabled when its contract is absent and requires authentication', () => {
     expect(loadIssuerConfig({})).toBeUndefined()
-    expect(loadIssuerConfig({ XCS_ISSUER_ENABLED: '0' })).toBeUndefined()
-    expect(() => loadIssuerConfig({ ...environment, XCS_ISSUER_ENABLED: 'true' })).toThrow(
-      'ISSUER_FLAG_INVALID',
-    )
-    expect(() => loadIssuerConfig({ ...environment, XCS_AUTH_ENABLED: '0' })).toThrow(
-      'ISSUER_AUTH_REQUIRED',
-    )
+    expect(() =>
+      loadIssuerConfig({ NUXT_ISSUER_DATABASE_URL: environment.NUXT_ISSUER_DATABASE_URL }),
+    ).toThrow('ISSUER_AUTH_REQUIRED')
   })
   it('requires separate least-privilege credentials and a canonical HTTPS origin', () => {
     for (const role of ['xcs_admin', 'xcs_admin_app', 'xcs_app', 'xcs_api'])

@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { isValidClassicAddress } from 'xrpl'
 import { adminSecret } from './admin/config'
+import { apiEnvironment, apiSettings } from './settings'
 
 export interface ApiConfig {
   databaseUrl: string
@@ -32,10 +33,8 @@ export interface ApiConfig {
 }
 
 function operationalMetrics(environment: NodeJS.ProcessEnv): ApiConfig['operationalMetrics'] {
-  const enabled = strictBoolean(environment.XCS_METRICS_ENABLED, false, 'XCS_METRICS_ENABLED')
-  if (!enabled) return { enabled: false }
-
-  const token = required(environment, 'XCS_METRICS_TOKEN')
+  const token = adminSecret(environment, 'XCS_METRICS_TOKEN')
+  if (token.trim().length === 0) return { enabled: false }
   if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
     throw new Error('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
   }
@@ -159,9 +158,27 @@ function hostedPayloadBaseUrl(value: string): string {
   return value
 }
 
-export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
+export function loadHostedPayloadConfig(
+  environment: NodeJS.ProcessEnv = apiEnvironment(),
+): ApiConfig['hostedPayloads'] {
+  const supplied = [
+    environment.XCS_PUBLIC_PAYLOAD_BASE_URL,
+    environment.XCS_PAYLOAD_STORAGE_IP_HASH_SECRET,
+    environment.XCS_HOSTED_PAYLOAD_NETWORKS,
+  ].some((value) => value !== undefined && value.trim().length > 0)
+  if (!supplied) return { enabled: false }
+  return {
+    enabled: true,
+    publicBaseUrl: hostedPayloadBaseUrl(required(environment, 'XCS_PUBLIC_PAYLOAD_BASE_URL')),
+    ipHashSecret: required(environment, 'XCS_PAYLOAD_STORAGE_IP_HASH_SECRET'),
+    networks: list(environment.XCS_HOSTED_PAYLOAD_NETWORKS),
+  }
+}
+
+export function loadApiConfig(environment: NodeJS.ProcessEnv = apiEnvironment()): ApiConfig {
   const readinessMaxLedgerAgeSeconds = Number(
-    environment.XCS_READINESS_MAX_LEDGER_AGE_SECONDS ?? '120',
+    environment.XCS_READINESS_MAX_LEDGER_AGE_SECONDS ??
+      apiSettings.XCS_READINESS_MAX_LEDGER_AGE_SECONDS,
   )
   if (
     !Number.isInteger(readinessMaxLedgerAgeSeconds) ||
@@ -171,51 +188,47 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     throw new Error('XCS_READINESS_MAX_LEDGER_AGE_SECONDS must be an integer between 10 and 3600')
   }
   const demoPinningEnabled = strictBoolean(
-    environment.XCS_DEMO_PINNING_ENABLED,
+    environment.XCS_DEMO_PINNING_ENABLED ?? apiSettings.XCS_DEMO_PINNING_ENABLED,
     false,
     'XCS_DEMO_PINNING_ENABLED',
   )
   const demoPinning = demoPinningEnabled
     ? {
         enabled: true as const,
-        kuboRpcUrl: required(environment, 'XCS_IPFS_API_URL'),
+        kuboRpcUrl: environment.XCS_IPFS_API_URL ?? apiSettings.XCS_IPFS_API_URL,
         ipHashSecret: required(environment, 'XCS_PINNING_IP_HASH_SECRET'),
-        networks: list(environment.XCS_PINNING_NETWORKS),
+        networks: list(environment.XCS_PINNING_NETWORKS ?? apiSettings.XCS_PINNING_NETWORKS),
       }
     : ({ enabled: false } as const)
-  const trustedIssuers = addressList(environment.XCS_TRUSTED_ISSUERS, 'XCS_TRUSTED_ISSUERS')
-  const hostedPayloadsEnabled = strictBoolean(
-    environment.XCS_HOSTED_PAYLOADS_ENABLED,
-    false,
-    'XCS_HOSTED_PAYLOADS_ENABLED',
+  const trustedIssuers = addressList(
+    environment.XCS_TRUSTED_ISSUERS ?? apiSettings.XCS_TRUSTED_ISSUERS,
+    'XCS_TRUSTED_ISSUERS',
   )
-  const hostedPayloads: ApiConfig['hostedPayloads'] = hostedPayloadsEnabled
-    ? {
-        enabled: true,
-        publicBaseUrl: hostedPayloadBaseUrl(required(environment, 'XCS_PUBLIC_PAYLOAD_BASE_URL')),
-        ipHashSecret: required(environment, 'XCS_PAYLOAD_STORAGE_IP_HASH_SECRET'),
-        networks: list(environment.XCS_HOSTED_PAYLOAD_NETWORKS),
-      }
-    : { enabled: false }
-  const untrustedIssuers = addressList(environment.XCS_UNTRUSTED_ISSUERS, 'XCS_UNTRUSTED_ISSUERS')
+  const hostedPayloads = loadHostedPayloadConfig(environment)
+  const untrustedIssuers = addressList(
+    environment.XCS_UNTRUSTED_ISSUERS ?? apiSettings.XCS_UNTRUSTED_ISSUERS,
+    'XCS_UNTRUSTED_ISSUERS',
+  )
   if (trustedIssuers.some((issuer) => untrustedIssuers.includes(issuer))) {
     throw new Error('XCS_TRUSTED_ISSUERS and XCS_UNTRUSTED_ISSUERS must not overlap')
   }
   return {
     databaseUrl: compatibleRequired(environment, 'XCS_DATABASE_URL', 'DATABASE_URL'),
     payloadDatabaseUrl:
-      hostedPayloadsEnabled || demoPinningEnabled
+      hostedPayloads.enabled || demoPinningEnabled
         ? databaseUrl(environment, 'XCS_PAYLOAD_DATABASE_URL', 'xcs_payload_writer')
         : undefined,
     hostedPayloads,
     trustedProxyCidrs: trustedProxyCidrs(environment.XCS_TRUSTED_PROXY_CIDRS),
     ipfsGateway:
-      environment.XCS_IPFS_GATEWAY_URL ?? environment.IPFS_GATEWAY_URL ?? 'https://ipfs.io/',
+      environment.XCS_IPFS_GATEWAY_URL ??
+      environment.IPFS_GATEWAY_URL ??
+      apiSettings.XCS_IPFS_GATEWAY_URL,
     trustedIssuers,
     untrustedIssuers,
     allowedOrigins: origins(environment.XCS_ALLOWED_ORIGINS),
     payloadFetchEnabled: strictBoolean(
-      environment.XCS_PAYLOAD_FETCH_ENABLED,
+      environment.XCS_PAYLOAD_FETCH_ENABLED ?? apiSettings.XCS_PAYLOAD_FETCH_ENABLED,
       false,
       'XCS_PAYLOAD_FETCH_ENABLED',
     ),

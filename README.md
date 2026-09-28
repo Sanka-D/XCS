@@ -79,21 +79,20 @@ pnpm --dir apps/indexer verify
 
 ### Pointing the applications at a database
 
-PostgreSQL is provisioned outside this repository. The indexer owns the tooling; run it once against
-a fresh database, then give each application its least-privilege connection string:
+PostgreSQL is provisioned outside this repository. First create these eight managed users in
+DigitalOcean: `xcs_indexer`, `xcs_api`, `xcs_payload_writer`, `xcs_monitor`, `xcs_app`,
+`xcs_admin_app`, `xcs_notifier` and `xcs_issuer`. DigitalOcean generates and owns their passwords.
+Then run the grants-only bootstrap with the database administrator URL:
 
 ```bash
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@host:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… XCS_API_DATABASE_PASSWORD=… \
-  XCS_PAYLOAD_DATABASE_PASSWORD=… XCS_MONITOR_DATABASE_PASSWORD=… \
-  XCS_APP_DATABASE_PASSWORD=… XCS_ADMIN_DATABASE_PASSWORD=… \
-  XCS_NOTIFIER_DATABASE_PASSWORD=… XCS_ISSUER_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
-The indexer then reads `XCS_INDEXER_DATABASE_URL` (role `xcs_indexer`) and the web app reads
-`XCS_DATABASE_URL` (role `xcs_api`). The complete contracts are
+The command applies migrations 0000–0008 and database grants atomically. It never creates a user and
+never reads, sets or rotates a runtime password. Each component then receives its own managed URL.
+The complete contracts are
 [`apps/indexer/.env.example`](./apps/indexer/.env.example) and
 [`apps/web/.env.example`](./apps/web/.env.example). The pre-deploy and notification contracts are
 [`apps/db-bootstrap/.env.example`](./apps/db-bootstrap/.env.example) and

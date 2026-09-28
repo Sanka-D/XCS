@@ -12,7 +12,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
 } from '../server/lib/db/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../server/lib/db/bootstrap.js'
+import { createManagedRuntimeDatabaseUsers } from './lib/db/managedRuntimeUsers.js'
 import { PostgresAuthRepository } from '../server/xcs/auth/repository'
 import { SESSION_COOKIE } from '../server/xcs/auth/http'
 import { startAdminRuntime } from './helpers/adminRuntime'
@@ -76,9 +77,7 @@ describe.skipIf(!enabled)(
         const url = new URL(databaseUrl!)
         url.pathname = '/' + databaseName
         database = createDatabaseClient(url.toString(), { onNotice: () => undefined })
-        const passwords = {
-          clusterScope: 'dedicated' as const,
-          administratorPassword: databasePasswordFromUrl(databaseUrl!),
+        const passwords = await createManagedRuntimeDatabaseUsers(database, {
           indexerPassword: randomBytes(32).toString('hex'),
           apiPassword: randomBytes(32).toString('hex'),
           payloadWriterPassword: randomBytes(32).toString('hex'),
@@ -86,8 +85,8 @@ describe.skipIf(!enabled)(
           applicationPassword: randomBytes(32).toString('hex'),
           adminApplicationPassword: randomBytes(32).toString('hex'),
           issuerPassword: randomBytes(32).toString('hex'),
-        }
-        await bootstrapDatabase(database, passwords)
+        })
+        await bootstrapDatabase(database, { clusterScope: 'dedicated' })
         const roleUrl = (role: string, password: string) => {
           const value = new URL(url)
           value.username = role

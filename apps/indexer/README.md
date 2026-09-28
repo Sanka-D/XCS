@@ -44,14 +44,14 @@ devDependencies; the web app has none of them.
 ```sh
 pnpm --dir apps/indexer db:generate    # add a migration after editing db/schema — retain applied files
 pnpm --dir apps/indexer db:migrate     # apply migrations to an existing database (idempotent)
-pnpm --dir apps/indexer db:bootstrap   # migrate + provision every enabled least-privilege role
+pnpm --dir apps/indexer db:bootstrap   # migrate + grant all eight runtime users
 ```
 
-Use `db:bootstrap` for initial provisioning on a dedicated cluster. It needs
-`XCS_BOOTSTRAP_DATABASE_URL`, `XCS_DATABASE_CLUSTER_SCOPE=dedicated` and the required runtime
-passwords; optional application-role passwords enable the auth/admin/issuer services. Re-running
-bootstrap applies the supported migration history and updates grants/passwords. Supply all enabled
-role passwords: omitting an optional password disables that role.
+Before `db:bootstrap`, create all eight runtime users listed in [`db/README.md`](../../db/README.md)
+through DigitalOcean and retain the generated connection strings in the deployment secret store.
+The bootstrap needs only `XCS_BOOTSTRAP_DATABASE_URL` and
+`XCS_DATABASE_CLUSTER_SCOPE=dedicated`. It checks every user before DDL, applies migrations 0000–0008
+and least-privilege grants in one transaction, and never reads or changes a runtime password.
 
 `db:migrate` applies pending migrations without provisioning roles. The committed 0000–0008 history
 supports populated-baseline upgrades and repeated runs; integration tests check preservation of

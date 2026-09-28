@@ -1,12 +1,6 @@
 // Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { readFileSync, statSync } from 'node:fs'
 
-/** Absence disables an optional capability; an explicitly empty value is invalid. */
-export function optionalEnvironment(name: string): string | undefined {
-  if (process.env[name] === undefined && process.env[`${name}_FILE`] === undefined) return undefined
-  return requiredEnvironment(name)
-}
-
 /** Supports secret files in native CLI runs as well as the container entrypoint. */
 export function requiredEnvironment(name: string): string {
   const direct = process.env[name]

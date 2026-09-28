@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadAuthConfig } from '../server/xcs/auth/config'
 const env = {
-  XCS_AUTH_ENABLED: '1',
   XCS_AUTH_ORIGIN: 'https://xcs.example',
   XCS_IDENTITY_CLIENT_ID: 'test-client',
   XCS_IDENTITY_CLIENT_SECRET: 'test-secret',
@@ -15,8 +14,9 @@ afterEach(() => {
   if (directory) rmSync(directory, { recursive: true, force: true })
 })
 describe('authentication configuration', () => {
-  it('is disabled by default without accessing secret files', () => {
-    expect(loadAuthConfig({ XCS_IDENTITY_CLIENT_SECRET_FILE: '/missing' })).toBeUndefined()
+  it('is disabled only when the complete contract is absent and rejects a partial contract', () => {
+    expect(loadAuthConfig({})).toBeUndefined()
+    expect(() => loadAuthConfig({ XCS_IDENTITY_CLIENT_SECRET_FILE: '/missing' })).toThrow()
   })
   it('uses the canonical issuer and private application role with bounded sessions', () => {
     expect(loadAuthConfig(env)).toMatchObject({

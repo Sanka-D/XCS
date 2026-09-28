@@ -15,26 +15,17 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: xcs-ci-${{ github.run_id }}-${{ github.run_attempt }}
       XCS_POSTGRES_ADMIN_PASSWORD: compose-ci-admin-password-00000001
-      XCS_INDEXER_DATABASE_PASSWORD: compose-ci-indexer-password-0001
-      XCS_API_DATABASE_PASSWORD: compose-ci-api-password-000000001
-      XCS_PAYLOAD_DATABASE_PASSWORD: compose-ci-payload-password-000001
-      XCS_MONITOR_DATABASE_PASSWORD: compose-ci-monitor-password-000001
-      XCS_APP_DATABASE_PASSWORD: compose-ci-app-password-0000000001
-      XCS_ADMIN_DATABASE_PASSWORD: compose-ci-admin-app-password-0001
-      XCS_NOTIFIER_DATABASE_PASSWORD: compose-ci-notifier-password-00001
-      XCS_ISSUER_DATABASE_PASSWORD: compose-ci-issuer-password-0000001
       XCS_AUTH_ORIGIN: https://compose.invalid
       XCS_IDENTITY_CLIENT_ID: compose-ci-client
       XCS_IDENTITY_CLIENT_SECRET: compose-ci-identity-secret-000001
       XCS_ADMIN_DOCUMENT_KEY: compose-ci-document-signing-key-000001
-      XCS_METRICS_ENABLED: 'true'
       XCS_METRICS_TOKEN: compose-ci-metrics-token-000000000001
       XCS_RPC_URL_PRIMARY: wss://primary.invalid.example
       XCS_RPC_URL_SECONDARY: wss://secondary.invalid.example
-      XCS_NETWORK_PROFILE: /workspace/config/networks/testnet.example.json
       XCS_PUBLIC_RPC_URL: wss://submission.invalid.example
       XCS_INDEXER_IMAGE: xcs-indexer:ci
       XCS_WEB_IMAGE: xcs-web:ci
+      XCS_NOTIFIER_IMAGE: xcs-notifier:ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,13 +66,13 @@ jobs:
           jq empty ops/monitoring/grafana/dashboards/*.json
 
       - name: Build production-only core images
-        run: docker compose build web indexer
+        run: docker compose -f docker-compose.yml -f docker-compose.application.yml build web indexer admin-notifier
 
       - name: Assert runtime images exclude development tools
         shell: bash
         run: |
           set -euo pipefail
-          for IMAGE in "$XCS_WEB_IMAGE" "$XCS_INDEXER_IMAGE"; do
+          for IMAGE in "$XCS_WEB_IMAGE" "$XCS_INDEXER_IMAGE" "$XCS_NOTIFIER_IMAGE"; do
             docker run --rm --entrypoint sh "$IMAGE" -c \
               'test ! -e node_modules/typescript && test ! -e node_modules/vitest && test ! -e node_modules/tsx'
           done
@@ -187,10 +178,6 @@ jobs:
                 );
             " | grep --fixed-strings --line-regexp t
 
-          # Provision optional roles with the exact application overlay, without
-          # starting OAuth, SMTP or application processes in the base-stack smoke.
-          docker compose -f docker-compose.yml -f docker-compose.application.yml \
-            run --rm --no-deps db-bootstrap
           "${COMPOSE[@]}" exec -T postgres psql -U xcs_admin -d xcs --no-psqlrc --tuples-only --no-align \
             --command "
               SELECT
@@ -260,7 +247,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for DOCKERFILE in apps/web/Dockerfile apps/indexer/Dockerfile; do
+          for DOCKERFILE in apps/web/Dockerfile apps/indexer/Dockerfile apps/notifier/Dockerfile apps/db-bootstrap/Dockerfile; do
             grep --fixed-strings -- 'USER node' "$DOCKERFILE"
             grep --fixed-strings -- 'pnpm install --frozen-lockfile' "$DOCKERFILE"
             if grep --extended-regexp 'RUN --mount|<<[A-Z]' "$DOCKERFILE"; then

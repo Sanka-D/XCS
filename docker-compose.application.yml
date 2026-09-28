@@ -1,40 +1,30 @@
-# Optional LOCAL auth/admin/issuer validation, on top of docker-compose.yml.
-# These are additional processes of the two standalone images, not a production topology.
+# Optional local auth/admin/issuer validation, on top of docker-compose.yml.
 services:
-  db-bootstrap:
-    environment:
-      XCS_APP_DATABASE_PASSWORD: ${XCS_APP_DATABASE_PASSWORD:?Set XCS_APP_DATABASE_PASSWORD}
-      XCS_ADMIN_DATABASE_PASSWORD: ${XCS_ADMIN_DATABASE_PASSWORD:?Set XCS_ADMIN_DATABASE_PASSWORD}
-      XCS_NOTIFIER_DATABASE_PASSWORD: ${XCS_NOTIFIER_DATABASE_PASSWORD:?Set XCS_NOTIFIER_DATABASE_PASSWORD}
-      XCS_ISSUER_DATABASE_PASSWORD: ${XCS_ISSUER_DATABASE_PASSWORD:?Set XCS_ISSUER_DATABASE_PASSWORD}
   web:
     environment:
-      XCS_AUTH_ENABLED: '1'
       XCS_AUTH_ORIGIN: ${XCS_AUTH_ORIGIN:?Set exact local HTTPS origin}
       XCS_IDENTITY_CLIENT_ID: ${XCS_IDENTITY_CLIENT_ID:?Set identity client ID}
       XCS_IDENTITY_CLIENT_SECRET: ${XCS_IDENTITY_CLIENT_SECRET:?Set identity client secret}
-      NUXT_APP_DATABASE_URL: postgres://xcs_app:${XCS_APP_DATABASE_PASSWORD}@postgres:5432/xcs
-      XCS_ADMIN_ENABLED: '1'
-      NUXT_ADMIN_DATABASE_URL: postgres://xcs_admin_app:${XCS_ADMIN_DATABASE_PASSWORD}@postgres:5432/xcs
+      NUXT_APP_DATABASE_URL: postgres://xcs_app:local-development-only-not-a-secret-app@postgres:5432/xcs
+      NUXT_ADMIN_DATABASE_URL: postgres://xcs_admin_app:local-development-only-not-a-secret-admin-app@postgres:5432/xcs
       XCS_ADMIN_DOCUMENT_KEY: ${XCS_ADMIN_DOCUMENT_KEY:?Set document signing key}
-      XCS_ISSUER_ENABLED: '1'
-      NUXT_PUBLIC_ISSUER_ENABLED: '1'
-      NUXT_ISSUER_DATABASE_URL: postgres://xcs_issuer:${XCS_ISSUER_DATABASE_PASSWORD}@postgres:5432/xcs
+      NUXT_ISSUER_DATABASE_URL: postgres://xcs_issuer:local-development-only-not-a-secret-issuer@postgres:5432/xcs
       XCS_DOCUMENT_STORAGE_DRIVER: filesystem
       XCS_DOCUMENT_FILESYSTEM_DIRECTORY: /var/lib/xcs-review
       XCS_DOCUMENT_FILESYSTEM_LOCAL: '1'
-      XCS_ISSUER_INVITE_DAYS: ${XCS_ISSUER_INVITE_DAYS:-7}
       XCS_SMTP_HOST: mailpit
       XCS_SMTP_PORT: '1025'
     volumes:
       - xcs-review-documents:/var/lib/xcs-review
     networks: [edge, database, monitoring, application-mail]
   admin-notifier:
-    image: ${XCS_WEB_IMAGE:-xcs-web:local}
-    command: ['node', 'dist/admin/admin-notifier.js']
+    image: ${XCS_NOTIFIER_IMAGE:-xcs-notifier:local}
+    build:
+      context: .
+      dockerfile: apps/notifier/Dockerfile
     user: node
     environment:
-      XCS_NOTIFIER_DATABASE_URL: postgres://xcs_notifier:${XCS_NOTIFIER_DATABASE_PASSWORD}@postgres:5432/xcs
+      XCS_NOTIFIER_DATABASE_URL: postgres://xcs_notifier:local-development-only-not-a-secret-notifier@postgres:5432/xcs
       XCS_SMTP_HOST: mailpit
       XCS_SMTP_PORT: '1025'
     depends_on:

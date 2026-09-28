@@ -2,11 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createDatabaseClient, type DatabaseClient } from '../../src/lib/db/client.js'
 import { bootstrapFirstAdmin } from '../../src/lib/db/app/bootstrap-admin.js'
-import {
-  databasePasswordFromUrl,
-  provisionRuntimeDatabaseRoles,
-} from '../../src/lib/db/bootstrap.js'
+import { provisionRuntimeDatabasePrivileges } from '../../src/lib/db/bootstrap.js'
 import { migrateDatabase } from '../../src/lib/db/migrations.js'
+import { createManagedRuntimeDatabaseUsers } from '../helpers/managedRuntimeUsers.js'
 
 const adminUrl = process.env.XCS_TEST_DATABASE_URL?.trim() || undefined
 if (process.env.XCS_REQUIRE_POSTGRES_TESTS === '1' && !adminUrl)
@@ -42,15 +40,13 @@ describe.skipIf(!adminUrl)('admin audit, operator bootstrap and restricted datab
     database = createDatabaseClient(url.toString(), { onNotice: () => undefined })
     await migrateDatabase(database)
     await migrateDatabase(database)
-    await provisionRuntimeDatabaseRoles(database, {
-      ...passwords,
-      administratorPassword: databasePasswordFromUrl(adminUrl!),
-    })
+    const managedPasswords = await createManagedRuntimeDatabaseUsers(database, passwords)
+    await provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' })
     url.username = 'xcs_admin_app'
-    url.password = passwords.adminApplicationPassword
+    url.password = managedPasswords.adminApplicationPassword
     admin = createDatabaseClient(url.toString(), { onNotice: () => undefined })
     url.username = 'xcs_notifier'
-    url.password = passwords.notifierPassword
+    url.password = managedPasswords.notifierPassword
     notifier = createDatabaseClient(url.toString(), { onNotice: () => undefined })
     const users = await database.sql<
       { id: string }[]
@@ -162,22 +158,23 @@ describe.skipIf(!adminUrl)('admin audit, operator bootstrap and restricted datab
     ).rejects.toMatchObject({ code: '42501' })
   })
 
-  it('removes stale column grants and disables both optional runtime roles when omitted', async () => {
+  it('removes stale column grants without changing managed authentication', async () => {
+    const before = await database.sql<
+      { roleName: string; canLogin: boolean; passwordHash: string | null }[]
+    >`
+      SELECT rolname AS "roleName", rolcanlogin AS "canLogin", rolpassword AS "passwordHash"
+      FROM pg_authid WHERE rolname IN ('xcs_admin_app','xcs_notifier') ORDER BY rolname
+    `
     await database.sql`GRANT SELECT (identity_subject) ON app_users TO xcs_admin_app, xcs_notifier`
-    const { adminApplicationPassword: a, notifierPassword: n, ...disabled } = passwords
-    void a
-    void n
-    await provisionRuntimeDatabaseRoles(database, {
-      ...disabled,
-      administratorPassword: databasePasswordFromUrl(adminUrl!),
-    })
-    const rows = await database.sql<
-      { rolcanlogin: boolean; cleared: boolean }[]
-    >`SELECT rolcanlogin, rolpassword IS NULL AS cleared FROM pg_authid WHERE rolname IN ('xcs_admin_app','xcs_notifier')`
-    expect(rows).toEqual([
-      { rolcanlogin: false, cleared: true },
-      { rolcanlogin: false, cleared: true },
-    ])
+    await provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' })
+    const after = await database.sql<
+      { roleName: string; canLogin: boolean; passwordHash: string | null }[]
+    >`
+      SELECT rolname AS "roleName", rolcanlogin AS "canLogin", rolpassword AS "passwordHash"
+      FROM pg_authid WHERE rolname IN ('xcs_admin_app','xcs_notifier') ORDER BY rolname
+    `
+    expect(after).toEqual(before)
+    expect(after.every(({ canLogin }) => canLogin)).toBe(true)
     for (const client of [admin, notifier])
       await expect(client.sql`SELECT identity_subject FROM public.app_users`).rejects.toMatchObject(
         {

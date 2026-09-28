@@ -1,6 +1,7 @@
 import { defineNitroPlugin, useRuntimeConfig } from 'nitropack/runtime'
 import { createDatabaseClient } from '../lib/db/index.js'
 import { loadAuthConfig } from '../xcs/auth/config'
+import { apiEnvironment } from '../xcs/settings'
 import {
   createAuthHandler,
   readAuthSession,
@@ -38,7 +39,7 @@ export default defineNitroPlugin(async (nitroApp) => {
     nitroApp.hooks.hook('close', harness.close)
     return
   }
-  const config = loadAuthConfig(process.env)
+  const config = loadAuthConfig(apiEnvironment())
   if (!config) return
   const database = createDatabaseClient(config.databaseUrl, { onNotice: () => undefined })
   const repository = new PostgresAuthRepository(database)

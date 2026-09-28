@@ -1,6 +1,9 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig, devices } from '@playwright/test'
 
-const baseURL = 'http://127.0.0.1:3101'
+const port = process.env.XCS_SECURITY_E2E_PORT ?? '3101'
+const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -27,13 +30,17 @@ export default defineConfig({
     env: {
       NODE_ENV: 'production',
       NITRO_HOST: '127.0.0.1',
-      NITRO_PORT: '3101',
+      NITRO_PORT: port,
       // Production uses the standalone API config, never the fixture repository.
       XCS_DATABASE_URL: 'postgres://xcs_api@127.0.0.1:1/security-test',
       XCS_ALLOWED_ORIGINS: baseURL,
       NUXT_BROWSER_E2E_MODE: 'disabled',
       NUXT_PUBLIC_BROWSER_E2E_MODE: 'disabled',
-      NUXT_PUBLIC_PROFILE_ID: 'commons-testnet-xcs-v0.1-controlled-pilot',
+      // The browser-visible profile identifier is derived from this file's
+      // `profileId`; there is no separate variable for it.
+      XCS_NETWORK_PROFILE: fileURLToPath(
+        new URL('./test/fixtures/network-profiles/controlled-pilot.json', import.meta.url),
+      ),
       XCS_BROWSER_E2E: '0',
       XCS_LOCAL_PAYLOAD_STORE: '0',
     },

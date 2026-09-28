@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const issuerEnabled = process.env.NUXT_PUBLIC_ISSUER_ENABLED === '1'
+const issuerEnabled = Boolean(process.env.NUXT_ISSUER_DATABASE_URL?.trim())
 
 async function navigate(page: Page, path: string) {
   await page.evaluate(async (target) => {
@@ -51,7 +51,7 @@ for (const locale of ['en', 'fr'] as const) {
     test(`simple ${locale} homepage for ${signedIn ? 'a multi-role account' : 'a visitor'}`, async ({
       page,
     }) => {
-      test.skip(!issuerEnabled, 'Run with NUXT_PUBLIC_ISSUER_ENABLED=1 for portal navigation.')
+      test.skip(!issuerEnabled, 'Run with a complete issuer contract for portal navigation.')
       await page.setViewportSize({ width: 1440, height: 1000 })
       await enterHome(page, locale, signedIn)
       const home = page.getByTestId('simple-home')
@@ -83,7 +83,7 @@ for (const locale of ['en', 'fr'] as const) {
 }
 
 test('keeps the protocol homepage when issuer portals are disabled', async ({ page }) => {
-  test.skip(issuerEnabled, 'Run with NUXT_PUBLIC_ISSUER_ENABLED=0 for protocol compatibility.')
+  test.skip(issuerEnabled, 'Run without an issuer contract for protocol compatibility.')
   await enterHome(page, 'en', false)
   await expect(page.getByTestId('landing-hero')).toBeVisible()
   await expect(page.getByTestId('install-command')).toContainText('pnpm install')

@@ -16,20 +16,18 @@ deployment acceptance checks and must be reported separately from automated test
 
 ## Prepare the database and secrets
 
-Apply the journaled migrations through `0008` after authentication migration `0004`. Existing
-migrations must remain unchanged. Run the normal database bootstrap with its existing credentials
-and these additional passwords before starting administration:
+Apply the journaled migrations through `0008`. Existing migrations must remain unchanged. Create
+the managed `xcs_admin_app` and `xcs_notifier` users in DigitalOcean, retain their generated URLs in
+the two components, then run the grants-only bootstrap:
 
-| Private variable                    | Purpose                                                |
-| ----------------------------------- | ------------------------------------------------------ |
-| `XCS_ADMIN_DATABASE_PASSWORD`       | Bootstrap password for restricted role `xcs_admin_app` |
-| `XCS_NOTIFIER_DATABASE_PASSWORD`    | Bootstrap password for restricted role `xcs_notifier`  |
-| `NUXT_ADMIN_DATABASE_URL`           | Web administrative connection as `xcs_admin_app`       |
-| `XCS_NOTIFIER_DATABASE_URL`         | Worker connection as `xcs_notifier`                    |
-| `XCS_ADMIN_DOCUMENT_KEY`            | Random signing key of at least 32 UTF-8 bytes          |
-| `XCS_DOCUMENT_STORAGE_DRIVER`       | `filesystem` locally; `s3` in production               |
-| `XCS_DOCUMENT_FILESYSTEM_DIRECTORY` | Absolute local-only private directory                  |
-| `XCS_DOCUMENT_S3_*`                 | Private production bucket, endpoint, region and key    |
+| Private variable                    | Purpose                                             |
+| ----------------------------------- | --------------------------------------------------- |
+| `NUXT_ADMIN_DATABASE_URL`           | Web administrative connection as `xcs_admin_app`    |
+| `XCS_NOTIFIER_DATABASE_URL`         | Worker connection as `xcs_notifier`                 |
+| `XCS_ADMIN_DOCUMENT_KEY`            | Random signing key of at least 32 UTF-8 bytes       |
+| `XCS_DOCUMENT_STORAGE_DRIVER`       | `filesystem` locally; `s3` in production            |
+| `XCS_DOCUMENT_FILESYSTEM_DIRECTORY` | Absolute local-only private directory               |
+| `XCS_DOCUMENT_S3_*`                 | Private production bucket, endpoint, region and key |
 
 The secret variables support an alternative `_FILE` variable. Supply one source only, with a
 single-line value in a readable regular file. Never put them in `NUXT_PUBLIC_*`, commit secret files,
@@ -190,8 +188,8 @@ CSRF rejection, missing documents and errors. Recheck public discovery and exist
 Report which checks actually ran; synthetic OIDC tests are not a real XRP Identity connection or
 mockup user acceptance testing.
 
-For an application rollback, stop `admin-notifier`, disable `XCS_ADMIN_ENABLED` or remove the application
-overlay, and deploy the compatible previous web image. Keep migration `0005`, decisions, audit rows,
+For an application rollback, stop `admin-notifier`, remove the administration component contract,
+and deploy the compatible previous web image. Keep migration `0005`, decisions, audit rows,
 notification records and private document storage. Do not run `docker compose down --volumes` as rollback.
 Before re-enabling, verify migrations, minimum grants, document integrity and pending/uncertain
 notification states. An indexer outage does not prevent reading the stored decision history.

@@ -146,8 +146,9 @@ process — and restrict all three at the ingress to the load balancer and monit
 
 ### Metrics
 
-`XCS_METRICS_ENABLED=true` exposes two routes, both requiring `Authorization: Bearer
-$XCS_METRICS_TOKEN`, both `Cache-Control: no-store`, neither consuming the public rate-limit budget:
+Supplying a valid `XCS_METRICS_TOKEN` exposes two routes, both requiring `Authorization: Bearer
+$XCS_METRICS_TOKEN`, both `Cache-Control: no-store`, neither consuming the public rate-limit budget.
+With no token, neither route is registered:
 
 - `GET /internal/metrics` — a bounded JSON operator snapshot (schema version 1);
 - `GET /internal/metrics/prometheus` — the Prometheus exposition Prometheus scrapes.
@@ -358,8 +359,9 @@ error path.
 
 ## Hosted HTTPS payloads
 
-Set `NUXT_PUBLIC_PAYLOAD_BASE_URL` to the API's exact public HTTPS payload origin and
-`XCS_LOCAL_PAYLOAD_STORE=0`. Hosted issuance requires explicit public-storage consent.
+Supply the complete hosted-payload contract, including `XCS_PUBLIC_PAYLOAD_BASE_URL`; the server
+derives the browser-visible origin from that validated value. Hosted issuance requires explicit
+public-storage consent and `XCS_LOCAL_PAYLOAD_STORE=0`.
 Canonical payloads larger than **64 KiB of UTF-8 bytes** are rejected before preparation and again
 before signing, matching the hosted API limit. External issuer-managed storage keeps its own limit.
 The page builds the immutable URI, signs and submits `CredentialCreate`, waits for
@@ -454,7 +456,7 @@ The complete contract is [`.env.example`](./.env.example). A minimal deployment 
 XCS_DATABASE_URL=postgres://xcs_api:...@db.example:5432/xcs
 XCS_ALLOWED_ORIGINS=https://xcs.example
 XCS_TRUSTED_PROXY_CIDRS=10.42.0.2/32
-NUXT_PUBLIC_PROFILE_ID=xrpl-testnet-xcs-v0.1
+XCS_NETWORK_PROFILE=/workspace/config/networks/testnet.json
 NUXT_PUBLIC_RPC_URL=wss://s.altnet.rippletest.net:51233
 NUXT_PUBLIC_XAMAN_API_KEY=optional-public-xaman-application-id
 NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=optional-public-reown-project-id
@@ -473,8 +475,9 @@ behind an undeclared proxy.
 
 The active network profile is read from this application's own `/v1` API, parsed locally and matched
 against the RPC server's reported `network_id` before autofill and again before signing or recovery.
-This alpha rejects profiles other than XRPL Testnet (`networkId: 1`). If `NUXT_PUBLIC_PROFILE_ID` is
-omitted, exactly one Testnet profile must be available.
+This alpha rejects profiles other than XRPL Testnet (`networkId: 1`). The browser-visible profile ID
+is derived from `XCS_NETWORK_PROFILE`; if the file is omitted, exactly one Testnet profile must be
+available.
 
 `NUXT_PUBLIC_XAMAN_API_KEY` and `NUXT_PUBLIC_WALLET_CONNECT_PROJECT_ID` are optional public
 application identifiers. Omitting either variable removes only that adapter; it does not prevent the

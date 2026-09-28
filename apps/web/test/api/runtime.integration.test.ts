@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url'
 
 import { computeSchemaUid, encodeCredentialPayload, payloadDigest } from '#xcs/core/index.js'
 import { createDatabaseClient, type DatabaseClient } from '../../server/lib/db/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../../server/lib/db/bootstrap.js'
+import { createManagedRuntimeDatabaseUsers } from '../lib/db/managedRuntimeUsers.js'
 import { buildCredentialCreate } from '#xcs/sdk/index.js'
 import { describe, expect, it } from 'vitest'
 import { Wallet } from 'xrpl'
@@ -225,11 +226,8 @@ describe.skipIf(!enabled)('built Nuxt with real PostgreSQL', () => {
       await admin.sql`CREATE DATABASE ${admin.sql(name)} TEMPLATE template0 ENCODING 'UTF8'`
       created = true
       database = createDatabaseClient(parsed.toString())
-      await bootstrapDatabase(database, {
-        clusterScope: 'dedicated',
-        administratorPassword: databasePasswordFromUrl(adminUrl!),
-        ...fixturePasswords,
-      })
+      await createManagedRuntimeDatabaseUsers(database, fixturePasswords)
+      await bootstrapDatabase(database, { clusterScope: 'dedicated' })
       provisioned = true
       const fixture = await seedProjection(database)
       const port = await unusedPort()
@@ -251,9 +249,10 @@ describe.skipIf(!enabled)('built Nuxt with real PostgreSQL', () => {
           ),
           // SSR must ignore this browser-only endpoint, using Nitro's in-process dispatch.
           NUXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:1',
-          NUXT_PUBLIC_PROFILE_ID: profileId,
+          XCS_NETWORK_PROFILE: fileURLToPath(
+            new URL('../fixtures/network-profiles/runtime.json', import.meta.url),
+          ),
           XCS_ALLOWED_ORIGINS: origin,
-          XCS_HOSTED_PAYLOADS_ENABLED: 'true',
           XCS_PUBLIC_PAYLOAD_BASE_URL: publicPayloadOrigin,
           XCS_PAYLOAD_STORAGE_IP_HASH_SECRET: 'runtime-integration-ip-hash-secret-01',
           XCS_HOSTED_PAYLOAD_NETWORKS: profileId,
@@ -332,7 +331,10 @@ describe.skipIf(!enabled)('built Nuxt with real PostgreSQL', () => {
           await database?.close()
           if (created) await admin.sql`DROP DATABASE ${admin.sql(name)} WITH (FORCE)`
           if (provisioned)
-            await admin.sql`DROP ROLE xcs_indexer, xcs_api, xcs_payload_writer, xcs_monitor`
+            await admin.sql`
+              DROP ROLE xcs_indexer, xcs_api, xcs_payload_writer, xcs_monitor,
+                xcs_app, xcs_admin_app, xcs_notifier, xcs_issuer
+            `
         } finally {
           await admin.close()
         }

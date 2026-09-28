@@ -1,12 +1,17 @@
 import { loadPrivateDocumentStorageConfig } from '../documents/config'
 import { serverSecret } from '../secrets'
+import { loadAuthConfig } from '../auth/config'
 
 export const adminSecret = serverSecret
 export function loadAdminConfig(env: NodeJS.ProcessEnv) {
-  if (env.XCS_ADMIN_ENABLED !== undefined && !['0', '1'].includes(env.XCS_ADMIN_ENABLED))
-    throw new Error('ADMIN_FLAG_INVALID')
-  if (env.XCS_ADMIN_ENABLED !== '1') return undefined
-  if (env.XCS_AUTH_ENABLED !== '1') throw new Error('ADMIN_AUTH_REQUIRED')
+  const supplied = [
+    'NUXT_ADMIN_DATABASE_URL',
+    'NUXT_ADMIN_DATABASE_URL_FILE',
+    'XCS_ADMIN_DOCUMENT_KEY',
+    'XCS_ADMIN_DOCUMENT_KEY_FILE',
+  ].some((name) => (env[name] ?? '').trim().length > 0)
+  if (!supplied) return undefined
+  if (loadAuthConfig(env) === undefined) throw new Error('ADMIN_AUTH_REQUIRED')
   const databaseUrl = adminSecret(env, 'NUXT_ADMIN_DATABASE_URL'),
     signingKey = adminSecret(env, 'XCS_ADMIN_DOCUMENT_KEY')
   let database: URL

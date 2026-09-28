@@ -168,21 +168,22 @@ finite replays.
 
 ## Database roles
 
-| Identity / role       | Access boundary                                                                                                               | Intended lifetime                               |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Bootstrap provisioner | Owns migrations and grants; requires `CREATEROLE` plus DDL rights on the dedicated XCS database.                              | PRE_DEPLOY job and controlled maintenance only. |
-| `xcs_indexer`         | Reads and inserts ledger-derived rows; receives column-limited updates only on `indexer_status` and `credential_generations`. | Indexer runtime.                                |
-| `xcs_api`             | Read-only access to public ledger projections.                                                                                | Web app public `/v1` API pool.                  |
-| `xcs_payload_writer`  | Writes hosted public payloads, publication records, demo pin challenges and pins.                                             | Web app publication pool.                       |
-| `xcs_monitor`         | No application-table DML; inherits PostgreSQL's `pg_monitor` role.                                                            | Metrics collection.                             |
-| `xcs_app`             | Accounts, OIDC sessions, wallet-link challenges and proven wallet records.                                                    | Web app authentication pool.                    |
-| `xcs_admin_app`       | Commons application review, audit decisions and notification outbox creation.                                                 | Web app administrator pool.                     |
-| `xcs_notifier`        | Claims and updates Commons notification outbox rows.                                                                          | Notifier worker.                                |
-| `xcs_issuer`          | Issuer applications, invitations, managed credentials, recipient access and presentations.                                    | Web app role-workspace pool.                    |
+| Identity / role       | Access boundary                                                                                                                        | Intended lifetime                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Bootstrap provisioner | Owns migrations and grants; requires DDL rights plus authority to administer the eight pre-created roles on the dedicated XCS cluster. | PRE_DEPLOY job and controlled maintenance only. |
+| `xcs_indexer`         | Reads and inserts ledger-derived rows; receives column-limited updates only on `indexer_status` and `credential_generations`.          | Indexer runtime.                                |
+| `xcs_api`             | Read-only access to public ledger projections.                                                                                         | Web app public `/v1` API pool.                  |
+| `xcs_payload_writer`  | Writes hosted public payloads, publication records, demo pin challenges and pins.                                                      | Web app publication pool.                       |
+| `xcs_monitor`         | No application-table DML; inherits PostgreSQL's `pg_monitor` role.                                                                     | Metrics collection.                             |
+| `xcs_app`             | Accounts, OIDC sessions, wallet-link challenges and proven wallet records.                                                             | Web app authentication pool.                    |
+| `xcs_admin_app`       | Commons application review, audit decisions and notification outbox creation.                                                          | Web app administrator pool.                     |
+| `xcs_notifier`        | Claims and updates Commons notification outbox rows.                                                                                   | Notifier worker.                                |
+| `xcs_issuer`          | Issuer applications, invitations, managed credentials, recipient access and presentations.                                             | Web app role-workspace pool.                    |
 
-Runtime roles own no objects, cannot create database objects, are not superusers, and have finite
-connection limits and statement timeouts. Bootstrap requires an explicit dedicated-cluster
-acknowledgement because PostgreSQL roles are cluster-wide.
+Runtime roles own no objects and must be normal managed users with `LOGIN` and no elevated role
+attributes or unexpected memberships. The managed service creates them and owns their passwords,
+connection limits and role defaults; bootstrap validates that boundary and applies only grants. It
+requires an explicit dedicated-cluster acknowledgement because PostgreSQL roles are cluster-wide.
 
 ## Schema ownership, migrations and bootstrap
 
@@ -236,26 +237,19 @@ This is idempotent: `drizzle-orm`'s migrator records applied migrations in
 
 ### Bootstrap and migrate atomically
 
-`db:bootstrap` is migration **plus** role provisioning. The `apps/db-bootstrap` PRE_DEPLOY job runs
-it for a fresh database and every later application revision:
+`db:bootstrap` is migration plus grants. Before the PRE_DEPLOY job, create all eight runtime users
+through DigitalOcean: `xcs_indexer`, `xcs_api`, `xcs_payload_writer`, `xcs_monitor`, `xcs_app`,
+`xcs_admin_app`, `xcs_notifier` and `xcs_issuer`. DigitalOcean owns their generated passwords.
 
 ```sh
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@host:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… \
-  XCS_API_DATABASE_PASSWORD=… \
-  XCS_PAYLOAD_DATABASE_PASSWORD=… \
-  XCS_MONITOR_DATABASE_PASSWORD=… \
-  XCS_APP_DATABASE_PASSWORD=… \
-  XCS_ADMIN_DATABASE_PASSWORD=… \
-  XCS_NOTIFIER_DATABASE_PASSWORD=… \
-  XCS_ISSUER_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
-It validates the provisioner and any existing runtime roles, applies migrations, then normalizes all
-eight runtime roles, passwords and grants in one administrative transaction. The command is
-idempotent, so rerunning it is safe and is also how a runtime password is rotated.
+It checks that all eight managed users exist before any DDL, applies migrations 0000–0008, then
+normalizes attributes and least-privilege grants in one administrative transaction. It never creates
+a role or reads, sets, resets or rotates a password. The command is idempotent.
 `XCS_DATABASE_CLUSTER_SCOPE=dedicated` is required because PostgreSQL login roles are cluster-wide
 even though the grants are scoped to the selected database. Bootstrap reports role names or a stable
 failure code, never URLs or password values.

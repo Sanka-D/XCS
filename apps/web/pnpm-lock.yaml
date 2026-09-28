@@ -10,7 +10,7 @@ overrides:
 
 patchedDependencies:
   vaul-vue@0.4.1:
-    hash: 63a11f2813f8a13b343c8bc1f659132aea910491c2e1b70d6cc760aa517a8f44
+    hash: 745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0
     path: patches/vaul-vue@0.4.1.patch
   xrpl-connect@1.0.0-rc.2:
     hash: fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a
@@ -45,7 +45,7 @@ importers:
         specifier: 1.0.0-rc.2
         version: 1.0.0-rc.2(vue@3.5.43(typescript@5.9.3))(xrpl-connect@1.0.0-rc.2(patch_hash=fc9808b6fae2f6618e5a51a02a66e384ffe5ce3ef9cd5679e9d2b099840d9d5a)(bufferutil@4.1.0)(db0@0.3.4(drizzle-orm@0.45.3(postgres@3.4.9)))(ioredis@5.11.1)(utf-8-validate@5.0.10)(xrpl@5.3.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)))(xrpl@5.3.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
       ajv:
-        specifier: ^8.17.1
+        specifier: ^8.20.0
         version: 8.20.0
       canonicalize:
         specifier: 4.0.0
@@ -8833,7 +8833,7 @@ snapshots:
       unplugin: 3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
       unplugin-auto-import: 21.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))))(@vueuse/core@14.4.0(vue@3.5.43(typescript@5.9.3)))(esbuild@0.27.7)(oxc-parser@0.141.0)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
       unplugin-vue-components: 32.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))))(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))(vue@3.5.43(typescript@5.9.3))
-      vaul-vue: 0.4.1(patch_hash=63a11f2813f8a13b343c8bc1f659132aea910491c2e1b70d6cc760aa517a8f44)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
+      vaul-vue: 0.4.1(patch_hash=745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
       vue-component-type-helpers: 3.3.11
     optionalDependencies:
       '@internationalized/date': 3.12.4
@@ -14446,8 +14446,8 @@ snapshots:
   unplugin-auto-import@21.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))))(@vueuse/core@14.4.0(vue@3.5.43(typescript@5.9.3)))(esbuild@0.27.7)(oxc-parser@0.141.0)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1)):
     dependencies:
       local-pkg: 1.2.1
-      magic-string: 1.2.3
-      picomatch: 4.0.5
+      magic-string: 1.4.2
+      picomatch: 4.0.7
       unimport: 6.5.0(esbuild@0.27.7)(oxc-parser@0.141.0)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
       unplugin: 3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
       unplugin-utils: 0.3.2
@@ -14492,7 +14492,7 @@ snapshots:
       magic-string: 0.30.21
       mlly: 1.8.2
       obug: 2.2.1
-      picomatch: 4.0.5
+      picomatch: 4.0.7
       tinyglobby: 0.2.17
       unplugin: 3.4.0(esbuild@0.27.7)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
       unplugin-utils: 0.3.2
@@ -14637,7 +14637,7 @@ snapshots:
       is-typed-array: 1.1.15
       which-typed-array: 1.1.22
 
-  vaul-vue@0.4.1(patch_hash=63a11f2813f8a13b343c8bc1f659132aea910491c2e1b70d6cc760aa517a8f44)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
+  vaul-vue@0.4.1(patch_hash=745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
     dependencies:
       '@vueuse/core': 10.11.1(vue@3.5.43(typescript@5.9.3))
       reka-ui: 2.10.4(vue@3.5.43(typescript@5.9.3))

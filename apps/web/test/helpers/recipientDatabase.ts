@@ -13,7 +13,8 @@ import {
   encodeHexUtf8,
   payloadDigest,
 } from '#xcs/core/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../../server/lib/db/bootstrap.js'
+import { createManagedRuntimeDatabaseUsers } from '../lib/db/managedRuntimeUsers.js'
 import {
   createAppToken,
   createDatabaseClient,
@@ -40,17 +41,15 @@ export async function createRecipientDatabase(url: string) {
     await operator.sql`CREATE DATABASE ${operator.sql(name)} TEMPLATE template0`
     parsed.pathname = '/' + name
     db = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })
-    const passwords = {
-      clusterScope: 'dedicated' as const,
-      administratorPassword: databasePasswordFromUrl(url),
+    const passwords = await createManagedRuntimeDatabaseUsers(db, {
       indexerPassword: randomBytes(32).toString('hex'),
       apiPassword: randomBytes(32).toString('hex'),
       payloadWriterPassword: randomBytes(32).toString('hex'),
       monitorPassword: randomBytes(32).toString('hex'),
       applicationPassword: randomBytes(32).toString('hex'),
       issuerPassword: randomBytes(32).toString('hex'),
-    }
-    await bootstrapDatabase(db, passwords)
+    })
+    await bootstrapDatabase(db, { clusterScope: 'dedicated' })
     parsed.username = 'xcs_app'
     parsed.password = passwords.applicationPassword
     authClient = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })

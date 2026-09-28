@@ -34,29 +34,28 @@ Provider access/refresh/ID tokens are not persisted or returned to the browser.
 
 ## Provision and enable
 
-Back up and follow [Migrate](deployment.md#migrate). Apply the new `0004_auth_sessions` migration,
-then rerun bootstrap with the existing four runtime passwords plus a fifth, distinct
-`XCS_APP_DATABASE_PASSWORD` (32–256 URL-safe characters), or its `_FILE` counterpart.
+Back up and follow [Migrate](deployment.md#migrate). Create the managed `xcs_app` user in
+DigitalOcean, retain its generated URL as `NUXT_APP_DATABASE_URL`, then run the grants-only
+bootstrap, which applies `0004_auth_sessions` and the later migrations.
 The optional `xcs_app` role has only the table/column access needed for authentication. It cannot
 write approvals, insert an admin role, move wallet ownership, read private payloads or modify the
 projection. Its connection must never replace `xcs_api` or `xcs_payload_writer`.
 
-Omitting the application password from a subsequent bootstrap **disables** `xcs_app`, clears its
-password and revokes its privileges. Preserve the configured application password for routine
-bootstrap operations while auth remains enabled. Schema-only `db:migrate` does not rotate passwords.
+Authentication is enabled when its origin, Identity client credentials and `xcs_app` URL are all
+present; a partial contract fails at startup. Rotate its password through DigitalOcean and replace
+only the application URL. Bootstrap never manages passwords.
 
 Nuxt private runtime configuration:
 
-| Variable                     | Meaning                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `XCS_AUTH_ENABLED=1`         | Enable auth only once client and database provisioning are ready          |
-| `XCS_AUTH_ORIGIN`            | Exact HTTPS site origin, without a path; defines callback and CSRF origin |
-| `XCS_IDENTITY_ISSUER`        | Defaults to `https://account.xrpl.in`                                     |
-| `XCS_IDENTITY_CLIENT_ID`     | Private client identifier; `_FILE` supported                              |
-| `XCS_IDENTITY_CLIENT_SECRET` | Private client secret; `_FILE` supported                                  |
-| `NUXT_APP_DATABASE_URL`      | Private `xcs_app` PostgreSQL URL; `_FILE` supported                       |
-| `XCS_AUTH_IDLE_SECONDS`      | Default 1800, bounded to 60–86400 seconds                                 |
-| `XCS_AUTH_MAX_SECONDS`       | Default 28800, bounded to 60–604800 seconds; at least idle duration       |
+| Variable                                                                             | Meaning                                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `XCS_AUTH_ORIGIN`                                                                    | Exact HTTPS site origin, without a path; defines callback and CSRF origin |
+| `XCS_IDENTITY_ISSUER`                                                                | Defaults to `https://account.xrpl.in`                                     |
+| `XCS_IDENTITY_CLIENT_ID`                                                             | Private client identifier; `_FILE` supported                              |
+| `XCS_IDENTITY_CLIENT_SECRET`                                                         | Private client secret; `_FILE` supported                                  |
+| `NUXT_APP_DATABASE_URL`                                                              | Private `xcs_app` PostgreSQL URL; `_FILE` supported                       |
+| Session lifetimes and the Identity issuer endpoint are checked-in settings in        |
+| `apps/web/server/xcs/settings.ts`, so changing them requires review and a new image. |
 
 Use the provider's verified database TLS connection configuration. Never put these values in
 `NUXT_PUBLIC_*`, source files or logs. Direct values and matching `_FILE` values are mutually
@@ -151,9 +150,9 @@ separate integration tests exercise PostgreSQL with the restricted role. Product
 harness flag and excludes its runtime branch. Stubs are not evidence of real Identity registration,
 real wallet consent or successful production login.
 
-Disable `XCS_AUTH_ENABLED` to remove account navigation and reject auth endpoints while keeping
-public routes available. Retain the additive tables and use forward fixes. Do not roll back by
-removing populated users, wallet links or the migration journal.
+Remove the complete auth secret group to disable account navigation and reject auth endpoints while
+keeping public routes available. Retain the additive tables and use forward fixes. Do not roll back
+by removing populated users, wallet links or the migration journal.
 
 The guided Account wallet picker offers only the three supported message-proof adapters. Its
 installation links come from those adapters; setup, backup and private keys stay inside the wallet.

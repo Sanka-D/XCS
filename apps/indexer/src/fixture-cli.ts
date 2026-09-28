@@ -12,18 +12,22 @@ import {
 import { QuorumLedgerSource } from './quorum-ledger-source.js'
 import { sourceErrorCode } from './source-errors.js'
 import { parseJson, sha256Hex } from './serialization.js'
+import { indexerEnvironment } from './settings.js'
 import { XrplLedgerSource } from './xrpl-source.js'
 
 type FixtureCommand = 'capture' | 'validate'
 
+// The fixture CLI reads the same settings-applied environment as the worker.
+const environment = indexerEnvironment()
+
 function required(name: string): string {
-  const value = process.env[name]
+  const value = environment[name]
   if (value === undefined || value.trim().length === 0) throw new Error(`${name} is required`)
   return value.trim()
 }
 
 function requiredOperatorLabel(name: string): string {
-  const value = process.env[name]
+  const value = environment[name]
   if (value === undefined || value.trim().length === 0) throw new Error(`${name} is required`)
   return value
 }

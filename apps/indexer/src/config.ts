@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { parseNetworkProfile, type NetworkProfile } from './lib/xcs/index.js'
 
 import { sha256Hex } from './serialization.js'
+import { indexerEnvironment, indexerSettings, pilotOverridableSettings } from './settings.js'
 import type { DatabaseScope, RegistryPolicy } from './types.js'
 
 export const CONTROLLED_PILOT_ACKNOWLEDGEMENT = 'DISPOSABLE_PROFILE_AND_DATABASE' as const
@@ -88,7 +89,9 @@ function rpcUrl(value: string, name: string): string {
   return parsed.toString()
 }
 
-export function loadLedgerRpcConfig(environment: NodeJS.ProcessEnv = process.env): LedgerRpcConfig {
+export function loadLedgerRpcConfig(
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
+): LedgerRpcConfig {
   const primary = rpcUrl(
     environment.XCS_RPC_URL_PRIMARY ??
       compatibleRequired(environment, 'XCS_RPC_URL', 'XRPL_RPC_URL'),
@@ -103,9 +106,9 @@ export function loadLedgerRpcConfig(environment: NodeJS.ProcessEnv = process.env
 
 export function resolveRegistryPolicy(
   profile: NetworkProfile,
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
 ): RegistryPolicy {
-  const policy = environment.XCS_REGISTRY_POLICY ?? 'blackholed'
+  const policy = environment.XCS_REGISTRY_POLICY ?? pilotOverridableSettings.XCS_REGISTRY_POLICY
   if (policy !== 'blackholed' && policy !== 'controlled-testnet-pilot') {
     throw new Error('XCS_REGISTRY_POLICY must be either blackholed or controlled-testnet-pilot')
   }
@@ -134,9 +137,9 @@ export function resolveRegistryPolicy(
 
 export function resolveDatabaseScope(
   registryPolicy: RegistryPolicy,
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
 ): DatabaseScope {
-  const scope = environment.XCS_DATABASE_SCOPE ?? 'shared'
+  const scope = environment.XCS_DATABASE_SCOPE ?? pilotOverridableSettings.XCS_DATABASE_SCOPE
   if (scope !== 'shared' && scope !== 'exclusive-profile') {
     throw new Error('XCS_DATABASE_SCOPE must be either shared or exclusive-profile')
   }
@@ -161,14 +164,14 @@ async function loadProfileConfig(environment: NodeJS.ProcessEnv): Promise<Loaded
 }
 
 export async function loadIndexerPreflightConfig(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
 ): Promise<IndexerPreflightConfig> {
   const loaded = await loadProfileConfig(environment)
   return { ...loaded, ...loadLedgerRpcConfig(environment) }
 }
 
 export async function loadIndexerConfig(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
 ): Promise<IndexerConfig> {
   const runtime = await loadIndexerRuntimeConfig(environment)
   const source = loadLedgerRpcConfig(environment)
@@ -181,23 +184,29 @@ export async function loadIndexerConfig(
 }
 
 export async function loadIndexerRuntimeConfig(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = indexerEnvironment(),
 ): Promise<IndexerRuntimeConfig> {
   const { profile, registryPolicy, databaseScope } = await loadProfileConfig(environment)
   const pollIntervalMs = Number(
-    environment.XCS_INDEXER_POLL_INTERVAL_MS ?? environment.INDEXER_POLL_INTERVAL_MS ?? '4000',
+    environment.XCS_INDEXER_POLL_INTERVAL_MS ??
+      environment.INDEXER_POLL_INTERVAL_MS ??
+      indexerSettings.XCS_INDEXER_POLL_INTERVAL_MS,
   )
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 250 || pollIntervalMs > 60_000) {
     throw new Error('XCS_INDEXER_POLL_INTERVAL_MS must be between 250 and 60000')
   }
-  const leaseDurationMs = Number(environment.XCS_INDEXER_LEASE_DURATION_MS ?? '30000')
+  const leaseDurationMs = Number(
+    environment.XCS_INDEXER_LEASE_DURATION_MS ?? indexerSettings.XCS_INDEXER_LEASE_DURATION_MS,
+  )
   if (!Number.isInteger(leaseDurationMs) || leaseDurationMs < 10_000 || leaseDurationMs > 300_000) {
     throw new Error('XCS_INDEXER_LEASE_DURATION_MS must be between 10000 and 300000')
   }
   if (leaseDurationMs < pollIntervalMs * 3) {
     throw new Error('XCS_INDEXER_LEASE_DURATION_MS must be at least 3 times the poll interval')
   }
-  const batchSize = Number(environment.XCS_INDEXER_BATCH_SIZE ?? '20')
+  const batchSize = Number(
+    environment.XCS_INDEXER_BATCH_SIZE ?? indexerSettings.XCS_INDEXER_BATCH_SIZE,
+  )
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) {
     throw new Error('XCS_INDEXER_BATCH_SIZE must be between 1 and 100')
   }

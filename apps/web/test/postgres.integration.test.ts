@@ -7,8 +7,10 @@ import {
   schemas,
   type DatabaseClient,
 } from '../server/lib/db/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../server/lib/db/bootstrap.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { createManagedRuntimeDatabaseUsers } from './lib/db/managedRuntimeUsers.js'
 
 import { PostgresOperationalMetricsRepository } from '../server/xcs/operational-metrics-repository.js'
 import { PostgresPinningRepository } from '../server/xcs/pinning-repository.js'
@@ -145,16 +147,15 @@ describePostgres('PostgreSQL 18 API integration', () => {
     temporaryDatabaseUrl = databaseUrl(adminDatabaseUrl, temporaryDatabaseName)
     databaseClient = createDatabaseClient(temporaryDatabaseUrl)
     runtimeRoleCleanupAllowed = true
-    const bootstrapPasswords = {
-      clusterScope: 'dedicated',
-      administratorPassword: databasePasswordFromUrl(temporaryDatabaseUrl),
+    await createManagedRuntimeDatabaseUsers(databaseClient, {
       indexerPassword: INDEXER_DATABASE_PASSWORD,
       apiPassword: API_DATABASE_PASSWORD,
       payloadWriterPassword: PAYLOAD_DATABASE_PASSWORD,
       monitorPassword: MONITOR_DATABASE_PASSWORD,
-    } as const
-    await bootstrapDatabase(databaseClient, bootstrapPasswords)
-    await bootstrapDatabase(databaseClient, bootstrapPasswords)
+    })
+    const provisioning = { clusterScope: 'dedicated' } as const
+    await bootstrapDatabase(databaseClient, provisioning)
+    await bootstrapDatabase(databaseClient, provisioning)
     runtimePayloadClient = createDatabaseClient(
       runtimeDatabaseUrl(temporaryDatabaseUrl, 'xcs_payload_writer', PAYLOAD_DATABASE_PASSWORD),
     )
@@ -212,7 +213,11 @@ describePostgres('PostgreSQL 18 API integration', () => {
               xcs_indexer,
               xcs_api,
               xcs_payload_writer,
-              xcs_monitor
+              xcs_monitor,
+              xcs_app,
+              xcs_admin_app,
+              xcs_notifier,
+              xcs_issuer
           `
           runtimeRoleCleanupAllowed = false
         } catch (error) {

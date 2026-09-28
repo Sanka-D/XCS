@@ -21,13 +21,9 @@ import {
   type DatabaseClient,
 } from '../src/lib/db/index.js'
 import {
-  databasePasswordFromUrl,
   initializeDatabase,
-  provisionRuntimeDatabaseRoles,
-  XCS_API_DATABASE_CONNECTION_LIMIT,
-  XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT,
-  XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
-  XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
+  provisionRuntimeDatabasePrivileges,
+  XCS_RUNTIME_DATABASE_ROLES,
 } from '../src/lib/db/bootstrap.js'
 import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '../src/lib/xcs/index.js'
 import { and, asc, eq } from 'drizzle-orm'
@@ -36,6 +32,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { captureLedgerFixtureBundle, ledgerFixtureBundleDigest } from '../src/fixture-bundle.js'
 import { prepareFixtureReplay } from '../src/fixture-replay.js'
+import { createManagedRuntimeDatabaseUsers } from './helpers/managedRuntimeUsers.js'
 import { computeProjectionDigest } from '../src/projection-digest.js'
 import { QuorumLedgerSource } from '../src/quorum-ledger-source.js'
 import { PostgresIndexerRepository } from '../src/repository.js'
@@ -925,16 +922,16 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     if (database === undefined) throw new Error('First temporary database was not created')
     if (adminClient === undefined) throw new Error('PostgreSQL admin client is not initialized')
 
-    const passwords = {
-      clusterScope: 'dedicated',
-      administratorPassword: databasePasswordFromUrl(database.url),
+    const provisioning = { clusterScope: 'dedicated' } as const
+
+    runtimeRoleCleanupAllowed = true
+    await createManagedRuntimeDatabaseUsers(adminClient, {
       indexerPassword: INDEXER_DATABASE_PASSWORD,
       apiPassword: API_DATABASE_PASSWORD,
       payloadWriterPassword: PAYLOAD_DATABASE_PASSWORD,
       monitorPassword: MONITOR_DATABASE_PASSWORD,
-    } as const
-    runtimeRoleCleanupAllowed = true
-    await provisionRuntimeDatabaseRoles(database.client, passwords)
+    })
+    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
     // Simulate the pre-split API grants: reprovisioning must remove them, not just add a writer.
     await database.client.sql`
       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_api
@@ -942,7 +939,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await database.client.sql`
       GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_api
     `
-    await provisionRuntimeDatabaseRoles(database.client, passwords)
+    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
 
     const roleProperties = await adminClient.sql<
       Array<{
@@ -974,44 +971,17 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
           ORDER BY setting
         ) AS configuration
       FROM pg_roles
-      WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
+      WHERE rolname IN (
+        'xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor',
+        'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer'
+      )
       ORDER BY rolname
     `
-    expect(roleProperties).toEqual([
-      {
-        roleName: 'xcs_api',
-        canLogin: true,
-        isSuperuser: false,
-        canCreateDatabase: false,
-        canCreateRole: false,
-        canReplicate: false,
-        canBypassRls: false,
-        inheritsPrivileges: false,
-        connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
-        configuration: [
-          'idle_in_transaction_session_timeout=30s',
-          'lock_timeout=15s',
-          'statement_timeout=30s',
-        ],
-      },
-      {
-        roleName: 'xcs_indexer',
-        canLogin: true,
-        isSuperuser: false,
-        canCreateDatabase: false,
-        canCreateRole: false,
-        canReplicate: false,
-        canBypassRls: false,
-        inheritsPrivileges: false,
-        connectionLimit: XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
-        configuration: [
-          'idle_in_transaction_session_timeout=30s',
-          'lock_timeout=30s',
-          'statement_timeout=5min',
-        ],
-      },
-      {
-        roleName: 'xcs_monitor',
+    expect(roleProperties.map(({ roleName }) => roleName)).toEqual(
+      [...XCS_RUNTIME_DATABASE_ROLES].sort(),
+    )
+    for (const role of roleProperties) {
+      expect(role).toMatchObject({
         canLogin: true,
         isSuperuser: false,
         canCreateDatabase: false,
@@ -1019,30 +989,10 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canReplicate: false,
         canBypassRls: false,
         inheritsPrivileges: true,
-        connectionLimit: XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
-        configuration: [
-          'idle_in_transaction_session_timeout=30s',
-          'lock_timeout=10s',
-          'statement_timeout=30s',
-        ],
-      },
-      {
-        roleName: 'xcs_payload_writer',
-        canLogin: true,
-        isSuperuser: false,
-        canCreateDatabase: false,
-        canCreateRole: false,
-        canReplicate: false,
-        canBypassRls: false,
-        inheritsPrivileges: false,
-        connectionLimit: XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT,
-        configuration: [
-          'idle_in_transaction_session_timeout=30s',
-          'lock_timeout=15s',
-          'statement_timeout=30s',
-        ],
-      },
-    ])
+        connectionLimit: -1,
+        configuration: [],
+      })
+    }
 
     const runtimeMemberships = await adminClient.sql<
       Array<{
@@ -1062,7 +1012,10 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       FROM pg_auth_members membership
       JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
       JOIN pg_roles member_role ON member_role.oid = membership.member
-      WHERE member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer')
+      WHERE member_role.rolname IN (
+        'xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor',
+        'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer'
+      )
       ORDER BY granted_role.rolname, member_role.rolname
     `
     expect(runtimeMemberships).toEqual([

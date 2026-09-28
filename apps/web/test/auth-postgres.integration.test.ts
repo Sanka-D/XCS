@@ -8,7 +8,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
 } from '../server/lib/db/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../server/lib/db/bootstrap.js'
+import { createManagedRuntimeDatabaseUsers } from './lib/db/managedRuntimeUsers.js'
 import { PostgresAuthRepository } from '../server/xcs/auth/repository'
 
 const url = process.env.XCS_TEST_DATABASE_URL?.trim()
@@ -41,15 +42,8 @@ describe.skipIf(!url)('PostgreSQL auth repository through xcs_app', () => {
     parsed.pathname = '/' + name
     database = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })
     const applicationPassword = randomBytes(32).toString('base64url')
-    await bootstrapDatabase(database, {
-      clusterScope: 'dedicated',
-      administratorPassword: databasePasswordFromUrl(url!),
-      indexerPassword: randomBytes(32).toString('base64url'),
-      apiPassword: randomBytes(32).toString('base64url'),
-      payloadWriterPassword: randomBytes(32).toString('base64url'),
-      monitorPassword: randomBytes(32).toString('base64url'),
-      applicationPassword,
-    })
+    await createManagedRuntimeDatabaseUsers(database, { applicationPassword })
+    await bootstrapDatabase(database, { clusterScope: 'dedicated' })
     parsed.username = 'xcs_app'
     parsed.password = applicationPassword
     app = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })

@@ -13,6 +13,7 @@ import {
   databaseMigrationStatus,
   migrateDatabase,
 } from '../../src/lib/db/migrations.js'
+import { createManagedRuntimeDatabaseUsers } from '../helpers/managedRuntimeUsers.js'
 
 const adminUrl = process.env.XCS_TEST_DATABASE_URL?.trim() || undefined
 if (process.env.XCS_REQUIRE_POSTGRES_TESTS === '1' && adminUrl === undefined) {
@@ -41,21 +42,6 @@ let managedRuntimeRolesCreated = false
 let managedPreexistingRuntimeRoles = false
 const fixtureFolders: string[] = []
 const managedProvisionerPassword = 'managed-provisioner-password-000001'
-
-function bootstrapPasswords(administratorPassword: string) {
-  return {
-    clusterScope: 'dedicated',
-    administratorPassword,
-    indexerPassword: 'managed-indexer-password-000000001',
-    apiPassword: 'managed-api-password-0000000000001',
-    payloadWriterPassword: 'managed-payload-password-000000001',
-    monitorPassword: 'managed-monitor-password-000000001',
-    applicationPassword: 'managed-app-password-000000000001',
-    adminApplicationPassword: 'managed-admin-password-0000000001',
-    notifierPassword: 'managed-notifier-password-00000001',
-    issuerPassword: 'managed-issuer-password-0000000001',
-  } as const
-}
 
 async function fixture(count = journal.entries.length): Promise<string> {
   const folder = await mkdtemp(join(tmpdir(), 'xcs-migration-fixture-'))
@@ -134,18 +120,6 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
       await administrator.sql`
         GRANT pg_monitor TO xcs_monitor
         WITH ADMIN FALSE, SET FALSE, INHERIT TRUE
-      `
-      await administrator.sql`
-        REVOKE
-          xcs_indexer,
-          xcs_api,
-          xcs_payload_writer,
-          xcs_monitor,
-          xcs_app,
-          xcs_admin_app,
-          xcs_notifier,
-          xcs_issuer
-        FROM ${administrator.sql(roleName)}
       `
       await administrator.sql`REVOKE pg_monitor FROM ${administrator.sql(roleName)}`
       managedPreexistingRuntimeRoles = false
@@ -227,20 +201,9 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
       GRANT pg_monitor TO ${administrator.sql(roleName)}
       WITH ADMIN TRUE, SET FALSE, INHERIT FALSE
     `
-    if (!createsFreshRuntimeRoles) {
-      await administrator.sql`
-        GRANT
-          xcs_indexer,
-          xcs_api,
-          xcs_payload_writer,
-          xcs_monitor,
-          xcs_app,
-          xcs_admin_app,
-          xcs_notifier,
-          xcs_issuer
-        TO ${administrator.sql(roleName)}
-        WITH ADMIN TRUE, SET FALSE, INHERIT FALSE
-      `
+    if (createsFreshRuntimeRoles) {
+      await createManagedRuntimeDatabaseUsers(administrator)
+      managedRuntimeRolesCreated = true
     }
     await administrator.sql`
       ALTER DATABASE ${administrator.sql(databaseName!)} OWNER TO ${administrator.sql(roleName)}
@@ -251,14 +214,13 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
     managedUrl.password = managedProvisionerPassword
     managedDatabase = createDatabaseClient(managedUrl.toString())
 
-    const passwords = bootstrapPasswords(managedProvisionerPassword)
-    await bootstrapDatabase(managedDatabase, passwords)
-    managedRuntimeRolesCreated = createsFreshRuntimeRoles
+    const provisioning = { clusterScope: 'dedicated' } as const
+    await bootstrapDatabase(managedDatabase, provisioning)
     const firstJournal = await managedDatabase.sql`
       SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id
     `
     expect(firstJournal).toHaveLength(tags.length)
-    await bootstrapDatabase(managedDatabase, passwords)
+    await bootstrapDatabase(managedDatabase, provisioning)
     expect(
       await managedDatabase.sql`
         SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id
@@ -323,10 +285,9 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
       )
         AND member_role.rolname = ${roleName}
     `
-    expect(delegations).toHaveLength(8)
-    expect(delegations).toEqual(
-      delegations.map(() => ({ adminOption: true, inheritOption: false, setOption: false })),
-    )
+    // Provider-created users do not delegate ADMIN OPTION to the provisioner.
+    // A grants-only bootstrap must therefore remain idempotent without it.
+    expect(delegations).toEqual([])
   }, 30_000)
 
   it('rejects an obsolete migration history before creating schema objects or runtime roles', async () => {
@@ -351,9 +312,7 @@ describe.skipIf(adminUrl === undefined)('PostgreSQL 18 migration lifecycle', () 
       VALUES ('obsolete-xcs-protocol-history', 1)
     `
 
-    await expect(bootstrapDatabase(database, bootstrapPasswords('d'.repeat(32)))).rejects.toThrow(
-      'DATABASE_MIGRATION_HISTORY_MISMATCH',
-    )
+    await expect(migrateDatabase(database)).rejects.toThrow('DATABASE_MIGRATION_HISTORY_MISMATCH')
     expect(await exists('public.network_profiles')).toBe(false)
     expect(
       await administrator.sql`

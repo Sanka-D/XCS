@@ -1,6 +1,7 @@
 import { createDatabaseClient } from '../lib/db/client.js'
 
 import { loadApiConfig } from '../xcs/config'
+import { apiEnvironment } from '../xcs/settings'
 import type { XcsApiContext } from '../xcs/context'
 import { fixtureGet, fixtureNotFound, fixtureVerify } from '../xcs/e2e-fixtures'
 import { createApiHandlers, createSchemaValidator } from '../xcs/handlers'
@@ -41,13 +42,15 @@ const unavailableRepository = new Proxy({} as ApiRepository, {
  */
 function createBrowserE2eContext(): XcsApiContext {
   const config = loadApiConfig({
-    ...process.env,
+    ...apiEnvironment(),
     // The fixtures never reach a database; the value only satisfies the
     // configuration contract so the rest of it is loaded the usual way.
     XCS_DATABASE_URL: process.env.XCS_DATABASE_URL ?? 'postgres://127.0.0.1:1/xcs-browser-e2e',
     XCS_DEMO_PINNING_ENABLED: 'false',
-    XCS_METRICS_ENABLED: 'false',
-    XCS_HOSTED_PAYLOADS_ENABLED: 'false',
+    XCS_METRICS_TOKEN: '',
+    XCS_PUBLIC_PAYLOAD_BASE_URL: '',
+    XCS_PAYLOAD_STORAGE_IP_HASH_SECRET: '',
+    XCS_HOSTED_PAYLOAD_NETWORKS: '',
   })
   const real = createApiHandlers({
     repository: unavailableRepository,
@@ -93,7 +96,7 @@ function createBrowserE2eContext(): XcsApiContext {
 }
 
 function createProductionContext(): XcsApiContext {
-  const config = loadApiConfig(process.env)
+  const config = loadApiConfig(apiEnvironment())
   const database = createDatabaseClient(config.databaseUrl)
   const payloadDatabase = config.payloadDatabaseUrl
     ? createDatabaseClient(config.payloadDatabaseUrl)

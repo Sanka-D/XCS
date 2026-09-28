@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { defineConfig, devices } from '@playwright/test'
 
 const port = process.env.XCS_AUTH_E2E_PORT ?? '3127'
@@ -28,9 +30,10 @@ export default defineConfig({
       XCS_BROWSER_E2E: '1',
       XCS_AUTH_BROWSER_E2E: '1',
       XCS_AUTH_TEST_ORIGIN: baseURL,
-      XCS_AUTH_ENABLED: '0',
       XCS_LOCAL_PAYLOAD_STORE: '0',
-      NUXT_PUBLIC_PROFILE_ID: 'xrpl-testnet-xcs-browser-e2e',
+      XCS_NETWORK_PROFILE: fileURLToPath(
+        new URL('./test/fixtures/network-profiles/browser-e2e.json', import.meta.url),
+      ),
       NUXT_PUBLIC_RPC_URL: 'ws://127.0.0.1:1',
     },
   },

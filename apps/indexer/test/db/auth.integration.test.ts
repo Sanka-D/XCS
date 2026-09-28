@@ -6,11 +6,9 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { createDatabaseClient, type DatabaseClient } from '../../src/lib/db/client.js'
-import {
-  databasePasswordFromUrl,
-  provisionRuntimeDatabaseRoles,
-} from '../../src/lib/db/bootstrap.js'
+import { provisionRuntimeDatabasePrivileges } from '../../src/lib/db/bootstrap.js'
 import { DATABASE_MIGRATIONS_FOLDER, migrateDatabase } from '../../src/lib/db/migrations.js'
+import { createManagedRuntimeDatabaseUsers } from '../helpers/managedRuntimeUsers.js'
 
 const adminUrl = process.env.XCS_TEST_DATABASE_URL?.trim() || undefined
 if (process.env.XCS_REQUIRE_POSTGRES_TESTS === '1' && !adminUrl) {
@@ -75,12 +73,10 @@ describe.skipIf(!adminUrl)('authentication schema and restricted application rol
     await database.sql`INSERT INTO app_user_roles (user_id, role) VALUES (${userId}, 'admin')`
     await migrateDatabase(database)
     await migrateDatabase(database)
-    await provisionRuntimeDatabaseRoles(database, {
-      ...passwords,
-      administratorPassword: databasePasswordFromUrl(adminUrl!),
-    })
+    const managedPasswords = await createManagedRuntimeDatabaseUsers(database, passwords)
+    await provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' })
     url.username = 'xcs_app'
-    url.password = passwords.applicationPassword
+    url.password = managedPasswords.applicationPassword
     application = createDatabaseClient(url.toString(), { onNotice: () => undefined })
   }, 30_000)
 
@@ -205,31 +201,29 @@ describe.skipIf(!adminUrl)('authentication schema and restricted application rol
     ).rejects.toMatchObject({ code: '23505' })
   })
 
-  it('normalizes accidental column grants and disables login and retained connections when omitted', async () => {
+  it('normalizes accidental column grants without changing managed authentication', async () => {
+    const [before] = await database.sql<{ canLogin: boolean; passwordHash: string | null }[]>`
+      SELECT rolcanlogin AS "canLogin", rolpassword AS "passwordHash"
+      FROM pg_authid WHERE rolname = 'xcs_app'
+    `
     await database.sql`GRANT UPDATE (status) ON app_users TO xcs_app`
-    await provisionRuntimeDatabaseRoles(database, {
-      ...passwords,
-      administratorPassword: databasePasswordFromUrl(adminUrl!),
-    })
+    await provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' })
+
+    const [after] = await database.sql<{ canLogin: boolean; passwordHash: string | null }[]>`
+      SELECT rolcanlogin AS "canLogin", rolpassword AS "passwordHash"
+      FROM pg_authid WHERE rolname = 'xcs_app'
+    `
+    expect(after).toEqual(before)
+    expect(after?.canLogin).toBe(true)
     await expect(
       application.sql`UPDATE app_users SET status = 'active' WHERE id = ${userId}`,
     ).rejects.toMatchObject({ code: '42501' })
-    const { applicationPassword: omitted, ...disabledPasswords } = passwords
-    void omitted
-    await provisionRuntimeDatabaseRoles(database, {
-      ...disabledPasswords,
-      administratorPassword: databasePasswordFromUrl(adminUrl!),
-    })
-    const [role] = await database.sql<{ rolcanlogin: boolean; password_cleared: boolean }[]>`
-      SELECT rolcanlogin, rolpassword IS NULL AS password_cleared FROM pg_authid WHERE rolname = 'xcs_app'
-    `
-    expect(role).toEqual({ rolcanlogin: false, password_cleared: true })
-    await expect(application.sql`SELECT id FROM public.app_users`).rejects.toMatchObject({
-      code: '42501',
-    })
+    expect(await application.sql`SELECT id FROM public.app_users WHERE id = ${userId}`).toEqual([
+      { id: userId },
+    ])
     const [grant] = await database.sql<
-      { insert_allowed: boolean }[]
-    >`SELECT has_column_privilege('xcs_app', 'app_user_roles', 'user_id', 'INSERT') AS insert_allowed`
-    expect(grant?.insert_allowed).toBe(false)
+      { insertAllowed: boolean }[]
+    >`SELECT has_column_privilege('xcs_app', 'app_user_roles', 'user_id', 'INSERT') AS "insertAllowed"`
+    expect(grant?.insertAllowed).toBe(true)
   })
 })

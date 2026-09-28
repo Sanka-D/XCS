@@ -53,12 +53,13 @@ workflow before starting the recovered API. It applies migrations and provisions
 or delete payloads as part of this rollout. Roll back application images without reversing these
 compatible table additions. Use the same fixed HTTPS origin and existing secret files.
 
-API hosting configuration: `XCS_HOSTED_PAYLOADS_ENABLED=true`,
+API hosting activates when its complete contract is present:
 `XCS_PUBLIC_PAYLOAD_BASE_URL` (exact short HTTPS origin), `XCS_HOSTED_PAYLOAD_NETWORKS`
-(allowed Testnet profile IDs) and `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` (at least 32 bytes).
-The web's `NUXT_PUBLIC_PAYLOAD_BASE_URL` must match the API origin. Keep secrets out of source and
-command output. GET `/p/:locator` serves immutable JSON; POST `/v1/payloads/:locator` publishes only
-after validating its signed transaction and indexed evidence.
+(allowed Testnet profile IDs), `XCS_PAYLOAD_STORAGE_IP_HASH_SECRET` (at least 32 bytes) and the
+`xcs_payload_writer` connection in `XCS_PAYLOAD_DATABASE_URL`. Nitro derives the browser-visible
+origin from this contract. Keep secrets out of source and command output. GET `/p/:locator` serves
+immutable JSON; POST `/v1/payloads/:locator` publishes only after validating its signed transaction
+and indexed evidence.
 
 The web now rejects oversized hosted payloads before signing and keeps consented recovery jobs
 across reloads. See the web README for retry, retention and cleanup semantics.

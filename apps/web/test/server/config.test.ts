@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { loadApiConfig } from '../../server/xcs/config.js'
+import { loadApiConfig, loadHostedPayloadConfig } from '../../server/xcs/config.js'
 import {
   DisabledPayloadResolver,
   PayloadUnavailableError,
@@ -47,33 +47,38 @@ describe('API configuration', () => {
     }
   })
 
-  it('requires a strong token only when operational metrics are enabled', () => {
+  it('enables operational metrics from a valid token alone', () => {
     expect(
       loadApiConfig({
         XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
         XCS_METRICS_TOKEN: METRICS_TOKEN,
       }).operationalMetrics,
     ).toEqual({ enabled: true, token: METRICS_TOKEN })
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
-      }),
-    ).toThrow('XCS_METRICS_TOKEN is required')
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
-        XCS_METRICS_TOKEN: 'too-short',
-      }),
-    ).toThrow('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'yes',
-      }),
-    ).toThrow('XCS_METRICS_ENABLED must be exactly true or false')
+  })
+
+  it('leaves operational metrics off when no token is supplied', () => {
+    expect(
+      loadApiConfig({ XCS_DATABASE_URL: 'postgres://localhost/xcs' }).operationalMetrics,
+    ).toEqual({ enabled: false })
+    for (const blank of ['', '   ']) {
+      expect(
+        loadApiConfig({
+          XCS_DATABASE_URL: 'postgres://localhost/xcs',
+          XCS_METRICS_TOKEN: blank,
+        }).operationalMetrics,
+      ).toEqual({ enabled: false })
+    }
+  })
+
+  it('rejects a malformed token rather than silently disabling the routes', () => {
+    for (const token of ['too-short', `${METRICS_TOKEN}!`, 'a'.repeat(257)]) {
+      expect(() =>
+        loadApiConfig({
+          XCS_DATABASE_URL: 'postgres://localhost/xcs',
+          XCS_METRICS_TOKEN: token,
+        }),
+      ).toThrow('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
+    }
   })
 
   it('rejects an unsafe readiness staleness threshold', () => {
@@ -116,6 +121,31 @@ describe('API configuration', () => {
         XCS_UNTRUSTED_ISSUERS: issuer,
       }),
     ).toThrow('must not overlap')
+  })
+
+  it('derives hosted payload publication from one complete server contract', () => {
+    const hostedEnvironment = {
+      XCS_PUBLIC_PAYLOAD_BASE_URL: 'https://p.xcs.test',
+      XCS_PAYLOAD_STORAGE_IP_HASH_SECRET: 'test-only-hosted-payload-secret-0001',
+      XCS_HOSTED_PAYLOAD_NETWORKS: 'testnet-a,testnet-b',
+    }
+    expect(loadHostedPayloadConfig(hostedEnvironment)).toEqual({
+      enabled: true,
+      publicBaseUrl: 'https://p.xcs.test',
+      ipHashSecret: 'test-only-hosted-payload-secret-0001',
+      networks: ['testnet-a', 'testnet-b'],
+    })
+    expect(loadHostedPayloadConfig({})).toEqual({ enabled: false })
+    expect(() => loadHostedPayloadConfig({ XCS_HOSTED_PAYLOAD_NETWORKS: 'testnet-a' })).toThrow(
+      'XCS_PUBLIC_PAYLOAD_BASE_URL is required',
+    )
+    expect(
+      loadApiConfig({
+        ...hostedEnvironment,
+        XCS_DATABASE_URL: 'postgres://xcs_api:password@localhost/xcs',
+        XCS_PAYLOAD_DATABASE_URL: 'postgres://xcs_payload_writer:password@localhost/xcs',
+      }).hostedPayloads,
+    ).toMatchObject({ enabled: true, publicBaseUrl: 'https://p.xcs.test' })
   })
 
   it('uses a network-free resolver when fetching is disabled', async () => {

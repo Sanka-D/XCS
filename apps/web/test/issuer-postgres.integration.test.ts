@@ -9,7 +9,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
 } from '../server/lib/db/index.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from '../server/lib/db/bootstrap.js'
+import { bootstrapDatabase } from '../server/lib/db/bootstrap.js'
+import { createManagedRuntimeDatabaseUsers } from './lib/db/managedRuntimeUsers.js'
 import { IssuerRepository } from '../server/xcs/issuer/repository'
 import { createIssuerHandler } from '../server/xcs/issuer/http'
 import { PostgresAuthRepository } from '../server/xcs/auth/repository'
@@ -88,17 +89,15 @@ describe.skipIf(!url)('issuer actual PostgreSQL restricted role and authenticati
     const parsed = new URL(url!)
     parsed.pathname = '/' + name
     db = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })
-    const passwords = {
-      clusterScope: 'dedicated' as const,
-      administratorPassword: databasePasswordFromUrl(url!),
+    const passwords = await createManagedRuntimeDatabaseUsers(db, {
       indexerPassword: randomBytes(32).toString('hex'),
       apiPassword: randomBytes(32).toString('hex'),
       payloadWriterPassword: randomBytes(32).toString('hex'),
       monitorPassword: randomBytes(32).toString('hex'),
       applicationPassword: randomBytes(32).toString('hex'),
       issuerPassword: randomBytes(32).toString('hex'),
-    }
-    await bootstrapDatabase(db, passwords)
+    })
+    await bootstrapDatabase(db, { clusterScope: 'dedicated' })
     parsed.username = 'xcs_app'
     parsed.password = passwords.applicationPassword
     app = createDatabaseClient(parsed.toString(), { onNotice: () => undefined })

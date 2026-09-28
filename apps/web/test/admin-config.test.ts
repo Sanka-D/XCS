@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { loadAdminConfig } from '../server/xcs/admin/config'
 describe('admin configuration', () => {
   const env = {
-    XCS_ADMIN_ENABLED: '1',
-    XCS_AUTH_ENABLED: '1',
+    XCS_AUTH_ORIGIN: 'https://xcs.example',
+    XCS_IDENTITY_CLIENT_ID: 'test-client',
+    XCS_IDENTITY_CLIENT_SECRET: 'test-secret',
+    NUXT_APP_DATABASE_URL: 'postgres://xcs_app:fixture@localhost/xcs',
     NUXT_ADMIN_DATABASE_URL: 'postgres://xcs_admin_app:fixture@localhost/xcs',
     XCS_ADMIN_DOCUMENT_KEY: 'test-only-32-character-signing-key',
     XCS_DOCUMENT_STORAGE_DRIVER: 'filesystem',
@@ -15,7 +17,9 @@ describe('admin configuration', () => {
       driver: 'filesystem',
       directory: '/private/documents',
     })
-    expect(() => loadAdminConfig({ ...env, XCS_AUTH_ENABLED: '0' })).toThrow('ADMIN_AUTH_REQUIRED')
+    expect(() => loadAdminConfig({ ...env, XCS_IDENTITY_CLIENT_SECRET: '' })).toThrow(
+      'AUTH_CONFIGURATION_REQUIRED',
+    )
     expect(() =>
       loadAdminConfig({
         ...env,

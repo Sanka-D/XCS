@@ -60,11 +60,11 @@ integrators.
 - PostgreSQL is a self-hostable, rebuildable reference projection, not a Commons authority and not a
   protocol requirement for third-party implementations. A MongoDB adapter would need to reproduce
   atomic checkpoints, single-writer fencing, snapshots, constraints, and deterministic replay.
-- The reference bootstrap targets a dedicated cluster. It creates cluster-wide fixed roles,
-  applies current-database grants and forces SCRAM-SHA-256 verifiers; it is not a shared-cluster
-  bootstrapper or an upgrader for arbitrary database histories. The administrator and reviewed
-  migration history remain trusted; transport security and an explicit SCRAM `pg_hba.conf` policy
-  remain operator responsibilities.
+- The reference bootstrap targets a dedicated cluster. DigitalOcean must create all eight runtime
+  users and owns their passwords; bootstrap only validates them and applies current-database grants.
+  It is not a shared-cluster bootstrapper or an upgrader for arbitrary database histories. The
+  administrator and reviewed migration history remain trusted; transport security remains an
+  operator responsibility.
 - The shared `db/migrations/` history supports upgrades from the committed projection baseline
   through migrations 0000–0008, including hosted payload, application, authentication, admin,
   issuer, recipient and signed-presentation storage. PostgreSQL integration tests exercise
@@ -132,10 +132,10 @@ integrators.
 - `--ignore-workspace` is mandatory on every per-app pnpm command that resolves dependencies
   (`install`, `audit`, `licenses list`). Without it pnpm silently operates on the root workspace and
   still exits 0, so an audit or licence report can appear to pass while covering the wrong lockfile.
-- Dependency license qualification remains open. The standalone policy run reports `Unknown`
-  for `@gemwallet/api@3.8.0`, `@walletconnect/types@2.25.0` and `vaul-vue@0.4.1`, plus
-  `nodemailer@10.0.10` (`MIT-0`, outside the current allowlist). No exception or policy relaxation
-  was added. The top-level SDK's MIT declaration does not replace review of bundled/transitive code.
+- Dependency licence decisions are recorded in [`third-party-licenses.md`](third-party-licenses.md).
+  The former automated allowlist gate was removed after Commons recorded the GemWallet permission,
+  WalletConnect conditions, Vaul notice restoration and permissive Nodemailer MIT-0 terms. Review
+  that record again whenever one of these exact versions changes.
 - PostgreSQL is provisioned outside this repository. The Compose stack — including the `monitoring`
   and `demo-pinning` profiles — is local development only: it carries no secret-file mechanism and
   passes Grafana's admin password and the exporter's database password as plain container
@@ -258,9 +258,9 @@ remains a browser-boundary risk. Private or sensitive claims must not enter this
   is limited to 200 active grants; recent workspace/history lists are bounded, not archival exports.
   Issuance/revocation emails use the existing issuer flow; external ledger revocations appear in the
   recipient's in-app notifications without triggering an additional email delivery service.
-- The dependency license gate still requires maintainer decisions for GemWallet, WalletConnect and
-  Nodemailer MIT-0. Vaul's missing MIT license file is restored from its exact published source;
-  see [license evidence](runbooks/dependency-licenses.md).
+- Vaul's missing MIT licence file is restored from its exact published source. GemWallet,
+  WalletConnect, Nodemailer and Vaul decisions are recorded in
+  [third-party licence evidence](third-party-licenses.md); they are no longer an open release gate.
 
 - Recovery of an already signed `CredentialAccept` rechecks exact generation/lifecycle and indexer
   readiness, but does not re-run issuer-trust consent or portal session authorization. A pending
