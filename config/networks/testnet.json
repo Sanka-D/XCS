@@ -1,0 +1,10 @@
+{
+  "profileId": "xrpl-testnet-xcs-v0.1-beta",
+  "xcsVersion": "0.1",
+  "networkId": 1,
+  "requiredAmendment": "1CB67D082CF7D9102412D34258CEDB400E659352D3B207348889297A6D90F5EF",
+  "registryAddress": "rHZ7viRpN7wMXjCaDFb9R8SshPMXt1oJPE",
+  "registrationAmountDrops": "1",
+  "activationLedgerIndex": 21120767,
+  "activationLedgerHash": "cee54154ac99347d3b9870cf662208e35c6127fc9c34f348852b1278711a2425"
+}
