@@ -1,4 +1,4 @@
-// Copied from packages/db/src/migrations.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 // Diverges by design (shared db/migrations location and XCS_MIGRATIONS_DIR deployment override); source sha256:42c7d5380bba58dcfc4414b033d5e9c028d5dc93bec2ddce6db860d43cb1abae.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -117,31 +117,44 @@ export async function migrateDatabase(
   migrationsFolder = DATABASE_MIGRATIONS_FOLDER,
 ): Promise<MigrationStatus> {
   const catalog = readCatalog(migrationsFolder)
-  return client.sql.begin(async (transaction) => {
-    // The stock migrator reads history before its transaction. Read, validate and apply on
-    // one locked transaction instead, retaining Drizzle's SQL reader and exact journal format.
-    const [lock] = await transaction<{ locked: boolean }[]>`
-      SELECT pg_try_advisory_xact_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) AS locked
-    `
-    if (!lock?.locked) throw new Error('DATABASE_MIGRATION_BUSY')
-    const before = await status(transaction, catalog)
-    if (before.pending.length === 0) return before
-    await transaction`CREATE SCHEMA IF NOT EXISTS drizzle`
+  return client.sql.begin((transaction) => migrateCatalogInTransaction(transaction, catalog))
+}
+
+async function migrateCatalogInTransaction(
+  transaction: TransactionSql,
+  catalog: MigrationEntry[],
+): Promise<MigrationStatus> {
+  // The stock migrator reads history before its transaction. Read, validate and apply on
+  // one locked transaction instead, retaining Drizzle's SQL reader and exact journal format.
+  const [lock] = await transaction<{ locked: boolean }[]>`
+    SELECT pg_try_advisory_xact_lock(${LOCK_CLASS}, ${LOCK_OBJECT}) AS locked
+  `
+  if (!lock?.locked) throw new Error('DATABASE_MIGRATION_BUSY')
+  const before = await status(transaction, catalog)
+  if (before.pending.length === 0) return before
+  await transaction`CREATE SCHEMA IF NOT EXISTS drizzle`
+  await transaction`
+    CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at bigint
+    )
+  `
+  for (const migration of catalog.slice(before.applied.length)) {
+    // These are reviewed local migration artifacts, never request-supplied SQL.
+    for (const statement of migration.statements) await transaction.unsafe(statement)
     await transaction`
-      CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (
-        id SERIAL PRIMARY KEY,
-        hash text NOT NULL,
-        created_at bigint
-      )
+      INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+      VALUES (${migration.hash}, ${migration.when})
     `
-    for (const migration of catalog.slice(before.applied.length)) {
-      // These are reviewed local migration artifacts, never request-supplied SQL.
-      for (const statement of migration.statements) await transaction.unsafe(statement)
-      await transaction`
-        INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-        VALUES (${migration.hash}, ${migration.when})
-      `
-    }
-    return status(transaction, catalog)
-  })
+  }
+  return status(transaction, catalog)
+}
+
+/** Applies migrations inside a caller-owned transaction, allowing an atomic bootstrap. */
+export async function migrateDatabaseInTransaction(
+  transaction: TransactionSql,
+  migrationsFolder = DATABASE_MIGRATIONS_FOLDER,
+): Promise<MigrationStatus> {
+  return migrateCatalogInTransaction(transaction, readCatalog(migrationsFolder))
 }

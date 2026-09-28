@@ -20,8 +20,8 @@ Open [the local gallery](./index.html) in a browser: choose French or English, t
 offline, static review artifact with fictional examples; buttons drawn inside screens do not perform
 transactions. Each role has editable Excalidraw boards and one SVG per screen, in both languages.
 
-| Role      | Journey, screen inventory and wireframes                            | Implementing issue                                   |
-| --------- | ------------------------------------------------------------------- | ---------------------------------------------------- |
+| Role      | Journey, screen inventory and wireframes                            | Implementing issue                                            |
+| --------- | ------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Admin     | [Review applications and manage access](./admin/README.md)          | [#30](https://github.com/XRPL-Commons/XCS/issues/30) |
 | Issuer    | [Apply, publish, invite and issue](./issuer/README.md)              | [#31](https://github.com/XRPL-Commons/XCS/issues/31) |
 | Recipient | [Claim, link, accept and present](./recipient/README.md)            | [#32](https://github.com/XRPL-Commons/XCS/issues/32) |

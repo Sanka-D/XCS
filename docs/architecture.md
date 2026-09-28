@@ -18,8 +18,8 @@ issuer/subject wallet -> unsigned transaction from SDK/web/CLI -> XRPL
 
 ## Ownership
 
-Two deployable applications, one shared schema folder, and a library that neither application
-imports. See [ADR 0004](./adr/0004-two-standalone-apps.md).
+Two application runtimes, two one-purpose deployment components, one shared schema folder, and a
+library that neither application imports. See [ADR 0004](./adr/0004-two-standalone-apps.md).
 
 - `apps/indexer` is the projection writer and the only normal writer to protocol projections. It
   advances only on validated ledger evidence agreed by its configured sources, and it owns the
@@ -28,6 +28,10 @@ imports. See [ADR 0004](./adr/0004-two-standalone-apps.md).
   the projection and fetches off-ledger payloads for verification, failing closed when projection
   evidence is stale or inconsistent; its `app/` half presents the workflows and connects user
   wallets. Browser-visible RPC configuration is separate from the private indexer sources.
+- `apps/notifier` runs the compiled SMTP outbox worker with only its restricted database and mail
+  credentials. It has no HTTP surface and no wallet or XRPL signing key.
+- `apps/db-bootstrap` runs migrations and role provisioning as a pre-deploy job. Its managed
+  PostgreSQL administrator URL never reaches a long-running component.
 - `db/` defines the rebuildable PostgreSQL model — Drizzle tables and generated SQL migrations. It
   is not a package: both applications compile it as their own source through the `#db/*` alias.
 - `core` parses and validates protocol values. It is browser-safe and performs no I/O.

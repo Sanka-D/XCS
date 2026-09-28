@@ -244,10 +244,10 @@ test('an unsupported template version keeps its exact diagnostic in optional det
   await expect(error).toContainText(
     'This template could not be read. Check its format in the advanced editor.',
   )
-  expect(await error.innerText()).not.toContain('INVALID_SCHEMA')
+  expect(await error.innerText()).not.toContain('SCHEMA_INVALID')
   expect(await error.innerText()).not.toContain('Each name must be unique')
   await error.getByText('Technical details', { exact: true }).click()
-  await expect(error).toContainText('INVALID_SCHEMA ($.xcsVersion): Unsupported XCS schema version')
+  await expect(error).toContainText('SCHEMA_INVALID ($.xcsVersion): Unsupported XCS schema version')
   await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
 })
 

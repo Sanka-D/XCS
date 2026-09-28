@@ -76,13 +76,14 @@ export async function startAdminRuntime(
         XCS_IDENTITY_CLIENT_ID: 'synthetic-runtime',
         XCS_IDENTITY_CLIENT_SECRET: 'synthetic-not-used-for-login',
         XCS_ADMIN_ENABLED: '1',
-        XCS_ADMIN_DOCUMENT_DIRECTORY: directory,
+        XCS_DOCUMENT_STORAGE_DRIVER: 'filesystem',
+        XCS_DOCUMENT_FILESYSTEM_DIRECTORY: directory,
+        XCS_DOCUMENT_FILESYSTEM_LOCAL: '1',
         XCS_ADMIN_DOCUMENT_KEY: 'synthetic-runtime-document-key-32-bytes',
         ...(issuer
           ? {
               XCS_ISSUER_ENABLED: '1',
               NUXT_ISSUER_DATABASE_URL: issuer.issuerDatabaseUrl,
-              XCS_ISSUER_DOCUMENT_DIRECTORY: directory,
               XCS_SMTP_HOST: '127.0.0.1',
               XCS_SMTP_PORT: String(issuer.smtpPort),
             }

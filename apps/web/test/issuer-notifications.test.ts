@@ -6,6 +6,7 @@ import {
   sendIssuerNotification,
   type IssuerNotification,
 } from '../server/xcs/issuer/notifications'
+import { loadSmtpConfiguration } from '../server/xcs/notifications/smtp'
 
 const token = randomBytes(32).toString('base64url')
 const invitation: IssuerNotification = {
@@ -30,6 +31,21 @@ describe('issuer notification delivery', () => {
     expect(JSON.stringify({ ...message, text: undefined })).not.toContain(token)
     expect(message).not.toHaveProperty('html')
     expect(message).not.toHaveProperty('attachments')
+  })
+
+  it('uses the same configured sender and envelope identity as administrator notifications', () => {
+    const sender = loadSmtpConfiguration({
+      XCS_SMTP_FROM_NAME: 'XRPL Commons',
+      XCS_SMTP_FROM_ADDRESS: 'notify@example.test',
+      XCS_SMTP_ENVELOPE_FROM: 'bounce@example.test',
+    }).sender
+    const message = createIssuerNotificationMessage(invitation, sender)
+    expect(message.from).toEqual({ name: 'XRPL Commons', address: 'notify@example.test' })
+    expect(message.envelope).toEqual({
+      from: 'bounce@example.test',
+      to: [invitation.recipientEmail],
+    })
+    expect(message.messageId).toBe(`<issuer-${invitation.id}@example.test>`)
   })
 
   it.each(['issued', 'revoked'] as const)(

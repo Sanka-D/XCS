@@ -1,15 +1,17 @@
-// Copied from packages/db/src/bootstrap.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import type { DatabaseClient } from './client.js'
-import { migrateDatabase } from './migrations.js'
+import { migrateDatabase, migrateDatabaseInTransaction } from './migrations.js'
 import {
   assertRuntimeDatabasePasswords,
-  provisionRuntimeDatabaseRoles,
+  preflightRuntimeDatabaseProvisioning,
+  provisionRuntimeDatabaseRolesInTransaction,
   type RuntimeDatabasePasswords,
 } from './provision.js'
 
 export {
   databasePasswordFromUrl,
   parseDatabaseClusterScope,
+  preflightRuntimeDatabaseProvisioning,
   provisionRuntimeDatabaseRoles,
   XCS_API_DATABASE_CONNECTION_LIMIT,
   XCS_API_DATABASE_ROLE,
@@ -37,6 +39,11 @@ export async function bootstrapDatabase(
   passwords: RuntimeDatabasePasswords,
 ): Promise<void> {
   assertRuntimeDatabasePasswords(passwords)
-  await initializeDatabase(client)
-  await provisionRuntimeDatabaseRoles(client, passwords)
+  await client.sql.begin(async (transaction) => {
+    // Validate the managed-service role contract before the first migration. Keeping
+    // migration and role provisioning in this transaction prevents a half-bootstrap.
+    await preflightRuntimeDatabaseProvisioning({ sql: transaction })
+    await migrateDatabaseInTransaction(transaction)
+    await provisionRuntimeDatabaseRolesInTransaction(transaction, passwords)
+  })
 }

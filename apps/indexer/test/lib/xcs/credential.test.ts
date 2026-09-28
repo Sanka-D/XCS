@@ -30,7 +30,7 @@ describe('credential payload', () => {
     expect(parseCredentialPayload(encoded.bytes, context)).toEqual(encoded.payload)
     expect(encoded.json).toBe(new TextDecoder().decode(encoded.bytes))
     expect(() => parseCredentialPayload(`${encoded.json}\n`, context)).toThrow(
-      expect.objectContaining({ code: 'NON_CANONICAL_JSON' }),
+      expect.objectContaining({ code: 'PAYLOAD_INVALID' }),
     )
   })
 

@@ -4,6 +4,7 @@ import {
   bootstrapDatabase,
   databasePasswordFromUrl,
   parseDatabaseClusterScope,
+  preflightRuntimeDatabaseProvisioning,
   provisionRuntimeDatabaseRoles,
 } from '../../src/lib/db/bootstrap.js'
 
@@ -19,7 +20,171 @@ function client(): DatabaseClient {
   }
 }
 
+function preflightClient(
+  options: {
+    provisioner?: Partial<{
+      roleName: string
+      isSuperuser: boolean
+      canCreateRole: boolean
+      canCreateDatabaseObjects: boolean
+      canCreatePublicObjects: boolean
+      serverVersion: number
+      selfGrant: string
+    }>
+    runtimeRoles?: Array<Record<string, unknown>>
+    memberships?: Array<Record<string, unknown>>
+  } = {},
+): { database: DatabaseClient; statements: string[] } {
+  const statements: string[] = []
+  const sql = vi.fn(async (strings: TemplateStringsArray) => {
+    const statement = strings.join('?')
+    statements.push(statement)
+    if (statement.includes("current_setting('server_version_num')")) {
+      return [
+        {
+          roleName: 'doadmin',
+          isSuperuser: false,
+          canCreateRole: true,
+          canCreateDatabaseObjects: true,
+          canCreatePublicObjects: true,
+          serverVersion: 180_000,
+          selfGrant: '',
+          ...options.provisioner,
+        },
+      ]
+    }
+    if (statement.includes('FROM pg_auth_members')) return options.memberships ?? []
+    if (statement.includes('FROM pg_roles')) return options.runtimeRoles ?? []
+    throw new Error(`Unexpected SQL in test: ${statement}`)
+  })
+  return {
+    database: {
+      db: {} as DatabaseClient['db'],
+      sql: sql as unknown as DatabaseClient['sql'],
+      close: vi.fn(),
+    },
+    statements,
+  }
+}
+
 describe('runtime database role provisioning', () => {
+  it('accepts a non-superuser managed PostgreSQL provisioner on a fresh database', async () => {
+    const { database } = preflightClient()
+    await expect(preflightRuntimeDatabaseProvisioning(database)).resolves.toBeUndefined()
+  })
+
+  it('rejects dangerous existing runtime role attributes without attempting to normalize them', async () => {
+    const { database } = preflightClient({
+      runtimeRoles: [
+        {
+          roleName: 'xcs_indexer',
+          isSuperuser: false,
+          canCreateDatabase: false,
+          canCreateRole: false,
+          canReplicate: true,
+          canBypassRls: false,
+        },
+      ],
+    })
+    await expect(preflightRuntimeDatabaseProvisioning(database)).rejects.toThrow(
+      'DATABASE_RUNTIME_ROLE_UNSAFE',
+    )
+  })
+
+  it('requires the non-inheritable admin delegation for an existing managed role', async () => {
+    const role = {
+      roleName: 'xcs_indexer',
+      isSuperuser: false,
+      canCreateDatabase: false,
+      canCreateRole: false,
+      canReplicate: false,
+      canBypassRls: false,
+    }
+    const withoutDelegation = preflightClient({ runtimeRoles: [role] })
+    await expect(preflightRuntimeDatabaseProvisioning(withoutDelegation.database)).rejects.toThrow(
+      'DATABASE_PROVISIONER_ROLE_ADMIN_REQUIRED',
+    )
+
+    const withDelegation = preflightClient({
+      runtimeRoles: [role],
+      memberships: [
+        {
+          grantedRole: 'xcs_indexer',
+          memberRole: 'doadmin',
+          adminOption: true,
+          inheritOption: false,
+          setOption: false,
+        },
+      ],
+    })
+    await expect(
+      preflightRuntimeDatabaseProvisioning(withDelegation.database),
+    ).resolves.toBeUndefined()
+  })
+
+  it('fails closed on an unexpected runtime role membership', async () => {
+    const { database } = preflightClient({
+      memberships: [
+        {
+          grantedRole: 'pg_write_all_data',
+          memberRole: 'xcs_indexer',
+          adminOption: false,
+          inheritOption: true,
+          setOption: true,
+        },
+      ],
+    })
+    await expect(preflightRuntimeDatabaseProvisioning(database)).rejects.toThrow(
+      'DATABASE_RUNTIME_ROLE_MEMBERSHIP_UNSAFE',
+    )
+  })
+
+  it('runs the managed PostgreSQL preflight before migration DDL', async () => {
+    const statements: string[] = []
+    const transaction = vi.fn(async (strings: TemplateStringsArray) => {
+      const statement = strings.join('?')
+      statements.push(statement)
+      if (statement.includes("current_setting('server_version_num')")) {
+        return [
+          {
+            roleName: 'restricted-bootstrap',
+            isSuperuser: false,
+            canCreateRole: false,
+            canCreateDatabaseObjects: true,
+            canCreatePublicObjects: true,
+            serverVersion: 180_000,
+            selfGrant: '',
+          },
+        ]
+      }
+      throw new Error(`Unexpected SQL in test: ${statement}`)
+    })
+    const database = {
+      db: {} as DatabaseClient['db'],
+      sql: {
+        begin: vi.fn(async (callback: (sql: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+        ),
+      } as unknown as DatabaseClient['sql'],
+      close: vi.fn(),
+    }
+
+    await expect(
+      bootstrapDatabase(database, {
+        clusterScope: 'dedicated',
+        administratorPassword: 'd'.repeat(32),
+        indexerPassword: 'i'.repeat(32),
+        apiPassword: 'a'.repeat(32),
+        payloadWriterPassword: 'p'.repeat(32),
+        monitorPassword: 'm'.repeat(32),
+      }),
+    ).rejects.toThrow('DATABASE_PROVISIONER_CREATE_ROLE_REQUIRED')
+    expect(statements).toHaveLength(1)
+    expect(
+      statements.some((statement) => /\bCREATE\s+(?:SCHEMA|TABLE|ROLE)\b/u.test(statement)),
+    ).toBe(false)
+  })
+
   it.each(['short', 'd'.repeat(32), 'i'.repeat(32)])(
     'rejects invalid or reused optional application passwords',
     async (applicationPassword) => {

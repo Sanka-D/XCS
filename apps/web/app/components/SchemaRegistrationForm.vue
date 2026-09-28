@@ -41,12 +41,12 @@ const descriptionBytes = computed(() => utf8ByteLength(guidedDraft.value.descrip
 function readableSchemaError(value: string): string {
   const walletMessage = walletTransactionErrorMessage(value, t)
   if (walletMessage) return walletMessage
-  if (value.startsWith('INVALID_SCHEMA ($.description):'))
+  if (value.startsWith('SCHEMA_INVALID ($.description):'))
     return t('simpleIssuer.descriptionInvalid')
-  if (value.startsWith('INVALID_SCHEMA ($.name):')) return t('simpleIssuer.nameInvalid')
-  if (value.startsWith('INVALID_SCHEMA ($.fields') || value === 'SCHEMA_FIELD_DUPLICATE')
+  if (value.startsWith('SCHEMA_INVALID ($.name):')) return t('simpleIssuer.nameInvalid')
+  if (value.startsWith('SCHEMA_INVALID ($.fields') || value === 'SCHEMA_FIELD_DUPLICATE')
     return t('simpleIssuer.fieldsInvalid')
-  if (value.startsWith('INVALID_SCHEMA') || value.startsWith('INVALID_JSON'))
+  if (value.startsWith('SCHEMA_INVALID') || value.startsWith('JSON_INVALID'))
     return t('simpleIssuer.modelInvalid')
   return t('simpleIssuer.error')
 }

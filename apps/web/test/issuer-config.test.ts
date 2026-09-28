@@ -15,7 +15,8 @@ const environment = {
   XCS_ISSUER_ENABLED: '1',
   NUXT_ISSUER_DATABASE_URL: 'postgres://xcs_issuer:synthetic@localhost/xcs',
   XCS_AUTH_ORIGIN: 'https://xcs.test',
-  XCS_ISSUER_DOCUMENT_DIRECTORY: '/var/lib/xcs-review',
+  XCS_DOCUMENT_STORAGE_DRIVER: 'filesystem',
+  XCS_DOCUMENT_FILESYSTEM_DIRECTORY: '/var/lib/xcs-review',
 }
 describe('issuer opt-in configuration and request validation', () => {
   it('remains disabled without the exact flag and requires authentication', () => {
@@ -44,7 +45,7 @@ describe('issuer opt-in configuration and request validation', () => {
     ])
       expect(() => loadIssuerConfig({ ...environment, XCS_AUTH_ORIGIN: origin })).toThrow()
     expect(() =>
-      loadIssuerConfig({ ...environment, XCS_ISSUER_DOCUMENT_DIRECTORY: 'relative' }),
+      loadIssuerConfig({ ...environment, XCS_DOCUMENT_FILESYSTEM_DIRECTORY: 'relative' }),
     ).toThrow()
   })
   it('bounds invitation lifetime and defaults to seven days', () => {

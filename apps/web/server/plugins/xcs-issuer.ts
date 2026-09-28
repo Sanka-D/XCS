@@ -5,18 +5,21 @@ import { loadIssuerConfig } from '../xcs/issuer/config'
 import { createIssuerHandler } from '../xcs/issuer/http'
 import { IssuerRepository } from '../xcs/issuer/repository'
 import { PrivateDocumentStorage } from '../xcs/issuer/storage'
-import { createLocalSmtpTransport, sendIssuerNotification } from '../xcs/issuer/notifications'
+import { sendIssuerNotification } from '../xcs/issuer/notifications'
+import { createSmtpDelivery } from '../xcs/notifications/smtp'
 import type { IssuerServices } from '../xcs/issuer/services'
+import { createPrivateDocumentBackend } from '../xcs/documents/storage'
 
 export default defineNitroPlugin((nitroApp) => {
   const config = loadIssuerConfig(process.env)
   if (!config) return
   const database = createDatabaseClient(config.databaseUrl, { onNotice: () => undefined })
-  const transport = createLocalSmtpTransport(process.env)
+  const { transport, sender } = createSmtpDelivery(process.env)
+  const documentBackend = createPrivateDocumentBackend(config.storage)
   const repository = new IssuerRepository(database, {
     ...config,
-    documents: new PrivateDocumentStorage(config.directory),
-    notify: (message) => sendIssuerNotification(transport, message),
+    documents: new PrivateDocumentStorage(documentBackend),
+    notify: (message) => sendIssuerNotification(transport, message, sender),
   })
   const handler = createIssuerHandler({
     repository,
@@ -37,6 +40,7 @@ export default defineNitroPlugin((nitroApp) => {
     event.context.xcsIssuerServices = services
   })
   nitroApp.hooks.hook('close', async () => {
+    documentBackend.close?.()
     transport.close()
     await database.close()
   })

@@ -15,15 +15,17 @@ runbook. Bootstrap with all existing enabled runtime passwords plus `XCS_ISSUER_
 or its `_FILE` equivalent. Omitting this password on a later bootstrap disables the issuer role.
 The restricted `xcs_issuer` pool cannot approve applications, grant admins or modify the projection.
 
-| Variable                             | Purpose                                                       |
-| ------------------------------------ | ------------------------------------------------------------- |
-| `XCS_ISSUER_ENABLED=1`               | Enable server routes after auth provisioning                  |
-| `NUXT_PUBLIC_ISSUER_ENABLED=1`       | Show issuer navigation to signed-in accounts                  |
-| `NUXT_ISSUER_DATABASE_URL` / `_FILE` | Private `xcs_issuer` connection                               |
-| `XCS_ISSUER_DOCUMENT_DIRECTORY`      | Absolute private writable directory, shared with admin review |
-| `XCS_ISSUER_INVITE_DAYS`             | Claim lifetime, default 7 days, bounded to 1–30               |
-| `XCS_SMTP_HOST`, `XCS_SMTP_PORT`     | Existing local SMTP transport, e.g. Mailpit                   |
-| `XCS_AUTH_ORIGIN`                    | Exact HTTPS origin for invitation and payload URLs            |
+| Variable                             | Purpose                                                     |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `XCS_ISSUER_ENABLED=1`               | Enable server routes after auth provisioning                |
+| `NUXT_PUBLIC_ISSUER_ENABLED=1`       | Show issuer navigation to signed-in accounts                |
+| `NUXT_ISSUER_DATABASE_URL` / `_FILE` | Private `xcs_issuer` connection                             |
+| `XCS_DOCUMENT_STORAGE_DRIVER`        | `filesystem` locally; `s3` in production                    |
+| `XCS_DOCUMENT_FILESYSTEM_DIRECTORY`  | Absolute local-only directory shared with admin review      |
+| `XCS_DOCUMENT_S3_*`                  | Private bucket endpoint, region, prefix and object key      |
+| `XCS_ISSUER_INVITE_DAYS`             | Claim lifetime, default 7 days, bounded to 1–30             |
+| `XCS_SMTP_*`                         | TLS mode, credentials and verified sender for external SMTP |
+| `XCS_AUTH_ORIGIN`                    | Exact HTTPS origin for invitation and payload URLs          |
 
 Never expose credentials in `NUXT_PUBLIC_*`. The navigation flag contains no secret. Payload URIs
 must fit XRPL's 128-byte limit including the digest; use a short HTTPS origin.
@@ -34,13 +36,12 @@ For local validation, supply the variables named by `docker-compose.application.
 docker compose -f docker-compose.yml -f docker-compose.application.yml config --quiet
 ```
 
-Bootstrap all enabled role passwords with the standalone indexer command `db:bootstrap`. Production
-runs use an externally provisioned PostgreSQL instance and direct environment values supplied by
-its secret manager; no production Compose stack is provided. The web image includes a private
-`/var/lib/xcs-review` directory owned by UID1000 for a persistent writable volume. Back up documents
-and database metadata. Mailpit is only a local test inbox; its overlay inbox is ephemeral on restart,
-so record ambiguous delivery evidence before stopping it. Qualify a production provider before
-promising external delivery. This setup does not register an OIDC client or alter a live deployment.
+Bootstrap all enabled role passwords with the PRE_DEPLOY component or the standalone indexer command
+`db:bootstrap`. Production uses managed PostgreSQL, a private S3-compatible bucket and an external
+SMTP provider with `starttls` or `tls`; filesystem storage and Mailpit remain local-only. Use a bucket
+key limited to Read/Write/Delete Objects, keep the bucket private and back up its objects together
+with database metadata. Qualify the sender domain and provider delivery before inviting users. The
+deployment operator must register the exact HTTPS origin with the OIDC provider.
 
 ## Application and approval
 

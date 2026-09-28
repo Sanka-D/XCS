@@ -19,10 +19,10 @@ import { createAdminHandler } from '../server/xcs/admin/http'
 import { AdminRepository } from '../server/xcs/admin/repository'
 import { PrivateDocuments } from '../server/xcs/admin/documents'
 import {
-  createLocalSmtpTransport,
   PostgresNotificationRepository,
   processNextNotification,
 } from '../server/xcs/admin/notifications'
+import { createSmtpDelivery } from '../server/xcs/notifications/smtp'
 
 const url = process.env.XCS_TEST_DATABASE_URL?.trim()
 if (process.env.XCS_REQUIRE_POSTGRES_TESTS === '1' && !url)
@@ -292,8 +292,9 @@ describe.skipIf(!url)('admin real PostgreSQL / shared auth / restricted pools', 
     const f = await fixture(),
       bytes = Buffer.from('%PDF-1.4\nSynthetic proof\n'),
       id = randomUUID()
-    await writeFile(join(directory, 'review.pdf'), bytes)
-    await db.sql`INSERT INTO app_documents(id,organization_id,application_role,storage_key,mime_type,byte_length,sha256,uploaded_by) VALUES (${id},${f.id},'verifier','review.pdf','application/pdf',${bytes.length},${createHash('sha256').update(bytes).digest('hex')},${f.userId})`
+    const storageKey = `${'a'.repeat(64)}.pdf`
+    await writeFile(join(directory, storageKey), bytes)
+    await db.sql`INSERT INTO app_documents(id,organization_id,application_role,storage_key,mime_type,byte_length,sha256,uploaded_by) VALUES (${id},${f.id},'verifier',${storageKey},'application/pdf',${bytes.length},${createHash('sha256').update(bytes).digest('hex')},${f.userId})`
     const link = await inject(listener, {
       method: 'POST',
       url: `/api/admin/documents/${id}/link`,
@@ -336,7 +337,7 @@ describe.skipIf(!url)('admin real PostgreSQL / shared auth / restricted pools', 
       ),
     ).rejects.toThrow('ADMIN_ACCESS_REVOKED')
     await db.sql`UPDATE app_user_roles SET revoked_at=NULL WHERE user_id=${session.userId} AND role='admin'`
-    await writeFile(join(directory, 'review.pdf'), 'corrupted')
+    await writeFile(join(directory, storageKey), 'corrupted')
     expect((await inject(listener, { url: link.json().url, headers: headers() })).statusCode).toBe(
       422,
     )
@@ -383,14 +384,17 @@ describe.skipIf(!url)('admin real PostgreSQL / shared auth / restricted pools', 
       const f = await fixture(),
         r = await post(f.id, f.role, decision())
       const worker = new PostgresNotificationRepository(notifier)
-      const down = createLocalSmtpTransport({ XCS_SMTP_HOST: '127.0.0.1', XCS_SMTP_PORT: '1' })
+      const { transport: down } = createSmtpDelivery({
+        XCS_SMTP_HOST: '127.0.0.1',
+        XCS_SMTP_PORT: '1',
+      })
       expect(await processNextNotification(worker, down)).toBe('failed')
       down.close()
       const [notification] =
         await db.sql`SELECT id,status FROM app_admin_notifications WHERE decision_id=${r.json().decision.id}`
       expect(notification!.status).toBe('failed')
       await repo.retryNotification(notification!.id)
-      const smtp = createLocalSmtpTransport({
+      const { transport: smtp } = createSmtpDelivery({
         XCS_SMTP_HOST: '127.0.0.1',
         XCS_SMTP_PORT: process.env.XCS_TEST_SMTP_PORT!,
       })

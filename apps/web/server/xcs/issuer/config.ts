@@ -1,5 +1,5 @@
-import { isAbsolute } from 'node:path'
 import { adminSecret } from '../admin/config'
+import { loadPrivateDocumentStorageConfig } from '../documents/config'
 export function loadIssuerConfig(env: NodeJS.ProcessEnv) {
   if (env.XCS_ISSUER_ENABLED !== undefined && !['0', '1'].includes(env.XCS_ISSUER_ENABLED))
     throw new Error('ISSUER_FLAG_INVALID')
@@ -26,10 +26,9 @@ export function loadIssuerConfig(env: NodeJS.ProcessEnv) {
     origin.password
   )
     throw new Error('ISSUER_ORIGIN_INVALID')
-  const directory = env.XCS_ISSUER_DOCUMENT_DIRECTORY ?? env.XCS_ADMIN_DOCUMENT_DIRECTORY ?? ''
-  if (!isAbsolute(directory)) throw new Error('ISSUER_DOCUMENT_DIRECTORY_REQUIRED')
+  const storage = loadPrivateDocumentStorageConfig(env)
   const lifetime = env.XCS_ISSUER_INVITE_DAYS ?? '7'
   if (!/^\d+$/.test(lifetime) || Number(lifetime) < 1 || Number(lifetime) > 30)
     throw new Error('ISSUER_INVITE_LIFETIME_INVALID')
-  return { databaseUrl, origin: origin.origin, directory, inviteDays: Number(lifetime) }
+  return { databaseUrl, origin: origin.origin, storage, inviteDays: Number(lifetime) }
 }

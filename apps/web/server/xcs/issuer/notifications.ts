@@ -1,11 +1,11 @@
 import {
   classifySmtpFailure,
+  DEFAULT_NOTIFICATION_SENDER,
   isNotificationEmail,
   type NotificationMessage,
+  type NotificationSender,
   type NotificationTransport,
-} from '../admin/notifications'
-
-export { createLocalSmtpTransport } from '../admin/notifications'
+} from '../notifications/smtp'
 
 export interface IssuerNotification {
   id: string
@@ -21,7 +21,6 @@ export interface IssuerNotificationResult {
   errorCode: string | null
 }
 
-const SENDER = 'notifications@xcs.test'
 const SMTP_DEADLINE_MS = 60_000
 
 function hasControlCharacters(value: string, allowWhitespace = false): boolean {
@@ -31,7 +30,10 @@ function hasControlCharacters(value: string, allowWhitespace = false): boolean {
   })
 }
 
-export function createIssuerNotificationMessage(input: IssuerNotification): NotificationMessage {
+export function createIssuerNotificationMessage(
+  input: IssuerNotification,
+  sender: NotificationSender = DEFAULT_NOTIFICATION_SENDER,
+): NotificationMessage {
   if (
     !isNotificationEmail(input.recipientEmail) ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.id) ||
@@ -95,10 +97,10 @@ export function createIssuerNotificationMessage(input: IssuerNotification): Noti
     throw new Error('ISSUER_NOTIFICATION_INVALID')
   }
   return {
-    from: { name: 'XCS', address: SENDER },
+    from: { name: sender.name, address: sender.address },
     to: { name: '', address: input.recipientEmail },
-    envelope: { from: SENDER, to: [input.recipientEmail] },
-    messageId: `<issuer-${input.id}@xcs.test>`,
+    envelope: { from: sender.envelopeFrom, to: [input.recipientEmail] },
+    messageId: `<issuer-${input.id}@${sender.messageIdDomain}>`,
     subject,
     text: text.join('\n'),
   }
@@ -108,10 +110,11 @@ export function createIssuerNotificationMessage(input: IssuerNotification): Noti
 export async function sendIssuerNotification(
   transport: NotificationTransport,
   input: IssuerNotification,
+  sender?: NotificationSender,
 ): Promise<IssuerNotificationResult> {
   let message: NotificationMessage
   try {
-    message = createIssuerNotificationMessage(input)
+    message = createIssuerNotificationMessage(input, sender)
   } catch {
     return { status: 'failed', errorCode: 'ISSUER_NOTIFICATION_INVALID' }
   }

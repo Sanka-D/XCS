@@ -37,15 +37,16 @@ describe('admin documents and transitions', () => {
     directories.push(directory)
     const service = new PrivateDocuments(directory, randomBytes(32).toString('hex'))
     const bytes = Buffer.from('%PDF-1.4\nsynthetic test only\n')
+    const storageKey = `${'a'.repeat(64)}.pdf`
     const document = {
       id: randomUUID(),
-      storage_key: 'proof.pdf',
+      storage_key: storageKey,
       mime_type: 'application/pdf',
       byte_length: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'),
     }
     await expect(service.read(document)).rejects.toThrow('ADMIN_DOCUMENT_MISSING')
-    await writeFile(join(directory, 'proof.pdf'), bytes)
+    await writeFile(join(directory, storageKey), bytes)
     expect(await service.read(document)).toEqual(bytes)
     await expect(service.read({ ...document, storage_key: '../proof.pdf' })).rejects.toThrow(
       'ADMIN_DOCUMENT_PATH_INVALID',
@@ -53,12 +54,13 @@ describe('admin documents and transitions', () => {
     await expect(service.read({ ...document, mime_type: 'text/html' })).rejects.toThrow(
       'ADMIN_DOCUMENT_INVALID',
     )
-    await symlink(join(directory, 'proof.pdf'), join(directory, 'linked.pdf'))
-    await expect(service.read({ ...document, storage_key: 'linked.pdf' })).rejects.toThrow(
+    const linkedKey = `${'b'.repeat(64)}.pdf`
+    await symlink(join(directory, storageKey), join(directory, linkedKey))
+    await expect(service.read({ ...document, storage_key: linkedKey })).rejects.toThrow(
       'ADMIN_DOCUMENT_PATH_INVALID',
     )
     await writeFile(
-      join(directory, 'proof.pdf'),
+      join(directory, storageKey),
       Buffer.from(bytes.toString().replace('synthetic', 'tampered!')),
     )
     await expect(service.read(document)).rejects.toThrow('ADMIN_DOCUMENT_INTEGRITY_INVALID')

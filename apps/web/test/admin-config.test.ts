@@ -6,11 +6,15 @@ describe('admin configuration', () => {
     XCS_AUTH_ENABLED: '1',
     NUXT_ADMIN_DATABASE_URL: 'postgres://xcs_admin_app:fixture@localhost/xcs',
     XCS_ADMIN_DOCUMENT_KEY: 'test-only-32-character-signing-key',
-    XCS_ADMIN_DOCUMENT_DIRECTORY: '/private/documents',
+    XCS_DOCUMENT_STORAGE_DRIVER: 'filesystem',
+    XCS_DOCUMENT_FILESYSTEM_DIRECTORY: '/private/documents',
   }
   it('is opt-in and requires shared auth and restricted database role', () => {
     expect(loadAdminConfig({})).toBeUndefined()
-    expect(loadAdminConfig(env)?.directory).toBe('/private/documents')
+    expect(loadAdminConfig(env)?.storage).toEqual({
+      driver: 'filesystem',
+      directory: '/private/documents',
+    })
     expect(() => loadAdminConfig({ ...env, XCS_AUTH_ENABLED: '0' })).toThrow('ADMIN_AUTH_REQUIRED')
     expect(() =>
       loadAdminConfig({
@@ -18,7 +22,7 @@ describe('admin configuration', () => {
         NUXT_ADMIN_DATABASE_URL: 'postgres://xcs_admin:fixture@localhost/xcs',
       }),
     ).toThrow('ADMIN_DATABASE_ROLE_REQUIRED')
-    expect(() => loadAdminConfig({ ...env, XCS_ADMIN_DOCUMENT_DIRECTORY: 'public' })).toThrow()
+    expect(() => loadAdminConfig({ ...env, XCS_DOCUMENT_FILESYSTEM_DIRECTORY: 'public' })).toThrow()
     expect(() => loadAdminConfig({ ...env, XCS_ADMIN_DOCUMENT_KEY: 'weak' })).toThrow()
   })
 })

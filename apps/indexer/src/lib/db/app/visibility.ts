@@ -1,4 +1,4 @@
-// Copied from packages/db/src/app/visibility.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 

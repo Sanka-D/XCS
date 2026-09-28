@@ -1,4 +1,4 @@
-// Copied from packages/db/src/index.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 export * from './client.js'
 export * from './indexer-fencing.js'
 export * from './transactions.js'

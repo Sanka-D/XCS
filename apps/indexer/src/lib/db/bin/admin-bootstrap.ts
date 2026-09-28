@@ -1,4 +1,4 @@
-// Copied from packages/db/src/bin/admin-bootstrap.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { createDatabaseClient } from '../client.js'
 import { bootstrapFirstAdmin } from '../app/bootstrap-admin.js'
 import { requiredEnvironment } from './environment.js'

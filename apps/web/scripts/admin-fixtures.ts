@@ -6,7 +6,7 @@ import { adminSecret } from '../server/xcs/admin/config.js'
 
 async function main() {
   const url = new URL(adminSecret(process.env, 'XCS_ADMIN_FIXTURE_DATABASE_URL'))
-  const directory = process.env.XCS_ADMIN_DOCUMENT_DIRECTORY ?? ''
+  const directory = process.env.XCS_DOCUMENT_FILESYSTEM_DIRECTORY ?? ''
   if (
     process.env.NODE_ENV === 'production' ||
     !['127.0.0.1', 'localhost', 'postgres'].includes(url.hostname) ||

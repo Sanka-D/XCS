@@ -66,8 +66,9 @@ integrators.
   migration history remain trusted; transport security and an explicit SCRAM `pg_hba.conf` policy
   remain operator responsibilities.
 - The shared `db/migrations/` history supports upgrades from the committed projection baseline
-  through migrations 0000–0006, including hosted payload, application, authentication, admin and
-  issuer storage. PostgreSQL integration tests exercise populated-baseline upgrades, preserving
+  through migrations 0000–0008, including hosted payload, application, authentication, admin,
+  issuer, recipient and signed-presentation storage. PostgreSQL integration tests exercise
+  populated-baseline upgrades, preserving
   profiles and legacy payload bytes/locators, plus repeat migration runs. Use the standalone
   indexer's migration commands before enabling the corresponding web features; retain applied
   migration bytes and add forward migrations. This does not provide a migration from the former

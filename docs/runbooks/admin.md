@@ -9,25 +9,27 @@ and French. It uses the PostgreSQL sessions, server role checks and CSRF protect
 both changes together; there is no separate administrator login or automatic role assignment from
 email or identity-provider claims.
 
-This setup uses private local documents and Mailpit. It does not qualify the feature for production,
-implement verifier application forms (#33), or store private credentials. The issuer workspace is
-covered by the [issuer runbook](issuer.md). Mockup user
-acceptance tests and a real XRP Identity login must be reported separately from automated tests.
+The local procedure uses private filesystem documents and Mailpit. Production uses the common private
+S3/Spaces backend and the external TLS SMTP contract from the
+[deployment runbook](deployment.md). Real XRP Identity, provider delivery and bucket access remain
+deployment acceptance checks and must be reported separately from automated tests.
 
 ## Prepare the database and secrets
 
-Apply the journaled migrations through `0006` after authentication migration `0004`. Existing
+Apply the journaled migrations through `0008` after authentication migration `0004`. Existing
 migrations must remain unchanged. Run the normal database bootstrap with its existing credentials
 and these additional passwords before starting administration:
 
-| Private variable                 | Purpose                                                |
-| -------------------------------- | ------------------------------------------------------ |
-| `XCS_ADMIN_DATABASE_PASSWORD`    | Bootstrap password for restricted role `xcs_admin_app` |
-| `XCS_NOTIFIER_DATABASE_PASSWORD` | Bootstrap password for restricted role `xcs_notifier`  |
-| `NUXT_ADMIN_DATABASE_URL`        | Web administrative connection as `xcs_admin_app`       |
-| `XCS_NOTIFIER_DATABASE_URL`      | Worker connection as `xcs_notifier`                    |
-| `XCS_ADMIN_DOCUMENT_KEY`         | Random signing key of at least 32 UTF-8 bytes          |
-| `XCS_ADMIN_DOCUMENT_DIRECTORY`   | Absolute private document directory                    |
+| Private variable                    | Purpose                                                |
+| ----------------------------------- | ------------------------------------------------------ |
+| `XCS_ADMIN_DATABASE_PASSWORD`       | Bootstrap password for restricted role `xcs_admin_app` |
+| `XCS_NOTIFIER_DATABASE_PASSWORD`    | Bootstrap password for restricted role `xcs_notifier`  |
+| `NUXT_ADMIN_DATABASE_URL`           | Web administrative connection as `xcs_admin_app`       |
+| `XCS_NOTIFIER_DATABASE_URL`         | Worker connection as `xcs_notifier`                    |
+| `XCS_ADMIN_DOCUMENT_KEY`            | Random signing key of at least 32 UTF-8 bytes          |
+| `XCS_DOCUMENT_STORAGE_DRIVER`       | `filesystem` locally; `s3` in production               |
+| `XCS_DOCUMENT_FILESYSTEM_DIRECTORY` | Absolute local-only private directory                  |
+| `XCS_DOCUMENT_S3_*`                 | Private production bucket, endpoint, region and key    |
 
 The secret variables support an alternative `_FILE` variable. Supply one source only, with a
 single-line value in a readable regular file. Never put them in `NUXT_PUBLIC_*`, commit secret files,
@@ -89,7 +91,7 @@ command automatically at login. The four screens do not provide account or admin
 Use a separate local database whose name begins `xcs_admin_demo`, migrated and bootstrapped with the
 same role boundaries. The fixture command accepts loopback or the Docker `postgres` hostname only.
 Configure `XCS_ADMIN_FIXTURE_DATABASE_URL` with an operator connection to that disposable database,
-and `XCS_ADMIN_DOCUMENT_DIRECTORY` with an absolute durable private directory, then run:
+and `XCS_DOCUMENT_FILESYSTEM_DIRECTORY` with an absolute durable private directory, then run:
 
 ```sh
 pnpm --dir apps/web admin:fixtures
@@ -105,7 +107,7 @@ For the fixture script's `synthetic-*.png` files, with the host document directo
 
 ```sh
 docker compose run --rm --no-deps --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE \
-  --volume "${XCS_ADMIN_DOCUMENT_DIRECTORY}:/fixtures:ro" \
+  --volume "${XCS_DOCUMENT_FILESYSTEM_DIRECTORY}:/fixtures:ro" \
   --volume "${COMPOSE_PROJECT_NAME}_xcs-review-documents:/var/lib/xcs-review" \
   --entrypoint sh admin-notifier -c \
   'for file in /fixtures/synthetic-*.png; do
@@ -190,6 +192,6 @@ mockup user acceptance testing.
 
 For an application rollback, stop `admin-notifier`, disable `XCS_ADMIN_ENABLED` or remove the application
 overlay, and deploy the compatible previous web image. Keep migration `0005`, decisions, audit rows,
-notification records and the document volume. Do not run `docker compose down --volumes` as rollback.
+notification records and private document storage. Do not run `docker compose down --volumes` as rollback.
 Before re-enabling, verify migrations, minimum grants, document integrity and pending/uncertain
 notification states. An indexer outage does not prevent reading the stored decision history.

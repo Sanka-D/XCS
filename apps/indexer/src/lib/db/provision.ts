@@ -1,5 +1,7 @@
-// Copied from packages/db/src/provision.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 // Diverges by design (recipient presentation writes and verifier evidence history on the shared portal pool); source sha256:95df14330b7a194a132a444fa26ded1872dde31f8ffc26897e9725430275d9cc.
+import type { Sql, TransactionSql } from 'postgres'
+
 import type { DatabaseClient } from './client.js'
 
 export const XCS_INDEXER_DATABASE_ROLE = 'xcs_indexer' as const
@@ -21,6 +23,46 @@ export const XCS_APP_DATABASE_CONNECTION_LIMIT = 12
 const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u
 const PROVISION_LOCK_CLASS_ID = 1_480_807_217
 const PROVISION_LOCK_OBJECT_ID = 1
+const MINIMUM_MANAGED_POSTGRES_VERSION = 160_000
+const RUNTIME_DATABASE_ROLES = [
+  XCS_INDEXER_DATABASE_ROLE,
+  XCS_API_DATABASE_ROLE,
+  XCS_PAYLOAD_WRITER_DATABASE_ROLE,
+  XCS_MONITOR_DATABASE_ROLE,
+  XCS_APP_DATABASE_ROLE,
+  XCS_ADMIN_APP_DATABASE_ROLE,
+  XCS_NOTIFIER_DATABASE_ROLE,
+  XCS_ISSUER_DATABASE_ROLE,
+] as const
+
+type ProvisioningSql = Sql | TransactionSql
+
+interface ProvisionerRow {
+  roleName: string
+  isSuperuser: boolean
+  canCreateRole: boolean
+  canCreateDatabaseObjects: boolean
+  canCreatePublicObjects: boolean
+  serverVersion: number
+  selfGrant: string
+}
+
+interface RuntimeRoleRow {
+  roleName: string
+  isSuperuser: boolean
+  canCreateDatabase: boolean
+  canCreateRole: boolean
+  canReplicate: boolean
+  canBypassRls: boolean
+}
+
+interface RuntimeMembershipRow {
+  grantedRole: string
+  memberRole: string
+  adminOption: boolean
+  inheritOption: boolean
+  setOption: boolean
+}
 
 export interface RuntimeDatabasePasswords {
   clusterScope: typeof XCS_DATABASE_CLUSTER_SCOPE
@@ -107,6 +149,126 @@ export function assertRuntimeDatabasePasswords(passwords: RuntimeDatabasePasswor
   }
 }
 
+async function assertProvisioningPreconditions(sql: ProvisioningSql): Promise<void> {
+  const [provisioner] = await sql<ProvisionerRow[]>`
+    SELECT
+      role_object.rolname AS "roleName",
+      role_object.rolsuper AS "isSuperuser",
+      role_object.rolcreaterole AS "canCreateRole",
+      has_database_privilege(current_user, current_database(), 'CREATE') AS "canCreateDatabaseObjects",
+      COALESCE(has_schema_privilege(current_user, 'public', 'CREATE'), false) AS "canCreatePublicObjects",
+      current_setting('server_version_num')::integer AS "serverVersion",
+      COALESCE(current_setting('createrole_self_grant', true), '') AS "selfGrant"
+    FROM pg_roles role_object
+    WHERE role_object.rolname = current_user
+  `
+  if (provisioner === undefined) throw new Error('DATABASE_PROVISIONER_INVALID')
+  if (provisioner.serverVersion < MINIMUM_MANAGED_POSTGRES_VERSION) {
+    throw new Error('DATABASE_POSTGRES_VERSION_UNSUPPORTED')
+  }
+  if (!provisioner.isSuperuser && !provisioner.canCreateRole) {
+    throw new Error('DATABASE_PROVISIONER_CREATE_ROLE_REQUIRED')
+  }
+  if (!provisioner.canCreateDatabaseObjects || !provisioner.canCreatePublicObjects) {
+    throw new Error('DATABASE_PROVISIONER_DDL_REQUIRED')
+  }
+  if (!provisioner.isSuperuser && provisioner.selfGrant !== '') {
+    throw new Error('DATABASE_PROVISIONER_SELF_GRANT_UNSAFE')
+  }
+
+  const runtimeRoles = await sql<RuntimeRoleRow[]>`
+    SELECT
+      rolname AS "roleName",
+      rolsuper AS "isSuperuser",
+      rolcreatedb AS "canCreateDatabase",
+      rolcreaterole AS "canCreateRole",
+      rolreplication AS "canReplicate",
+      rolbypassrls AS "canBypassRls"
+    FROM pg_roles
+    WHERE rolname IN (
+      'xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor',
+      'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer'
+    )
+    ORDER BY rolname
+  `
+  if (
+    runtimeRoles.some(
+      (role) =>
+        role.isSuperuser ||
+        role.canCreateDatabase ||
+        role.canCreateRole ||
+        role.canReplicate ||
+        role.canBypassRls,
+    )
+  ) {
+    throw new Error('DATABASE_RUNTIME_ROLE_UNSAFE')
+  }
+
+  const memberships = await sql<RuntimeMembershipRow[]>`
+    SELECT
+      granted_role.rolname AS "grantedRole",
+      member_role.rolname AS "memberRole",
+      membership.admin_option AS "adminOption",
+      membership.inherit_option AS "inheritOption",
+      membership.set_option AS "setOption"
+    FROM pg_auth_members membership
+    JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+    JOIN pg_roles member_role ON member_role.oid = membership.member
+    WHERE granted_role.rolname IN (
+      'xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor',
+      'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer'
+    )
+       OR member_role.rolname IN (
+      'xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor',
+      'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer'
+    )
+  `
+  const roleNames = new Set<string>(RUNTIME_DATABASE_ROLES)
+  const safeMembership = (membership: RuntimeMembershipRow): boolean => {
+    if (
+      membership.grantedRole === 'pg_monitor' &&
+      membership.memberRole === XCS_MONITOR_DATABASE_ROLE
+    ) {
+      return !membership.adminOption && membership.inheritOption && !membership.setOption
+    }
+    return (
+      roleNames.has(membership.grantedRole) &&
+      membership.memberRole === provisioner.roleName &&
+      membership.adminOption &&
+      !membership.inheritOption &&
+      !membership.setOption
+    )
+  }
+  if (memberships.some((membership) => !safeMembership(membership))) {
+    throw new Error('DATABASE_RUNTIME_ROLE_MEMBERSHIP_UNSAFE')
+  }
+
+  if (!provisioner.isSuperuser) {
+    const existingRoleNames = new Set(runtimeRoles.map((role) => role.roleName))
+    const administeredRoleNames = new Set(
+      memberships
+        .filter(
+          (membership) =>
+            membership.memberRole === provisioner.roleName &&
+            membership.adminOption &&
+            !membership.inheritOption &&
+            !membership.setOption,
+        )
+        .map((membership) => membership.grantedRole),
+    )
+    if ([...existingRoleNames].some((roleName) => !administeredRoleNames.has(roleName))) {
+      throw new Error('DATABASE_PROVISIONER_ROLE_ADMIN_REQUIRED')
+    }
+  }
+}
+
+/** Validates managed-service capabilities and existing cluster-wide roles without changing state. */
+export async function preflightRuntimeDatabaseProvisioning(client: {
+  sql: ProvisioningSql
+}): Promise<void> {
+  await assertProvisioningPreconditions(client.sql)
+}
+
 const CREATE_ROLES_SQL = `
   DO $xcs_roles$
   BEGIN
@@ -138,44 +300,22 @@ const CREATE_ROLES_SQL = `
   $xcs_roles$;
 `
 
-const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
-  DO $xcs_memberships$
-  DECLARE
-    membership record;
-  BEGIN
-    FOR membership IN
-      SELECT granted_role.rolname AS granted_role, member_role.rolname AS member_role
-      FROM pg_auth_members auth_membership
-      JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
-      JOIN pg_roles member_role ON member_role.oid = auth_membership.member
-      WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', 'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer')
-         OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor', 'xcs_payload_writer', 'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer')
-    LOOP
-      IF membership.granted_role = 'pg_monitor' AND membership.member_role = 'xcs_monitor' THEN
-        CONTINUE;
-      END IF;
-      EXECUTE format('REVOKE %I FROM %I', membership.granted_role, membership.member_role);
-    END LOOP;
-  END
-  $xcs_memberships$;
-`
-
 const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
-  ALTER ROLE xcs_indexer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_INDEXER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_api WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_payload_writer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_monitor WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_app WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_APP_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_indexer WITH NOLOGIN NOINHERIT CONNECTION LIMIT ${XCS_INDEXER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_api WITH NOLOGIN NOINHERIT CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_payload_writer WITH NOLOGIN NOINHERIT CONNECTION LIMIT ${XCS_PAYLOAD_WRITER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_monitor WITH NOLOGIN INHERIT CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_app WITH NOLOGIN NOINHERIT CONNECTION LIMIT ${XCS_APP_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity' PASSWORD NULL;
   ALTER ROLE xcs_indexer RESET ALL;
   ALTER ROLE xcs_api RESET ALL;
   ALTER ROLE xcs_payload_writer RESET ALL;
   ALTER ROLE xcs_monitor RESET ALL;
   ALTER ROLE xcs_app RESET ALL;
-  ALTER ROLE xcs_admin_app WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 VALID UNTIL 'infinity' PASSWORD NULL;
-  ALTER ROLE xcs_notifier WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 3 VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_admin_app WITH NOLOGIN NOINHERIT CONNECTION LIMIT 8 VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_notifier WITH NOLOGIN NOINHERIT CONNECTION LIMIT 3 VALID UNTIL 'infinity' PASSWORD NULL;
   ALTER ROLE xcs_admin_app RESET ALL;
   ALTER ROLE xcs_notifier RESET ALL;
-  ALTER ROLE xcs_issuer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 8 VALID UNTIL 'infinity' PASSWORD NULL;
+  ALTER ROLE xcs_issuer WITH NOLOGIN NOINHERIT CONNECTION LIMIT 8 VALID UNTIL 'infinity' PASSWORD NULL;
   ALTER ROLE xcs_issuer RESET ALL;
   ALTER ROLE xcs_issuer SET statement_timeout = '30s';
   ALTER ROLE xcs_issuer SET lock_timeout = '15s';
@@ -351,44 +491,53 @@ const GRANT_RUNTIME_ACCESS_SQL = `
   GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_payload_writer;
 `
 
+export async function provisionRuntimeDatabaseRolesInTransaction(
+  sql: TransactionSql,
+  passwords: RuntimeDatabasePasswords,
+): Promise<void> {
+  assertRuntimeDatabasePasswords(passwords)
+  await sql`SELECT pg_advisory_xact_lock(${PROVISION_LOCK_CLASS_ID}, ${PROVISION_LOCK_OBJECT_ID})`
+  await assertProvisioningPreconditions(sql)
+  await sql.unsafe(CREATE_ROLES_SQL)
+  // PostgreSQL 16+ automatically grants a non-superuser creator ADMIN on each
+  // new role with neither INHERIT nor SET. Re-check that exact delegation before
+  // any password or privilege changes.
+  await assertProvisioningPreconditions(sql)
+  await sql.unsafe(NORMALIZE_ROLE_ATTRIBUTES_SQL)
+  await sql`SELECT set_config('password_encryption', 'scram-sha-256', true)`
+  await sql`SELECT set_config('xcs.indexer_password', ${passwords.indexerPassword}, true)`
+  await sql`SELECT set_config('xcs.api_password', ${passwords.apiPassword}, true)`
+  await sql`SELECT set_config('xcs.payload_writer_password', ${passwords.payloadWriterPassword}, true)`
+  await sql`SELECT set_config('xcs.monitor_password', ${passwords.monitorPassword}, true)`
+  await sql.unsafe(SET_ROLE_PASSWORDS_SQL)
+  await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
+  await sql.unsafe(REVOKE_APPLICATION_COLUMNS_SQL)
+  await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
+  if (passwords.applicationPassword !== undefined) {
+    await sql`SELECT set_config('xcs.application_password', ${passwords.applicationPassword}, true)`
+    await sql.unsafe(GRANT_APPLICATION_ACCESS_SQL)
+  }
+  if (passwords.adminApplicationPassword !== undefined) {
+    await sql`SELECT set_config('xcs.admin_application_password', ${passwords.adminApplicationPassword}, true)`
+    await sql.unsafe(GRANT_ADMIN_ACCESS_SQL)
+  }
+  if (passwords.notifierPassword !== undefined) {
+    await sql`SELECT set_config('xcs.notifier_password', ${passwords.notifierPassword}, true)`
+    await sql.unsafe(GRANT_NOTIFIER_ACCESS_SQL)
+  }
+  if (passwords.issuerPassword !== undefined) {
+    await sql`SELECT set_config('xcs.issuer_password', ${passwords.issuerPassword}, true)`
+    await sql.unsafe(GRANT_ISSUER_ACCESS_SQL)
+  }
+  await sql.unsafe(
+    'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN; ALTER ROLE xcs_payload_writer LOGIN;',
+  )
+}
+
 export async function provisionRuntimeDatabaseRoles(
   client: DatabaseClient,
   passwords: RuntimeDatabasePasswords,
 ): Promise<void> {
   assertRuntimeDatabasePasswords(passwords)
-
-  await client.sql.begin(async (sql) => {
-    await sql`SELECT pg_advisory_xact_lock(${PROVISION_LOCK_CLASS_ID}, ${PROVISION_LOCK_OBJECT_ID})`
-    await sql.unsafe(CREATE_ROLES_SQL)
-    await sql.unsafe(NORMALIZE_ROLE_MEMBERSHIPS_SQL)
-    await sql.unsafe(NORMALIZE_ROLE_ATTRIBUTES_SQL)
-    await sql`SELECT set_config('password_encryption', 'scram-sha-256', true)`
-    await sql`SELECT set_config('xcs.indexer_password', ${passwords.indexerPassword}, true)`
-    await sql`SELECT set_config('xcs.api_password', ${passwords.apiPassword}, true)`
-    await sql`SELECT set_config('xcs.payload_writer_password', ${passwords.payloadWriterPassword}, true)`
-    await sql`SELECT set_config('xcs.monitor_password', ${passwords.monitorPassword}, true)`
-    await sql.unsafe(SET_ROLE_PASSWORDS_SQL)
-    await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
-    await sql.unsafe(REVOKE_APPLICATION_COLUMNS_SQL)
-    await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
-    if (passwords.applicationPassword !== undefined) {
-      await sql`SELECT set_config('xcs.application_password', ${passwords.applicationPassword}, true)`
-      await sql.unsafe(GRANT_APPLICATION_ACCESS_SQL)
-    }
-    if (passwords.adminApplicationPassword !== undefined) {
-      await sql`SELECT set_config('xcs.admin_application_password', ${passwords.adminApplicationPassword}, true)`
-      await sql.unsafe(GRANT_ADMIN_ACCESS_SQL)
-    }
-    if (passwords.notifierPassword !== undefined) {
-      await sql`SELECT set_config('xcs.notifier_password', ${passwords.notifierPassword}, true)`
-      await sql.unsafe(GRANT_NOTIFIER_ACCESS_SQL)
-    }
-    if (passwords.issuerPassword !== undefined) {
-      await sql`SELECT set_config('xcs.issuer_password', ${passwords.issuerPassword}, true)`
-      await sql.unsafe(GRANT_ISSUER_ACCESS_SQL)
-    }
-    await sql.unsafe(
-      'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN; ALTER ROLE xcs_payload_writer LOGIN;',
-    )
-  })
+  await client.sql.begin((sql) => provisionRuntimeDatabaseRolesInTransaction(sql, passwords))
 }

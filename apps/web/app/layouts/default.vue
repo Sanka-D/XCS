@@ -67,7 +67,6 @@ const navigation = computed(() =>
               : []),
             { label: t('nav.explorer'), to: localePath('/schemas') },
             { label: t('nav.create'), to: localePath('/studio') },
-            { label: t('simpleNavigation.protocolVerify'), to: localePath('/verify') },
             ...(account.value ? [{ label: t('nav.wallet'), to: localePath('/credentials') }] : []),
             { label: t('nav.docs'), to: localePath('/developers') },
             { label: t('nav.status'), to: localePath('/status') },

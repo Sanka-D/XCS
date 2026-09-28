@@ -194,8 +194,9 @@ for (const application of [false, true]) {
             'notifier must retain node user and read-only filesystem',
           )
           check(
-            environment.XCS_ISSUER_DOCUMENT_DIRECTORY === '/var/lib/xcs-review' &&
-              environment.XCS_ADMIN_DOCUMENT_DIRECTORY === '/var/lib/xcs-review',
+            environment.XCS_DOCUMENT_STORAGE_DRIVER === 'filesystem' &&
+              environment.XCS_DOCUMENT_FILESYSTEM_DIRECTORY === '/var/lib/xcs-review' &&
+              environment.XCS_DOCUMENT_FILESYSTEM_LOCAL === '1',
             'reviewers and issuers must share the private document directory',
           )
           const documents = services.web.volumes.find(

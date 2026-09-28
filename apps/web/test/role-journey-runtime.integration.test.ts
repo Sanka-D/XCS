@@ -361,13 +361,10 @@ describe.skipIf(!enabled)(
         walletTransport.select(issuerWallet)
         await page.goto(runtime.origin + `/issuer/issue/${inviteId}`)
         await connectWallet()
-        await page.getByText(en.simpleIssuer.advanced, { exact: true }).click()
-        await page.getByRole('button', { name: en.simpleIssuer.editJson, exact: true }).click()
-        await page
-          .locator('#claims')
-          .fill(
-            JSON.stringify({ course: 'Public runtime course', secret: 'PRIVATE RUNTIME CLAIM' }),
-          )
+        await browserExpect(page.locator('#claim-course')).toBeVisible()
+        await page.locator('#claim-course').fill('Public runtime course')
+        await page.locator('#claim-secret').fill('PRIVATE RUNTIME CLAIM')
+        await browserExpect(page.locator('#claims')).toHaveCount(0)
         await page.getByRole('checkbox', { name: 'course', exact: true }).check()
         await page.getByRole('button', { name: en.simpleIssuer.reviewIssue, exact: true }).click()
         await page.getByTestId('transaction-technical-details').locator('summary').click()

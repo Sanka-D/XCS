@@ -1,4 +1,4 @@
-// Copied from packages/db/src/bin/environment.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { readFileSync, statSync } from 'node:fs'
 
 /** Absence disables an optional capability; an explicitly empty value is invalid. */

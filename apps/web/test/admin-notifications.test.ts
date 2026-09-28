@@ -3,7 +3,6 @@ import { once } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   classifySmtpFailure,
-  createLocalSmtpTransport,
   createNotificationMessage,
   isNotificationEmail,
   processNextNotification,
@@ -11,6 +10,7 @@ import {
   type NotificationRepository,
   type NotificationTransport,
 } from '../server/xcs/admin/notifications'
+import { createSmtpDelivery, loadSmtpConfiguration } from '../server/xcs/notifications/smtp'
 
 const notification: ClaimedNotification = {
   id: '84b066bb-aa8d-40a6-b37d-3a3d7cf25485',
@@ -153,21 +153,96 @@ describe('SMTP boundaries', () => {
     expect(isNotificationEmail('responsible+test@example.test')).toBe(true)
   })
 
-  it.each(['smtp.example.com', 'https://mailpit', '127.0.0.2'])(
-    'rejects external SMTP host %s',
+  it.each(['https://mailpit', 'bad host', '-smtp.example.com'])(
+    'rejects invalid SMTP host %s',
     (host) => {
-      expect(() => createLocalSmtpTransport({ XCS_SMTP_HOST: host })).toThrow('local Mailpit')
+      expect(() => loadSmtpConfiguration({ XCS_SMTP_HOST: host })).toThrow('valid hostname')
     },
   )
 
   it.each(['0', '-1', '65536', '1025x', '1.5', ''])('rejects invalid SMTP port %s', (port) => {
-    expect(() => createLocalSmtpTransport({ XCS_SMTP_PORT: port })).toThrow('valid port')
+    expect(() => loadSmtpConfiguration({ XCS_SMTP_PORT: port })).toThrow('valid port')
   })
 
   it.each(['127.0.0.1', 'localhost', 'mailpit'])('accepts local Mailpit host %s', (host) => {
-    const transport = createLocalSmtpTransport({ XCS_SMTP_HOST: host })
+    const { transport } = createSmtpDelivery({ XCS_SMTP_HOST: host })
     expect(transport.sendMail).toBeTypeOf('function')
     transport.close()
+  })
+
+  it('loads authenticated STARTTLS and configurable sender fields for production', () => {
+    const configuration = loadSmtpConfiguration({
+      XCS_SMTP_HOST: 'smtp.example.com',
+      XCS_SMTP_PORT: '587',
+      XCS_SMTP_TLS_MODE: 'starttls',
+      XCS_SMTP_USERNAME: 'xcs-user',
+      XCS_SMTP_PASSWORD: 'private-test-secret',
+      XCS_SMTP_FROM_NAME: 'XCS Commons',
+      XCS_SMTP_FROM_ADDRESS: 'notifications@example.com',
+      XCS_SMTP_ENVELOPE_FROM: 'bounces@example.com',
+    })
+    expect(configuration).toMatchObject({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      requireTls: true,
+      ignoreTls: false,
+      username: 'xcs-user',
+      sender: {
+        name: 'XCS Commons',
+        address: 'notifications@example.com',
+        envelopeFrom: 'bounces@example.com',
+        messageIdDomain: 'example.com',
+      },
+    })
+  })
+
+  it('supports implicit TLS without weakening certificate verification', () => {
+    const configuration = loadSmtpConfiguration({
+      XCS_SMTP_HOST: 'smtp.example.com',
+      XCS_SMTP_PORT: '465',
+      XCS_SMTP_TLS_MODE: 'tls',
+      XCS_SMTP_FROM_ADDRESS: 'notifications@example.com',
+    })
+    expect(configuration).toMatchObject({
+      secure: true,
+      requireTls: false,
+      ignoreTls: false,
+    })
+  })
+
+  it.each([
+    [{ XCS_SMTP_HOST: 'smtp.example.com' }, 'XCS_SMTP_TLS_MODE'],
+    [
+      {
+        XCS_SMTP_HOST: 'smtp.example.com',
+        XCS_SMTP_TLS_MODE: 'disabled',
+        XCS_SMTP_FROM_ADDRESS: 'notifications@example.com',
+      },
+      'enable TLS',
+    ],
+    [{ XCS_SMTP_USERNAME: 'user' }, 'configured together'],
+    [{ XCS_SMTP_PASSWORD: 'secret' }, 'configured together'],
+    [{ XCS_SMTP_FROM_ADDRESS: 'Sender <notifications@example.com>' }, 'valid mailbox'],
+    [{ XCS_SMTP_FROM_NAME: 'XCS\r\nBcc: other@example.com' }, 'display name'],
+    [{ XCS_SMTP_ENVELOPE_FROM: 'a@example.com,b@example.com' }, 'valid mailbox'],
+  ])('rejects an unsafe or incomplete production configuration', (environment, expected) => {
+    expect(() => loadSmtpConfiguration(environment)).toThrow(expected)
+  })
+
+  it('applies the configured header sender and envelope sender without changing the recipient', () => {
+    const sender = loadSmtpConfiguration({
+      XCS_SMTP_FROM_NAME: 'XRPL Commons',
+      XCS_SMTP_FROM_ADDRESS: 'notify@example.test',
+      XCS_SMTP_ENVELOPE_FROM: 'bounce@example.test',
+    }).sender
+    const message = createNotificationMessage(notification, sender)
+    expect(message.from).toEqual({ name: 'XRPL Commons', address: 'notify@example.test' })
+    expect(message.envelope).toEqual({
+      from: 'bounce@example.test',
+      to: [notification.recipientEmail],
+    })
+    expect(message.messageId).toBe(`<admin-decision-${notification.decisionId}@example.test>`)
   })
 })
 
@@ -225,7 +300,7 @@ async function localSmtpServer(accept: boolean) {
 describe('actual local SMTP transport', () => {
   it('receives the decision and persists success after the SMTP acknowledgement', async () => {
     const server = await localSmtpServer(true)
-    const transport = createLocalSmtpTransport({ XCS_SMTP_PORT: String(server.port) })
+    const { transport } = createSmtpDelivery({ XCS_SMTP_PORT: String(server.port) })
     try {
       const { repository } = setup()
       expect(await processNextNotification(repository, transport)).toBe('sent')
@@ -243,7 +318,7 @@ describe('actual local SMTP transport', () => {
 
   it('keeps acceptance uncertain when the connection breaks after receiving DATA', async () => {
     const server = await localSmtpServer(false)
-    const transport = createLocalSmtpTransport({ XCS_SMTP_PORT: String(server.port) })
+    const { transport } = createSmtpDelivery({ XCS_SMTP_PORT: String(server.port) })
     try {
       const { repository } = setup()
       expect(await processNextNotification(repository, transport)).toBe('uncertain')

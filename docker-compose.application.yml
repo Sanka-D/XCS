@@ -17,11 +17,12 @@ services:
       XCS_ADMIN_ENABLED: '1'
       NUXT_ADMIN_DATABASE_URL: postgres://xcs_admin_app:${XCS_ADMIN_DATABASE_PASSWORD}@postgres:5432/xcs
       XCS_ADMIN_DOCUMENT_KEY: ${XCS_ADMIN_DOCUMENT_KEY:?Set document signing key}
-      XCS_ADMIN_DOCUMENT_DIRECTORY: /var/lib/xcs-review
       XCS_ISSUER_ENABLED: '1'
       NUXT_PUBLIC_ISSUER_ENABLED: '1'
       NUXT_ISSUER_DATABASE_URL: postgres://xcs_issuer:${XCS_ISSUER_DATABASE_PASSWORD}@postgres:5432/xcs
-      XCS_ISSUER_DOCUMENT_DIRECTORY: /var/lib/xcs-review
+      XCS_DOCUMENT_STORAGE_DRIVER: filesystem
+      XCS_DOCUMENT_FILESYSTEM_DIRECTORY: /var/lib/xcs-review
+      XCS_DOCUMENT_FILESYSTEM_LOCAL: '1'
       XCS_ISSUER_INVITE_DAYS: ${XCS_ISSUER_INVITE_DAYS:-7}
       XCS_SMTP_HOST: mailpit
       XCS_SMTP_PORT: '1025'

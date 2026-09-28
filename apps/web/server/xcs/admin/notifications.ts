@@ -1,10 +1,30 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseClient } from '../../lib/db/index.js'
-import nodemailer from 'nodemailer'
+import {
+  classifySmtpFailure,
+  DEFAULT_NOTIFICATION_SENDER,
+  isNotificationEmail,
+  type NotificationMessage,
+  type NotificationSender,
+  type NotificationTransport,
+} from '../notifications/smtp'
+
+export {
+  classifySmtpFailure,
+  createSmtpDelivery,
+  createSmtpTransport,
+  isNotificationEmail,
+  loadSmtpConfiguration,
+} from '../notifications/smtp'
+export type {
+  NotificationMessage,
+  NotificationSender,
+  NotificationTransport,
+  SmtpConfiguration,
+} from '../notifications/smtp'
 
 const SMTP_DEADLINE_MS = 60_000
 const STALE_CLAIM_SECONDS = 300
-const SENDER = 'notifications@xcs.test'
 
 export interface ClaimedNotification {
   id: string
@@ -28,29 +48,6 @@ export interface NotificationRepository {
     outcome: 'sent' | 'failed' | 'uncertain',
     errorCode: string | null,
   ): Promise<void>
-}
-
-export interface NotificationMessage {
-  from: { name: string; address: string }
-  to: { name: string; address: string }
-  envelope: { from: string; to: string[] }
-  messageId: string
-  subject: string
-  text: string
-}
-
-export interface NotificationTransport {
-  sendMail(message: NotificationMessage): Promise<{ accepted: unknown[]; rejected: unknown[] }>
-  close(): void
-}
-
-export function isNotificationEmail(email: unknown): email is string {
-  // A single plain mailbox only: provider claims must never create extra recipients.
-  return (
-    typeof email === 'string' &&
-    email.length <= 254 &&
-    /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(email)
-  )
 }
 
 export class PostgresNotificationRepository implements NotificationRepository {
@@ -118,7 +115,10 @@ export class PostgresNotificationRepository implements NotificationRepository {
   }
 }
 
-export function createNotificationMessage(notification: ClaimedNotification): NotificationMessage {
+export function createNotificationMessage(
+  notification: ClaimedNotification,
+  sender: NotificationSender = DEFAULT_NOTIFICATION_SENDER,
+): NotificationMessage {
   const statuses: Record<string, [string, string]> = {
     approved: ['approved', 'approuvé'],
     rejected: ['rejected', 'refusé'],
@@ -129,10 +129,10 @@ export function createNotificationMessage(notification: ClaimedNotification): No
     notification.status,
   ]
   return {
-    from: { name: 'XCS', address: SENDER },
+    from: { name: sender.name, address: sender.address },
     to: { name: '', address: notification.recipientEmail },
-    envelope: { from: SENDER, to: [notification.recipientEmail] },
-    messageId: `<admin-decision-${notification.decisionId}@xcs.test>`,
+    envelope: { from: sender.envelopeFrom, to: [notification.recipientEmail] },
+    messageId: `<admin-decision-${notification.decisionId}@${sender.messageIdDomain}>`,
     subject: 'XCS — Access decision / Décision concernant votre accès',
     // No profile, document, wallet, private claim, or internal moderation reason is sent.
     text: [
@@ -145,39 +145,10 @@ export function createNotificationMessage(notification: ClaimedNotification): No
   }
 }
 
-export function classifySmtpFailure(error: unknown): 'failed' | 'uncertain' {
-  if (!error || typeof error !== 'object') return 'uncertain'
-  const details = error as {
-    command?: unknown
-    responseCode?: unknown
-    syscall?: unknown
-    code?: unknown
-  }
-  // Nodemailer labels socket failures CONN even after DATA was transmitted.
-  // Only DNS or an actual connect() failure proves that no message was accepted.
-  if (details.command === 'CONN' && (details.syscall === 'connect' || details.code === 'EDNS'))
-    return 'failed'
-  // A negative SMTP reply is definitive, including a rejection after DATA.
-  if (
-    typeof details.responseCode === 'number' &&
-    details.responseCode >= 400 &&
-    details.responseCode <= 599 &&
-    typeof details.command === 'string' &&
-    /^(EHLO|HELO|STARTTLS|AUTH(?: .*)?|MAIL FROM|RCPT TO|DATA)$/i.test(details.command)
-  )
-    return 'failed'
-  if (
-    typeof details.command === 'string' &&
-    /^(EHLO|HELO|STARTTLS|AUTH(?: .*)?|MAIL FROM|RCPT TO)$/i.test(details.command)
-  )
-    return 'failed'
-  // A reset/timeout during DATA may have followed acceptance by the server.
-  return 'uncertain'
-}
-
 export async function processNextNotification(
   repository: NotificationRepository,
   transport: NotificationTransport,
+  sender?: NotificationSender,
 ): Promise<NotificationOutcome> {
   await repository.recoverStale()
   const result = await repository.claim()
@@ -188,7 +159,7 @@ export async function processNextNotification(
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const info = await Promise.race([
-      transport.sendMail(createNotificationMessage(notification)),
+      transport.sendMail(createNotificationMessage(notification, sender)),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('SMTP_DEADLINE')), SMTP_DEADLINE_MS)
       }),
@@ -206,32 +177,4 @@ export async function processNextNotification(
   // It must not be mistaken for a definitive SMTP failure and offered for retry.
   await repository.finish(notification, outcome, errorCode)
   return outcome
-}
-
-export function createLocalSmtpTransport(
-  environment: Record<string, string | undefined>,
-): NotificationTransport {
-  const host = environment.XCS_SMTP_HOST ?? '127.0.0.1'
-  if (!['127.0.0.1', 'localhost', 'mailpit'].includes(host)) {
-    throw new Error('XCS_SMTP_HOST must select local Mailpit')
-  }
-  const configuredPort = environment.XCS_SMTP_PORT ?? '1025'
-  const port = Number(configuredPort)
-  if (!/^\d+$/.test(configuredPort) || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('XCS_SMTP_PORT must be a valid port')
-  }
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: false,
-    name: 'xcs.test',
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 10_000,
-    dnsTimeout: 10_000,
-    logger: false,
-    debug: false,
-    disableFileAccess: true,
-    disableUrlAccess: true,
-  })
 }

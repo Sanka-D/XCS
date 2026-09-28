@@ -1,4 +1,4 @@
-// Copied from packages/db/src/app/tokens.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { createHash, randomBytes } from 'node:crypto'
 
 /** Bearer secrets stay outside the database; persist only the returned hash. */

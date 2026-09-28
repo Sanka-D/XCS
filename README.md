@@ -6,13 +6,16 @@ This repository is alpha software for XRPL Testnet. Do not use personal data or 
 
 ## Layout
 
-Two deployable applications:
+Two application runtimes and two one-purpose deployment components:
 
 - `apps/indexer`: validated-ledger ingestion and rebuildable projections. It owns the database
   tooling (`db:generate`, `db:migrate`, `db:bootstrap`).
 - `apps/web`: the Nuxt Testnet explorer and issuer/subject workflows **and** the read/verification
   API it serves from the same origin at `/v1`, with `/health/*`, `/internal/metrics*` and
   `/documentation`.
+- `apps/notifier`: the restricted SMTP notification worker built from the web application.
+- `apps/db-bootstrap`: the pre-deploy migration and least-privilege role provisioning job built from
+  the indexer.
 
 Each application is standalone: its own `package.json`, `pnpm-lock.yaml`, `.npmrc`, tsconfig,
 Prettier config, `Dockerfile` and `.env.example`. Neither imports a workspace package; each carries
@@ -82,14 +85,19 @@ a fresh database, then give each application its least-privilege connection stri
 ```bash
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@host:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… XCS_API_DATABASE_PASSWORD=… XCS_MONITOR_DATABASE_PASSWORD=… \
+  XCS_INDEXER_DATABASE_PASSWORD=… XCS_API_DATABASE_PASSWORD=… \
+  XCS_PAYLOAD_DATABASE_PASSWORD=… XCS_MONITOR_DATABASE_PASSWORD=… \
+  XCS_APP_DATABASE_PASSWORD=… XCS_ADMIN_DATABASE_PASSWORD=… \
+  XCS_NOTIFIER_DATABASE_PASSWORD=… XCS_ISSUER_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
 The indexer then reads `XCS_INDEXER_DATABASE_URL` (role `xcs_indexer`) and the web app reads
 `XCS_DATABASE_URL` (role `xcs_api`). The complete contracts are
 [`apps/indexer/.env.example`](./apps/indexer/.env.example) and
-[`apps/web/.env.example`](./apps/web/.env.example).
+[`apps/web/.env.example`](./apps/web/.env.example). The pre-deploy and notification contracts are
+[`apps/db-bootstrap/.env.example`](./apps/db-bootstrap/.env.example) and
+[`apps/notifier/.env.example`](./apps/notifier/.env.example).
 
 For a disposable local database, `docker-compose.yml` runs PostgreSQL, the one-shot bootstrap and
 both applications. It is a **local-development stack only**; it is not a deployment template. Copy

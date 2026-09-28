@@ -67,12 +67,13 @@ passwords disable those roles and remove their privileges. All passwords must be
 The operator-only `pnpm --dir apps/indexer admin:bootstrap` command grants the first administrator
 to an existing exact OIDC issuer/subject and writes an audit record; it never matches by email.
 
-## Preserved application migrations and validation
+## Application migrations and validation
 
-Migrations 0000–0006, their snapshots and the journal retain the exact bytes from the previous
-application implementation. They include public payload storage, application organizations and
-invitations, sessions, administrator decisions and private issuer payload storage. The schemas are
-shared here; clients, grants and application helpers remain local to each application.
+Migrations 0000–0006, their snapshots and journal entries retain the exact bytes from the previous
+application implementation. Additive migration `0007_recipient_verifier` supplies recipient and
+verifier history, and `0008_presentation_wallet_proof` binds presentation grants to a verified wallet
+signature. The complete deployment journal is therefore `0000`–`0008`. Schemas are shared here;
+clients, grants and application helpers remain local to each application.
 
 `pnpm --dir apps/indexer test:postgres` runs the migrated DB suites and indexer suite sequentially.
 Use only an isolated disposable cluster configured through `XCS_TEST_DATABASE_URL`: bootstrap

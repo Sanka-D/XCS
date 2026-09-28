@@ -75,6 +75,7 @@ for (const locale of ['en', 'fr'] as const) {
         .click()
       await expect(primary.locator(`a[href="${prefix}/schemas"]`)).toBeVisible()
       await expect(primary.locator(`a[href="${prefix}/developers"]`)).toBeVisible()
+      await expect(primary.locator(`a[href="${prefix}/verify"]`)).toHaveCount(0)
       if (signedIn) await expect(primary.locator(`a[href="${prefix}/admin"]`)).toBeVisible()
       else await expect(primary.locator(`a[href="${prefix}/admin"]`)).toHaveCount(0)
     })

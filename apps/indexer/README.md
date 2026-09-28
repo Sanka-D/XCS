@@ -26,8 +26,10 @@ pnpm --dir apps/indexer dev      # tsx watch src/main.ts
 pnpm --dir apps/indexer verify   # format:check, lint, test, build
 ```
 
-Configuration is the contract in [`.env.example`](./.env.example). The long-running service reads the
-first ten variables; the last five are read only by `db:bootstrap`.
+Configuration for the long-running service is the contract in [`.env.example`](./.env.example).
+Bootstrap secrets have a separate contract in
+[`apps/db-bootstrap/.env.example`](../db-bootstrap/.env.example) and must never be delivered to the
+indexer worker.
 
 The committed `config/networks/testnet.example.json` is a placeholder with an invalid registry and
 activation boundary. The indexer refuses it and stops with `SOURCE_REGISTRY_NOT_BLACKHOLED`. **This is
@@ -42,7 +44,7 @@ devDependencies; the web app has none of them.
 ```sh
 pnpm --dir apps/indexer db:generate    # add a migration after editing db/schema — retain applied files
 pnpm --dir apps/indexer db:migrate     # apply migrations to an existing database (idempotent)
-pnpm --dir apps/indexer db:bootstrap   # migrate + provision xcs_indexer / xcs_api / xcs_monitor
+pnpm --dir apps/indexer db:bootstrap   # migrate + provision every enabled least-privilege role
 ```
 
 Use `db:bootstrap` for initial provisioning on a dedicated cluster. It needs
@@ -51,7 +53,7 @@ passwords; optional application-role passwords enable the auth/admin/issuer serv
 bootstrap applies the supported migration history and updates grants/passwords. Supply all enabled
 role passwords: omitting an optional password disables that role.
 
-`db:migrate` applies pending migrations without provisioning roles. The committed 0000–0006 history
+`db:migrate` applies pending migrations without provisioning roles. The committed 0000–0008 history
 supports populated-baseline upgrades and repeated runs; integration tests check preservation of
 profiles and legacy payload bytes/locators. Never rewrite an applied migration. This is not an
 upgrader for arbitrary schema drift or the former Nuxt MVP. See the [shared database contract](../../db/README.md).

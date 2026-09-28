@@ -1,20 +1,22 @@
 # Deploying XCS
 
-XCS deploys as **two independent applications** against a PostgreSQL instance provisioned outside
-this repository:
+XCS deploys as one DigitalOcean App Platform application with four independently configured
+components. PostgreSQL, private object storage, SMTP and OIDC are provisioned outside this repository.
 
-| Application    | What it is                                                                                             | Contract                    | Image                     |
-| -------------- | ------------------------------------------------------------------------------------------------------ | --------------------------- | ------------------------- |
-| `apps/indexer` | Validated-ledger ingestion worker. No HTTP surface. Owns database tooling.                             | `apps/indexer/.env.example` | `apps/indexer/Dockerfile` |
-| `apps/web`     | Nuxt UI **and** the `/v1` read/verification API, health, metrics, `/documentation`, all on one origin. | `apps/web/.env.example`     | `apps/web/Dockerfile`     |
+| Component           | Kind               | Purpose                                                                                  | Environment contract             |
+| ------------------- | ------------------ | ---------------------------------------------------------------------------------------- | -------------------------------- |
+| `apps/web`          | service, port 3000 | Nuxt UI, `/v1` API, auth, issuer, recipient, verifier, health, metrics and documentation | `apps/web/.env.example`          |
+| `apps/indexer`      | worker             | Validated-ledger ingestion and rebuildable projections; no HTTP surface                  | `apps/indexer/.env.example`      |
+| `apps/notifier`     | worker             | Restricted SMTP outbox processor; no HTTP surface                                        | `apps/notifier/.env.example`     |
+| `apps/db-bootstrap` | PRE_DEPLOY job     | Atomic migrations `0000`–`0008` and least-privilege database-role provisioning           | `apps/db-bootstrap/.env.example` |
 
-Each is deployed on its own, from its own directory, with its own lockfile and its own environment
-contract. There is no shared runtime component and no service-to-service call between them: they
-communicate only through PostgreSQL rows. See [ADR 0004](../adr/0004-two-standalone-apps.md).
+The web and indexer remain independent application runtimes and communicate through PostgreSQL rows.
+The notifier packages the worker compiled by the web build; the bootstrap job packages the database
+command compiled by the indexer. Every component has its own Passbolt folder and receives only its
+own environment contract. See [ADR 0004](../adr/0004-two-standalone-apps.md).
 
-Both Dockerfiles use the **repository root** as build context, because each image also needs `db/`
-(migrations and schema) and `config/` (network profiles) beside the application. Nothing under
-`packages/` is copied into either image.
+Every Dockerfile uses the **repository root** as build context so it can copy its application plus
+`db/` and `config/` where needed. Nothing under `packages/` enters a runtime image.
 
 ## What Compose is, and is not
 
@@ -28,8 +30,8 @@ They are **not** a deployment template:
 - the PostgreSQL container is disposable local state, not a managed database;
 - every published port binds to `127.0.0.1` and no port is meant to be exposed.
 
-Never run this Compose stack on a public host. A deployment runs the two images directly, against an
-external database, with the variables named in the two `.env.example` contracts.
+Never run this Compose stack on a public host. A hosted deployment uses the four component contracts
+above against managed services.
 
 ```sh
 cp .env.compose.example .env
@@ -96,8 +98,8 @@ as explicitly labelled staging evidence.
 
 ## Preparing the external database
 
-PostgreSQL 18 is provisioned outside this repository — a managed instance or an operator-run cluster.
-Nothing here creates the server.
+PostgreSQL 16 or newer is provisioned outside this repository — a managed instance or an
+operator-run cluster. The integration suite qualifies PostgreSQL 18. Nothing here creates the server.
 
 The indexer owns every database command. `--ignore-workspace` is mandatory on any per-app pnpm
 command that resolves dependencies (`install`, `audit`, `licenses list`); commands that only run a
@@ -114,35 +116,46 @@ XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@db.example:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
   XCS_INDEXER_DATABASE_PASSWORD=… \
   XCS_API_DATABASE_PASSWORD=… \
+  XCS_PAYLOAD_DATABASE_PASSWORD=… \
   XCS_MONITOR_DATABASE_PASSWORD=… \
+  XCS_APP_DATABASE_PASSWORD=… \
+  XCS_ADMIN_DATABASE_PASSWORD=… \
+  XCS_NOTIFIER_DATABASE_PASSWORD=… \
+  XCS_ISSUER_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
-Run it from an operator machine, or as a one-off job using the indexer image
-(`node dist/lib/db/bin/bootstrap.js`), which is exactly what Compose's `db-bootstrap` service does
-locally.
+Hosted deployments run the same command as the `apps/db-bootstrap` PRE_DEPLOY job. The operator
+machine command remains useful for local recovery and is exactly what Compose's `db-bootstrap`
+service executes.
 
 Bootstrap applies the committed migrations and then provisions the fixed runtime roles in one
-administrative transaction. It is idempotent: a second run reapplies the same role attributes,
-passwords and grants, which is also how a runtime password is rotated. Give the four identities
-distinct, long, URL-safe passwords.
+administrative transaction. It first checks the managed-service provisioner and every pre-existing
+runtime role, then applies migrations and grants atomically. It is idempotent: a second run reapplies
+passwords and grants, which is also how a runtime password is rotated. Give every identity a
+distinct, long, URL-safe password.
 
-| Identity      | Use                                       | Database rights                                                                                                                                                                                                      |
-| ------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `xcs_admin`   | One-shot bootstrap and migrations         | Schema/DDL and role administration; never given to a long-running service                                                                                                                                            |
-| `xcs_indexer` | Indexer service and maintenance replay    | `SELECT`/`INSERT` on `network_profiles`, `ledger_checkpoints`, `schema_events`, `schemas`, `credential_events`, and `indexer_incidents`; `SELECT`/`INSERT`/`UPDATE` on `indexer_status` and `credential_generations` |
-| `xcs_api`     | Web app (`/v1`) and optional demo pinning | `SELECT` on projections; CRUD on `pin_challenges` and `demo_pins` only                                                                                                                                               |
-| `xcs_monitor` | PostgreSQL exporter                       | `pg_monitor`; no DML rights on XCS application tables                                                                                                                                                                |
+| Identity              | Runtime use                                        |
+| --------------------- | -------------------------------------------------- |
+| bootstrap provisioner | PRE_DEPLOY migrations and role administration only |
+| `xcs_indexer`         | Ledger projection writer and maintenance replay    |
+| `xcs_api`             | Public `/v1` projection reads and demo pinning     |
+| `xcs_payload_writer`  | Optional hosted public-payload publication         |
+| `xcs_monitor`         | PostgreSQL monitoring                              |
+| `xcs_app`             | Authenticated accounts and sessions                |
+| `xcs_admin_app`       | Commons review decisions                           |
+| `xcs_notifier`        | Notification outbox worker                         |
+| `xcs_issuer`          | Issuer, recipient and presentation workspaces      |
 
 `XCS_DATABASE_CLUSTER_SCOPE=dedicated` is mandatory: PostgreSQL login roles are cluster-wide, so
-bootstrap must only ever run on a cluster dedicated to XCS. Grants and `PUBLIC` revocations are
-scoped to the database named by `XCS_BOOTSTRAP_DATABASE_URL`. All runtime roles are denied schema
-creation and `CREATE` on `public` is revoked from `PUBLIC`. The single-replica alpha caps connections
-at 12 for `xcs_indexer`, 12 for `xcs_api` and 3 for `xcs_monitor`, leaving capacity for
-administration and recovery; raise them deliberately before scaling replicas or pool sizes.
+bootstrap must only ever run on a cluster dedicated to XCS. A DigitalOcean-style non-superuser
+administrator is supported on PostgreSQL 16+ when it has `CREATEROLE`, database/schema DDL rights and
+can administer every existing XCS runtime role. Bootstrap rejects dangerous attributes, unexpected
+memberships and unsafe `createrole_self_grant` settings instead of trying to normalize them. Grants
+and `PUBLIC` revocations remain scoped to the selected database.
 
 Bootstrap overrides any caller-supplied `password_encryption` with transaction-local
-`scram-sha-256`, writes all three runtime passwords, and restores `LOGIN` only after every grant
+`scram-sha-256`, writes runtime passwords, and restores `LOGIN` only after every grant
 succeeds. Configure the matching `pg_hba.conf` entries with `scram-sha-256` as well, and restrict
 each runtime role to the XCS database: verifier storage does not replace an authentication policy.
 Bootstrap reports role names or a stable failure code, never URLs or password values.
@@ -188,26 +201,42 @@ The committed migrations are the complete current schema for this indexer's proj
 Rollback means restoring the former application against its untouched legacy database; do not point
 an older application at the new projection schema.
 
-## Deploying each application
+## Creating the Commons deployment
 
-Deployment is per application. `gh deploy-setup` is run **from that application's own directory**,
-where it finds that application's `Dockerfile` and reads that application's `.env.example` as the
-environment contract (names only; values live in the deployment's secret store). Each contract marks
-every variable with `# config`, `# optional`, `# generate` or `# held`.
+Use the current multi-component `gh deploy-setup` extension from the repository root. One repository
+maps to one DigitalOcean app; each `apps/*` directory containing both `Dockerfile` and `.env.example`
+maps to one component and one Passbolt folder.
 
 ```sh
-cd apps/indexer && gh deploy-setup     # worker, no HTTP port
-cd apps/web && gh deploy-setup         # HTTP service, port 3000
+gh extension upgrade deploy-setup
+cd /path/to/xcs-protocol
+gh deploy-setup setup
 ```
 
-Both build with the **repository root** as build context. The web service listens on `3000` and
-serves the UI, `/v1`, `/health/*`, `/internal/metrics*` and `/documentation` from that one port. The
-indexer exposes nothing.
+Choose `service` on port `3000` for `web`, `worker` for `indexer` and `notifier`, and `job` with the
+`PRE_DEPLOY` phase for `db-bootstrap`. Review the proposed four-component topology before it is
+applied. Run environment commands from the component directory when setting or importing values;
+push and deploy remain app-wide:
+
+```sh
+cd apps/web && gh deploy-setup env import .env.prod
+cd ../indexer && gh deploy-setup env import .env.prod
+cd ../notifier && gh deploy-setup env import .env.prod
+cd ../db-bootstrap && gh deploy-setup env import .env.prod
+cd ../.. && gh deploy-setup env status
+gh deploy-setup env push
+gh deploy-setup deploy --if-behind --watch
+```
+
+The `.env.prod` files in this example are private and gitignored. Each must contain only variables
+from the adjacent `.env.example`; shared values are deliberately copied into the specific Passbolt
+folders that need them. Never put `XCS_BOOTSTRAP_DATABASE_URL` or role passwords in `web`, `indexer`
+or `notifier`.
 
 ### Indexer configuration
 
-The long-running worker reads only the first ten variables of `apps/indexer/.env.example`; the last
-five are read by `db:bootstrap` alone and must not be given to the service.
+The long-running worker receives only variables from `apps/indexer/.env.example`. Bootstrap variables
+exist only in `apps/db-bootstrap/.env.example`.
 
 - `XCS_INDEXER_DATABASE_URL` authenticates as the least-privilege `xcs_indexer` role. Never give the
   service the admin URL.
@@ -252,6 +281,19 @@ five are read by `db:bootstrap` alone and must not be given to the service.
   XRPL Connect adapters registered.
 - `XCS_METRICS_ENABLED` / `XCS_METRICS_TOKEN` gate the operational snapshot; see
   [`monitoring.md`](./monitoring.md).
+- Production document uploads require `XCS_DOCUMENT_STORAGE_DRIVER=s3` and a private
+  S3-compatible bucket such as DigitalOcean Spaces. Set its exact HTTPS endpoint, region, bucket,
+  optional single-segment prefix and `XCS_DOCUMENT_S3_PRIVATE_BUCKET=1`. Give the access key only
+  Read/Write/Delete Objects permission. Every upload explicitly uses the private ACL; the app does
+  not need bucket-administration access and never produces a public object URL. Filesystem storage is
+  limited to local development.
+- Configure `XCS_SMTP_*` on both `web` and `notifier`. External providers must use `starttls` or
+  `tls`, with a verified sender address and optional envelope sender. `disabled` transport security
+  is accepted only for local Mailpit. The web service sends issuer invitations and lifecycle mail;
+  the notifier drains Commons review decisions. Delivery attempts are durable, and an uncertain SMTP
+  result is never retried automatically.
+- Register `XCS_AUTH_ORIGIN` as the exact HTTPS redirect origin at XRP Identity and deliver the OIDC
+  client ID and secret to `web` only. Redirect URI or origin drift fails closed.
 
 For both the private controlled pilot and the Commons-hosted Testnet beta, also enforce the product
 boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):
@@ -266,12 +308,19 @@ boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):
 
 ### Deployment order
 
-1. Bootstrap the external database (above).
-2. Run `pnpm --dir apps/indexer preflight` against the audited profile and both sources.
-3. Deploy the indexer and let it reach `ready`.
-4. Deploy the web app. Its `/health/live` succeeds immediately; `/health/ready` stays `503` until the
+1. Provision the empty dedicated managed database, private Spaces bucket, SMTP sender and OIDC
+   client. Keep the former database untouched if replacing the legacy MVP.
+2. Fill and push all four Passbolt component folders, then verify `gh deploy-setup env status` is
+   green.
+3. Run `pnpm --dir apps/indexer preflight` against the audited profile and both XRPL sources.
+4. Start the app-wide deployment. DigitalOcean runs `db-bootstrap` in `PRE_DEPLOY`; any preflight,
+   migration or grant failure prevents the runtime rollout.
+5. Let the indexer reach `ready`, then verify the notifier is running and the web service's
+   `/health/live` succeeds. `/health/ready` stays `503` until the
    indexer owns a live lease and its status exactly matches a transaction-root-bearing checkpoint at
    the effective tip.
+6. Exercise one review email, one issuer invitation, one recipient acceptance/presentation and one
+   anonymous verifier link against the deployed integrations before opening access.
 
 Use `/health/live` for the platform's container health check. Do **not** use `/health/ready` for it:
 a normal catch-up must not restart the web service. `/health`, `/health/live` and `/health/ready` all
@@ -418,36 +467,34 @@ secrets or production credentials.
 - Monitor checkpoint age, rejected registrations, ledger continuity failures, pin-store failures and
   disk usage. Signal definitions, SLO/RTO/RPO semantics and the recovery drill are in
   [`monitoring.md`](./monitoring.md).
-- The two applications roll back independently. A web rollback is always safe: the web app never
-  writes protocol projections. Roll either back only to a version compatible with the applied
-  migrations.
+- App Platform deploys the four components as one revision. A rollback must select a revision
+  compatible with the already-applied forward migrations; never roll the database journal backward.
 - Before production, an incompatible schema change means rebuilding and replaying the database; never
   skip a ledger.
 - Rerun `db:bootstrap` after a runtime-password rotation, then restart the affected application with
   the matching credentials. Keep `xcs_admin` credentials out of runtime services and logs.
 - Retain a `pg_hba.conf` role-to-database allowlist as defense in depth.
-- Record the deployed revision of each application separately: they are versioned and deployed
-  independently, and a protocol change mirrored into only one of them is a real failure mode (see
+- Record the deployed repository revision and the component `COMMIT_SHA` values. A protocol change
+  mirrored into only one application remains a real failure mode (see
   [`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
 
 ## Optional authenticated workspaces and hosted payloads
 
-The same web app can enable auth, admin review and issuer workflows through its per-app environment
-contract. Apply migrations 0000–0006 first, then provision the optional `xcs_app`, `xcs_admin_app`,
-`xcs_notifier`, and `xcs_issuer` roles with their explicit bootstrap passwords. The API uses
-`xcs_api`; hosted publication uses a separate `xcs_payload_writer` connection. Never grant any of
-these roles to another runtime role. Omitting optional passwords on bootstrap disables those roles.
+The same web app enables auth, admin review, issuer, recipient and verifier workflows through its
+environment contract. The PRE_DEPLOY job applies migrations 0000–0008 and provisions `xcs_app`,
+`xcs_admin_app`, `xcs_notifier`, `xcs_issuer` and `xcs_payload_writer` with separate passwords. The
+public API continues to use `xcs_api`. Never grant one runtime role to another.
 
-The optional notification worker runs `node dist/admin/admin-notifier.js` from the web image.
-It is a separate process of that application with its own restricted connection, not an additional
-application package. It requires no XRPL signing keys. Mount persistent private document storage
-writable by UID1000 when enabling uploads. Database backups can contain private claims; they require
-the same access protection as live application data.
+The notification worker runs `node dist/admin/admin-notifier.js` from its dedicated component and
+requires no XRPL signing key. Production uploads live in the private S3/Spaces bucket; PostgreSQL
+stores metadata, workflow state and private claim payloads. Backups of either system require the same
+access controls as live application data.
 
 For local use only, add `docker-compose.application.yml` for auth/admin/issuer/Mailpit, and/or
 `docker-compose.hosted-payloads.yml` for public hosted publication. Supply variables through a private
 local environment file. Mailpit is a synthetic test destination, not a qualified external provider.
-Live Identity registration, wallet consent and managed-database rollout remain operator release checks.
+Live Identity registration, wallet consent, SMTP delivery, Spaces access and managed-database rollout
+remain operator release checks.
 
 See [authentication](authentication.md), [admin](admin.md) and [issuer](issuer.md) for authorization,
 review, invitation, notification and recovery semantics.

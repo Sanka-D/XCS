@@ -1,4 +1,4 @@
-// Copied from packages/db/src/transactions.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 // Diverges by design (the web ESLint rule requires an explicit distinction for an unrelated retry configuration error); source sha256:b367ac3f9b4388ba910cc2cd03d32b17325e71fa5d8a6982b120f8cd2dd13e1e.
 import type { XcsDatabase } from './client.js'
 

@@ -1,4 +1,4 @@
-// Copied from packages/db/src/indexer-fencing.ts at a9777cc; keep in sync by hand (see CONTRIBUTING.md).
+// Not a vendored copy (retired source): application-local database implementation maintained with db/schema.
 import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm'
 
 import type { XcsDatabase } from './client.js'
