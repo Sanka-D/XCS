@@ -167,7 +167,11 @@ async function closeAndDropTemporaryDatabases(): Promise<void> {
             xcs_indexer,
             xcs_api,
             xcs_payload_writer,
-            xcs_monitor
+            xcs_monitor,
+            xcs_app,
+            xcs_admin_app,
+            xcs_notifier,
+            xcs_issuer
         `
         runtimeRoleCleanupAllowed = false
       } catch (error) {
