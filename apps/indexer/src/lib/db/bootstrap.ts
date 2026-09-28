@@ -20,6 +20,7 @@ export function migrationsFolder(): string {
 }
 
 export {
+  DatabaseBootstrapConfigurationError,
   MissingRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
   provisionRuntimeDatabasePrivileges,

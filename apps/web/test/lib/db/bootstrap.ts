@@ -13,6 +13,7 @@ import {
 const BASELINE_FOLDER = fileURLToPath(new URL('../../../../../db/migrations', import.meta.url))
 
 export {
+  DatabaseBootstrapConfigurationError,
   MissingRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
   provisionRuntimeDatabasePrivileges,
