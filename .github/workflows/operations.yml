@@ -115,8 +115,8 @@ jobs:
           fi
 
           # The bootstrap is deliberately restart-safe. Run it again after the
-          # dependency chain has completed to prove repeated initialization and
-          # role provisioning do not require a clean volume.
+          # dependency chain has completed to prove repeated migrations and
+          # privilege grants do not require a clean volume.
           "${COMPOSE[@]}" run --rm --no-deps db-bootstrap
 
           curl --fail --silent --show-error http://127.0.0.1:3000/health/live > /dev/null
@@ -146,9 +146,14 @@ jobs:
             --command "
               SELECT
                 pg_has_role('xcs_monitor', 'pg_monitor', 'MEMBER')
-                AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_indexer') = 12
-                AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_api') = 12
-                AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_monitor') = 3
+                AND NOT EXISTS (
+                  SELECT 1 FROM pg_roles
+                  WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor')
+                    AND (
+                      NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb
+                      OR rolreplication OR rolbypassrls
+                    )
+                )
                 AND NOT has_schema_privilege('xcs_monitor', 'public', 'CREATE')
                 AND NOT EXISTS (
                   SELECT 1
@@ -189,7 +194,10 @@ jobs:
                 AND NOT EXISTS (
                   SELECT 1 FROM pg_roles
                   WHERE rolname IN ('xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer', 'xcs_payload_writer')
-                    AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls)
+                    AND (
+                      NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb
+                      OR rolreplication OR rolbypassrls
+                    )
                 )
                 AND NOT EXISTS (
                   SELECT 1 FROM pg_class relation
