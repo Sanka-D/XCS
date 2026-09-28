@@ -36,13 +36,28 @@ export function parseDatabaseClusterScope(
   value: string | undefined,
 ): typeof XCS_DATABASE_CLUSTER_SCOPE {
   if (value !== XCS_DATABASE_CLUSTER_SCOPE) {
-    throw new Error(
+    throw new DatabaseBootstrapConfigurationError(
       `XCS_DATABASE_CLUSTER_SCOPE must be ${XCS_DATABASE_CLUSTER_SCOPE}; runtime roles are cluster-wide`,
     )
   }
   return XCS_DATABASE_CLUSTER_SCOPE
 }
 
+/** An operator configuration mistake: a missing or invalid environment value.
+ * It is built from names and fixed text only, never from a connection string,
+ * so the CLI can print its message without leaking a credential. */
+export class DatabaseBootstrapConfigurationError extends Error {
+  readonly code = 'DATABASE_BOOTSTRAP_CONFIGURATION' as const
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'DatabaseBootstrapConfigurationError'
+  }
+}
+
+/** The managed database service creates the users and holds their passwords; this
+ * step only assigns privileges, so a role it cannot find is an operator error.
+ * It names the missing roles and carries no credential, so the CLI can print it. */
 export class MissingRuntimeDatabaseRolesError extends Error {
   readonly code = 'DATABASE_ROLES_MISSING' as const
   readonly roles: readonly string[]

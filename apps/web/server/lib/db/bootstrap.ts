@@ -9,6 +9,7 @@ import {
 } from './provision.js'
 
 export {
+  DatabaseBootstrapConfigurationError,
   MissingRuntimeDatabaseRolesError,
   UnsafeRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
