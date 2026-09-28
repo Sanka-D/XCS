@@ -31,8 +31,6 @@ export const apiSettings = {
   XCS_IPFS_API_URL: 'http://ipfs:5001',
   /** Profile identifiers on which demo pinning is offered; none. */
   XCS_PINNING_NETWORKS: '',
-  /** Internal operational snapshot at `/internal/metrics*`. Off. */
-  XCS_METRICS_ENABLED: 'false',
   /** Readiness fails when the newest indexed ledger is older than this. */
   XCS_READINESS_MAX_LEDGER_AGE_SECONDS: '120',
   /** Static pilot trust policy; comma-separated XRPL classic addresses. */

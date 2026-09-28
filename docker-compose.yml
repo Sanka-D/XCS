@@ -134,7 +134,9 @@ services:
       XCS_DATABASE_URL: postgres://xcs_api:${XCS_API_DATABASE_PASSWORD:-}@postgres:5432/xcs
       # Feature flags, the IPFS endpoints, the readiness threshold and the static
       # issuer trust policy are checked-in settings in
-      # apps/web/server/xcs/settings.ts, not deployment inputs.
+      # apps/web/server/xcs/settings.ts, not deployment inputs. The metrics routes
+      # are the exception: this token both enables and guards them, so an empty
+      # value leaves them unregistered and the monitoring profile needs it set.
       XCS_METRICS_TOKEN: ${XCS_METRICS_TOKEN:-}
       XCS_ALLOWED_ORIGINS: ${XCS_ALLOWED_ORIGINS:-http://localhost:3000}
       XCS_TRUSTED_PROXY_CIDRS: ${XCS_TRUSTED_PROXY_CIDRS:-}

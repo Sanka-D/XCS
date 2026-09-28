@@ -165,20 +165,24 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:3000/health/live > /dev/null
           READY_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3000/health/ready)"
           test "$READY_STATUS" = '503'
-          # The metrics routes are a checked-in feature flag in
-          # apps/web/server/xcs/settings.ts, off by default, so the image this job
-          # builds does not serve them at all and no token can reach them. Assert
-          # the routes are absent rather than gated; turning the flag on is a code
-          # change, and apps/web/test/server/handlers.test.ts covers the enabled
-          # behaviour.
+          # The metrics routes are enabled by the presence of a valid
+          # XCS_METRICS_TOKEN, which this job supplies to the web service, so they
+          # are registered here and must be gated rather than absent: an
+          # unauthenticated request is rejected and the job's own token is
+          # accepted. The routes deliberately stay 200 while the database is
+          # unavailable, which is the state this stack is in.
           for METRICS_PATH in /internal/metrics /internal/metrics/prometheus; do
             METRICS_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
               "http://127.0.0.1:3000${METRICS_PATH}")"
-            test "$METRICS_STATUS" = '404'
+            test "$METRICS_STATUS" = '401'
+            WRONG_TOKEN_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header 'Authorization: Bearer compose-ci-wrong-token-0000000000001' \
+              "http://127.0.0.1:3000${METRICS_PATH}")"
+            test "$WRONG_TOKEN_STATUS" = '401'
             AUTHENTICATED_STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' \
               --header "Authorization: Bearer $XCS_METRICS_TOKEN" \
               "http://127.0.0.1:3000${METRICS_PATH}")"
-            test "$AUTHENTICATED_STATUS" = '404'
+            test "$AUTHENTICATED_STATUS" = '200'
           done
 
           if "${COMPOSE[@]}" ps --services --status running | grep --extended-regexp '^(prometheus|grafana|postgres-exporter|node-exporter|ipfs)$'; then

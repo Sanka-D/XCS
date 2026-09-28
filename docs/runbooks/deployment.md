@@ -260,8 +260,9 @@ five are read by `db:bootstrap` alone and must not be given to the service.
   trailing slash — in the Xaman Developer Console; each self-hosted origin needs its own Xaman
   application. Omitting an identifier removes only that adapter and leaves the six self-configuring
   XRPL Connect adapters registered.
-- `XCS_METRICS_TOKEN` guards the operational snapshot, which the `XCS_METRICS_ENABLED` setting in
-  `apps/web/server/xcs/settings.ts` turns on. See [`monitoring.md`](./monitoring.md).
+- `XCS_METRICS_TOKEN` both guards and enables the operational snapshot: setting it registers the
+  `/internal/metrics*` routes, leaving it unset leaves them absent, and a value that is not 32 to
+  256 URL-safe characters fails start-up. See [`monitoring.md`](./monitoring.md).
 
 For both the private controlled pilot and the Commons-hosted Testnet beta, also enforce the product
 boundary from [`ADR 0002`](../adr/0002-public-product-and-discovery.md):

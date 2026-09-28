@@ -47,33 +47,38 @@ describe('API configuration', () => {
     }
   })
 
-  it('requires a strong token only when operational metrics are enabled', () => {
+  it('enables operational metrics from a valid token alone', () => {
     expect(
       loadApiConfig({
         XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
         XCS_METRICS_TOKEN: METRICS_TOKEN,
       }).operationalMetrics,
     ).toEqual({ enabled: true, token: METRICS_TOKEN })
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
-      }),
-    ).toThrow('XCS_METRICS_TOKEN is required')
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'true',
-        XCS_METRICS_TOKEN: 'too-short',
-      }),
-    ).toThrow('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
-    expect(() =>
-      loadApiConfig({
-        XCS_DATABASE_URL: 'postgres://localhost/xcs',
-        XCS_METRICS_ENABLED: 'yes',
-      }),
-    ).toThrow('XCS_METRICS_ENABLED must be exactly true or false')
+  })
+
+  it('leaves operational metrics off when no token is supplied', () => {
+    expect(
+      loadApiConfig({ XCS_DATABASE_URL: 'postgres://localhost/xcs' }).operationalMetrics,
+    ).toEqual({ enabled: false })
+    for (const blank of ['', '   ']) {
+      expect(
+        loadApiConfig({
+          XCS_DATABASE_URL: 'postgres://localhost/xcs',
+          XCS_METRICS_TOKEN: blank,
+        }).operationalMetrics,
+      ).toEqual({ enabled: false })
+    }
+  })
+
+  it('rejects a malformed token rather than silently disabling the routes', () => {
+    for (const token of ['too-short', `${METRICS_TOKEN}!`, 'a'.repeat(257)]) {
+      expect(() =>
+        loadApiConfig({
+          XCS_DATABASE_URL: 'postgres://localhost/xcs',
+          XCS_METRICS_TOKEN: token,
+        }),
+      ).toThrow('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
+    }
   })
 
   it('rejects an unsafe readiness staleness threshold', () => {

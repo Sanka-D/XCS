@@ -33,8 +33,6 @@ describe('checked-in web settings', () => {
         XCS_DATABASE_URL: 'postgres://localhost/xcs',
         XCS_PAYLOAD_FETCH_ENABLED: 'true',
         XCS_DEMO_PINNING_ENABLED: 'true',
-        XCS_METRICS_ENABLED: 'true',
-        XCS_METRICS_TOKEN: 'deployment-supplied-metrics-token-0001',
         XCS_READINESS_MAX_LEDGER_AGE_SECONDS: '3600',
         XCS_IPFS_GATEWAY_URL: 'https://gateway.invalid.example/',
         XCS_TRUSTED_ISSUERS: issuer,
@@ -48,6 +46,19 @@ describe('checked-in web settings', () => {
       operationalMetrics: { enabled: false },
       demoPinning: { enabled: false },
     })
+  })
+
+  it('takes the metrics token from the deployment, since its presence is the switch', () => {
+    const token = 'deployment-supplied-metrics-token-0001'
+    expect(apiSettings).not.toHaveProperty('XCS_METRICS_TOKEN')
+    expect(
+      loadApiConfig(
+        apiEnvironment({
+          XCS_DATABASE_URL: 'postgres://localhost/xcs',
+          XCS_METRICS_TOKEN: token,
+        }),
+      ).operationalMetrics,
+    ).toEqual({ enabled: true, token })
   })
 
   it('leaves the pinning secret unread while demo pinning is off', () => {

@@ -44,10 +44,10 @@ function createBrowserE2eContext(): XcsApiContext {
     // configuration contract so the rest of it is loaded the usual way.
     XCS_DATABASE_URL: process.env.XCS_DATABASE_URL ?? 'postgres://127.0.0.1:1/xcs-browser-e2e',
     // Forced after the checked-in settings: the fixture context must open
-    // neither a pinning store nor a metrics repository even if a future settings
-    // edit turns either on.
+    // neither a pinning store nor a metrics repository even if a settings edit
+    // turns pinning on or the environment supplies a metrics token.
     XCS_DEMO_PINNING_ENABLED: 'false',
-    XCS_METRICS_ENABLED: 'false',
+    XCS_METRICS_TOKEN: '',
   })
   const real = createApiHandlers({
     repository: unavailableRepository,

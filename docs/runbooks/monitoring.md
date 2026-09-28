@@ -37,15 +37,11 @@ cannot prove those external conditions by configuration alone.
 
 Requires Docker Compose `2.24.4` or newer.
 
-The metrics routes are a feature flag, so they live in checked-in code rather than in the deployment
-contract. Turn them on in `apps/web/server/xcs/settings.ts` and rebuild the web image:
-
-```ts
-XCS_METRICS_ENABLED: 'true',
-```
-
-Without that edit the two `/internal/metrics*` routes are not registered at all and answer `404`
-whatever token is presented. Then, in `.env` (copied from `.env.compose.example`):
+The metrics routes are enabled by the presence of a valid `XCS_METRICS_TOKEN` and by nothing else.
+Without one the two `/internal/metrics*` routes are not registered at all and answer `404` whatever
+token is presented; with one that is not 32 to 256 URL-safe characters the web app refuses to start,
+so a typo cannot leave the deployment quietly unmonitored. Set it in `.env` (copied from
+`.env.compose.example`) along with the rest of the profile's inputs:
 
 ```dotenv
 XCS_METRICS_TOKEN=<32+ URL-safe random characters>

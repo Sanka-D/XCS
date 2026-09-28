@@ -141,7 +141,7 @@ process — and restrict all three at the ingress to the load balancer and monit
 
 ### Metrics
 
-Turning `XCS_METRICS_ENABLED` on in `server/xcs/settings.ts` exposes two routes, both requiring
+Setting `XCS_METRICS_TOKEN` to 32 to 256 URL-safe characters exposes two routes, both requiring
 `Authorization: Bearer $XCS_METRICS_TOKEN`, both `Cache-Control: no-store`, neither consuming the public rate-limit budget:
 
 - `GET /internal/metrics` — a bounded JSON operator snapshot (schema version 1);

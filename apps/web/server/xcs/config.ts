@@ -28,19 +28,22 @@ export interface ApiConfig {
       }
 }
 
+/**
+ * The operational metrics routes are enabled by the presence of a usable
+ * `XCS_METRICS_TOKEN` and by nothing else.
+ *
+ * No token means no routes, which is what an ordinary deployment that sets
+ * nothing gets. A token that is present but malformed is a hard error rather
+ * than a quiet fallback to "off": a typo in the one credential that guards the
+ * snapshot must not silently produce an unmonitored deployment.
+ */
 function operationalMetrics(environment: NodeJS.ProcessEnv): ApiConfig['operationalMetrics'] {
-  const enabled = strictBoolean(
-    environment.XCS_METRICS_ENABLED ?? apiSettings.XCS_METRICS_ENABLED,
-    false,
-    'XCS_METRICS_ENABLED',
-  )
-  if (!enabled) return { enabled: false }
-
-  const token = required(environment, 'XCS_METRICS_TOKEN')
-  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(token)) {
+  const supplied = environment.XCS_METRICS_TOKEN
+  if (supplied === undefined || supplied.trim().length === 0) return { enabled: false }
+  if (!/^[A-Za-z0-9_-]{32,256}$/u.test(supplied)) {
     throw new Error('XCS_METRICS_TOKEN must be 32 to 256 URL-safe random characters')
   }
-  return { enabled: true, token }
+  return { enabled: true, token: supplied }
 }
 
 function requiredValue(value: string | undefined, name: string): string {
