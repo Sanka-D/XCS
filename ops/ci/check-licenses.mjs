@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const [reportPath, overridePath] = process.argv.slice(2)
-if (reportPath === undefined || overridePath === undefined) {
+const [reportPath, overridePath, acceptancePath] = process.argv.slice(2)
+if (reportPath === undefined || overridePath === undefined || acceptancePath === undefined) {
   throw new Error(
-    'Usage: node ops/ci/check-licenses.mjs <pnpm-license-report.json> <license-overrides.json>',
+    'Usage: node ops/ci/check-licenses.mjs <pnpm-license-report.json> <license-overrides.json> <license-acceptances.json>',
   )
 }
 
@@ -144,9 +144,141 @@ for (const [index, override] of overrideDocument.overrides.entries()) {
   overrides.set(key, override)
 }
 
+// Acceptances cover the other half of the problem. An override says "the
+// reported license is wrong, the real one is X"; an acceptance says "the
+// reported license really is non-standard, and here is the permission or the
+// review that makes shipping it legitimate". Both pin the exact reviewed
+// license text by digest, so an entry stops applying the moment upstream
+// changes its terms.
+const acceptanceDocument = JSON.parse(await readFile(acceptancePath, 'utf8'))
+if (
+  acceptanceDocument === null ||
+  Array.isArray(acceptanceDocument) ||
+  typeof acceptanceDocument !== 'object' ||
+  !Array.isArray(acceptanceDocument.acceptances)
+) {
+  throw new Error('License acceptance file must contain an acceptances array')
+}
+const unknownAcceptanceFields = Object.keys(acceptanceDocument).filter(
+  (key) => key !== 'acceptances',
+)
+if (unknownAcceptanceFields.length > 0) {
+  throw new Error(`Unknown license acceptance fields: ${unknownAcceptanceFields.join(', ')}`)
+}
+
+const acceptanceBases = new Set(['granted-permission', 'reviewed-compliance'])
+const acceptances = new Map()
+for (const [index, acceptance] of acceptanceDocument.acceptances.entries()) {
+  const label = `acceptances[${index}]`
+  if (acceptance === null || Array.isArray(acceptance) || typeof acceptance !== 'object') {
+    throw new Error(`${label} must be a mapping`)
+  }
+  const allowedFields = new Set([
+    'package',
+    'version',
+    'reportedLicense',
+    'licenseName',
+    'licenseFile',
+    'licenseSha256',
+    'basis',
+    'grantedBy',
+    'grantedOn',
+    'reviewedBy',
+    'reviewedOn',
+    'licenseReleaseDate',
+    'attestation',
+    'evidence',
+    'rationale',
+  ])
+  const unknownFields = Object.keys(acceptance).filter((key) => !allowedFields.has(key))
+  if (unknownFields.length > 0) {
+    throw new Error(`${label} has unknown fields: ${unknownFields.join(', ')}`)
+  }
+  for (const field of [
+    'package',
+    'version',
+    'reportedLicense',
+    'licenseName',
+    'licenseFile',
+    'basis',
+  ]) {
+    if (typeof acceptance[field] !== 'string' || acceptance[field].trim() === '') {
+      throw new Error(`${label}.${field} must be a non-empty string`)
+    }
+  }
+  if (!/^[A-Za-z0-9._-]+$/u.test(acceptance.licenseFile)) {
+    throw new Error(`${label}.licenseFile must be a file name without a path`)
+  }
+  if (!/^[0-9a-f]{64}$/u.test(acceptance.licenseSha256)) {
+    throw new Error(`${label}.licenseSha256 must be a lowercase SHA-256 digest`)
+  }
+  if (!acceptanceBases.has(acceptance.basis)) {
+    throw new Error(`${label}.basis must be one of ${[...acceptanceBases].join(', ')}`)
+  }
+  for (const field of ['evidence', 'rationale']) {
+    if (typeof acceptance[field] !== 'string' || acceptance[field].trim().length < 20) {
+      throw new Error(`${label}.${field} must be recorded in at least 20 characters`)
+    }
+  }
+  const isDate = (value) => typeof value === 'string' && /^\d{4}-\d{2}(?:-\d{2})?$/u.test(value)
+  // The two bases carry different facts, and each one refuses the other's
+  // fields so that an entry cannot claim a permission it does not have, or
+  // hide a missing grant behind a review field.
+  const requiredByBasis =
+    acceptance.basis === 'granted-permission'
+      ? { people: ['grantedBy'], dates: ['grantedOn'], text: [] }
+      : {
+          people: ['reviewedBy'],
+          dates: ['reviewedOn', 'licenseReleaseDate'],
+          text: ['attestation'],
+        }
+  const forbiddenByBasis = [...allowedFields].filter(
+    (field) =>
+      [
+        'grantedBy',
+        'grantedOn',
+        'reviewedBy',
+        'reviewedOn',
+        'licenseReleaseDate',
+        'attestation',
+      ].includes(field) &&
+      !requiredByBasis.people.includes(field) &&
+      !requiredByBasis.dates.includes(field) &&
+      !requiredByBasis.text.includes(field),
+  )
+  for (const field of requiredByBasis.people) {
+    if (typeof acceptance[field] !== 'string' || acceptance[field].trim().length < 3) {
+      throw new Error(`${label}.${field} must name the person or organisation responsible`)
+    }
+  }
+  for (const field of requiredByBasis.dates) {
+    if (!isDate(acceptance[field])) {
+      throw new Error(`${label}.${field} must be an ISO date (YYYY-MM or YYYY-MM-DD)`)
+    }
+  }
+  for (const field of requiredByBasis.text) {
+    if (typeof acceptance[field] !== 'string' || acceptance[field].trim().length < 20) {
+      throw new Error(`${label}.${field} must state what was attested in at least 20 characters`)
+    }
+  }
+  for (const field of forbiddenByBasis) {
+    if (acceptance[field] !== undefined) {
+      throw new Error(`${label}.${field} does not apply to a ${acceptance.basis} acceptance`)
+    }
+  }
+
+  const key = `${acceptance.package}@${acceptance.version}`
+  if (acceptances.has(key)) throw new Error(`Duplicate license acceptance for ${key}`)
+  if (overrides.has(key)) {
+    throw new Error(`${key} cannot have both a license override and a license acceptance`)
+  }
+  acceptances.set(key, acceptance)
+}
+
 const observed = new Set()
 const failures = []
 const usedOverrides = new Set()
+const usedAcceptances = new Set()
 
 for (const [reportedLicense, packages] of Object.entries(report)) {
   observed.add(reportedLicense.trim())
@@ -174,21 +306,33 @@ for (const [reportedLicense, packages] of Object.entries(report)) {
           continue
         }
         const override = overrides.get(key)
-        if (override === undefined || override.reportedLicense !== reportedLicense) {
+        const acceptance = acceptances.get(key)
+        let kind
+        let entry
+        let used
+        if (override !== undefined && override.reportedLicense === reportedLicense) {
+          kind = 'reviewed'
+          entry = override
+          used = usedOverrides
+        } else if (acceptance !== undefined && acceptance.reportedLicense === reportedLicense) {
+          kind = 'accepted'
+          entry = acceptance
+          used = usedAcceptances
+        } else {
           failures.push(`${key}: denied or unknown license ${reportedLicense}`)
           continue
         }
 
-        const license = await readFile(resolve(packagePath, override.licenseFile))
+        const license = await readFile(resolve(packagePath, entry.licenseFile))
         const digest = createHash('sha256').update(license).digest('hex')
-        if (digest !== override.licenseSha256) {
-          failures.push(`${key}: reviewed license file digest changed`)
+        if (digest !== entry.licenseSha256) {
+          failures.push(`${key}: ${kind} license file digest changed`)
           continue
         }
-        usedOverrides.add(key)
+        used.add(key)
       } catch (error) {
         failures.push(
-          `${String(packageEntry?.name ?? 'unknown package')}: could not validate license override (${String(error)})`,
+          `${String(packageEntry?.name ?? 'unknown package')}: could not validate license override or acceptance (${String(error)})`,
         )
       }
     }
@@ -199,8 +343,11 @@ if (observed.size === 0) throw new Error('No production dependency license was d
 for (const key of overrides.keys()) {
   if (!usedOverrides.has(key)) failures.push(`${key}: license override is stale or unused`)
 }
+for (const key of acceptances.keys()) {
+  if (!usedAcceptances.has(key)) failures.push(`${key}: license acceptance is stale or unused`)
+}
 if (failures.length > 0) throw new Error(failures.sort().join('\n'))
 
 process.stdout.write(
-  `Validated ${observed.size} production dependency license expression(s) and ${usedOverrides.size} reviewed override(s).\n`,
+  `Validated ${observed.size} production dependency license expression(s), ${usedOverrides.size} reviewed override(s) and ${usedAcceptances.size} recorded acceptance(s).\n`,
 )

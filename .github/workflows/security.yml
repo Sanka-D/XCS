@@ -74,9 +74,13 @@ jobs:
             )
           ' "$RUNNER_TEMP"/xcs-licenses-{root,web,indexer}.json \
             > "$RUNNER_TEMP/xcs-licenses.json"
+          # Overrides correct a misreported license; acceptances record the
+          # permission or the compliance review behind a license that really is
+          # non-standard. Both pin the reviewed license text by digest.
           node ops/ci/check-licenses.mjs \
             "$RUNNER_TEMP/xcs-licenses.json" \
-            ops/security/license-overrides.json
+            ops/security/license-overrides.json \
+            ops/security/license-acceptances.json
 
   repository-scan:
     runs-on: ubuntu-24.04

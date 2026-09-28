@@ -9,6 +9,9 @@ overrides:
   svgo@>=4.0.0 <4.1.0: '>=4.1.0'
 
 patchedDependencies:
+  vaul-vue@0.4.1:
+    hash: 745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0
+    path: patches/vaul-vue@0.4.1.patch
   xrpl-connect@1.0.0-rc.0:
     hash: e2ed5ff5b3a2c073307e088b37dc70382b07d407935c719d8be11a4a04332989
     path: patches/xrpl-connect@1.0.0-rc.0.patch
@@ -8196,7 +8199,7 @@ snapshots:
       unplugin: 3.4.0(esbuild@0.28.2)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       unplugin-auto-import: 21.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.2)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))))(@vueuse/core@14.4.0(vue@3.5.43(typescript@5.9.3)))(esbuild@0.28.2)(oxc-parser@0.141.0)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       unplugin-vue-components: 32.1.0(@nuxt/kit@4.5.2(magic-string@1.4.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.10)(unplugin@3.4.0(esbuild@0.28.2)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))))(esbuild@0.28.2)(rolldown@1.2.10)(rollup@4.63.4)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vue@3.5.43(typescript@5.9.3))
-      vaul-vue: 0.4.1(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
+      vaul-vue: 0.4.1(patch_hash=745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3))
       vue-component-type-helpers: 3.3.11
     optionalDependencies:
       '@internationalized/date': 3.12.4
@@ -13623,7 +13626,7 @@ snapshots:
       is-typed-array: 1.1.15
       which-typed-array: 1.1.24
 
-  vaul-vue@0.4.1(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
+  vaul-vue@0.4.1(patch_hash=745c51497acce22bbe96fcc248a7de7767e5f8beee0f24441d9d34c33e89faa0)(reka-ui@2.10.4(vue@3.5.43(typescript@5.9.3)))(vue@3.5.43(typescript@5.9.3)):
     dependencies:
       '@vueuse/core': 10.11.1(vue@3.5.43(typescript@5.9.3))
       reka-ui: 2.10.4(vue@3.5.43(typescript@5.9.3))

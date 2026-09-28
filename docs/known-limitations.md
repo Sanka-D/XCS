@@ -124,10 +124,14 @@ integrators.
 - `--ignore-workspace` is mandatory on every per-app pnpm command that resolves dependencies
   (`install`, `audit`, `licenses list`). Without it pnpm silently operates on the root workspace and
   still exits 0, so an audit or licence report can appear to pass while covering the wrong lockfile.
-- The licence CI job is currently **red** for `apps/web`: the wallet dependency tree carries the
-  WalletConnect Community License and the GemWallet integration, both of which are unresolved release
-  gates (see _Wallets_ below). The job is knowingly failing and must not be described as passing or
-  worked around.
+- The licence CI job passes for all three dependency graphs, and the three non-allowlisted wallet
+  licences are recorded rather than waved through. `ops/security/license-acceptances.json` holds the
+  GemWallet permission and the WalletConnect Community License compliance review;
+  `ops/security/license-overrides.json` holds `vaul-vue`, whose upstream MIT text is restored by
+  `apps/web/patches/vaul-vue@0.4.1.patch` because the published package ships no licence file. Every
+  entry pins the reviewed licence text by SHA-256, so the job turns red again the moment upstream
+  changes its terms or an entry outlives its dependency. The allowlist itself must not be widened to
+  absorb a non-standard licence.
 - PostgreSQL is provisioned outside this repository. The Compose stack — including the `monitoring`
   and `demo-pinning` profiles — is local development only: it carries no secret-file mechanism and
   passes Grafana's admin password and the exporter's database password as plain container
@@ -151,13 +155,18 @@ integrators.
   application identifier removes the corresponding adapter. Each self-hosted origin still needs a
   Xaman application registration; the Commons public application ID cannot authorize arbitrary
   third-party redirect origins.
-- The public deployment and dependency-policy gates must remain closed until Commons records
-  permission from GemWallet for public/beta use and explicitly reviews the WalletConnect Community
-  License, including its attribution, network and usage-threshold conditions. The RC bundles both
-  integrations; downgrading to `0.8.2`, removing only their lockfile entries or reclassifying their
-  licenses as MIT would conceal rather than remove them. The upstream per-adapter packages are not
-  currently published on npm, so retaining all eight adapters without these approvals has no
-  compliant package-level workaround.
+- The two wallet licence gates are closed by recorded acceptances in
+  `ops/security/license-acceptances.json`, not by reclassification. GemWallet's `LICENSE` is dual: its
+  MIT-like arm covers personal, educational and non-public research use only, and public, commercial
+  or beta use needs GemWallet's permission. Commons holds that permission, granted by Florent Bouron
+  in January 2026, and it covers public and beta use of the GemWallet API. The WalletConnect
+  Community License Agreement (release date 20 August 2025) is accepted on its attribution and
+  usage-threshold conditions: attribution is carried by the upstream
+  `packages/xrpl-connect/THIRD_PARTY_NOTICES.md` in `XRPL-Commons/xrpl-connect`, and the XCS
+  maintainer attested on 2026-09-28 that XRPL Commons is below the agreement's usage thresholds.
+  Neither licence may be restated as MIT: downgrading to `0.8.2`, removing only their lockfile entries
+  or reclassifying their licences would conceal rather than remove the bundled code, and the upstream
+  per-adapter packages are not currently published on npm.
 - XCS invokes only adapter `sign()`. It normalizes a returned `tx_blob` or signed `tx_json`, checks
   the derived hash, XRPL signature, optional `signerAddress` and exact equality with the reviewed
   transaction, then persists and submits the blob itself. Calling or falling back to

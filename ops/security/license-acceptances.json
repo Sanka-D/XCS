@@ -1,0 +1,32 @@
+{
+  "acceptances": [
+    {
+      "package": "@gemwallet/api",
+      "version": "3.8.0",
+      "reportedLicense": "Unknown",
+      "licenseName": "GemWallet CUSTOM (dual) License",
+      "licenseFile": "LICENSE",
+      "licenseSha256": "b29ff1e504a23d72e812dcce568f27a0ec7d470e4f1768088ee8ed1c0fe745ed",
+      "basis": "granted-permission",
+      "grantedBy": "Florent Bouron (GemWallet)",
+      "grantedOn": "2026-01",
+      "evidence": "Permission granted to XRPL Commons by Florent Bouron for the public and beta use of the GemWallet API, recorded by the XRPL Commons maintainers; the reviewed terms are the bundled LICENSE pinned by licenseSha256.",
+      "rationale": "The bundled LICENSE is dual: its MIT-like arm covers personal, educational and non-public research use only, so it cannot be recorded as MIT for XCS. The public, commercial and beta arm requires permission from GemWallet, and XRPL Commons holds that permission, which is what makes this public deployment licensed."
+    },
+    {
+      "package": "@walletconnect/types",
+      "version": "2.25.0",
+      "reportedLicense": "Unknown",
+      "licenseName": "WalletConnect Community License Agreement",
+      "licenseFile": "LICENSE.md",
+      "licenseSha256": "1cb6f8cfe21f54ab1105105717eaa2ba08343037a2a9c41dfd5ab09e3ce270fc",
+      "basis": "reviewed-compliance",
+      "reviewedBy": "Luc Bocahut (XCS maintainer, luc@xrpl-commons.org)",
+      "reviewedOn": "2026-09-28",
+      "licenseReleaseDate": "2025-08-20",
+      "attestation": "XRPL Commons is below the usage thresholds set out in the WalletConnect Community License Agreement, and the agreement's attribution condition is met by the upstream third-party notices shipped with @xrpl-commons/xrpl-connect.",
+      "evidence": "https://github.com/XRPL-Commons/xrpl-connect/blob/develop/packages/xrpl-connect/THIRD_PARTY_NOTICES.md names @walletconnect/sign-client@2.23.10 under the WalletConnect Community License Agreement with the attribution \"Portions (c) 2025 Reown, Inc. All Rights Reserved\" and ships a bundled copy of the licence text.",
+      "rationale": "The WalletConnect Community License Agreement is not an allowlisted SPDX licence and its terms cannot be restated as one. It permits this use subject to attribution and usage thresholds; both conditions are satisfied, so the dependency ships legitimately rather than under a loosened allowlist."
+    }
+  ]
+}

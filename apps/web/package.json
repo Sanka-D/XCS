@@ -70,7 +70,8 @@
       "svgo@>=4.0.0 <4.1.0": ">=4.1.0"
     },
     "patchedDependencies": {
-      "xrpl-connect@1.0.0-rc.0": "patches/xrpl-connect@1.0.0-rc.0.patch"
+      "xrpl-connect@1.0.0-rc.0": "patches/xrpl-connect@1.0.0-rc.0.patch",
+      "vaul-vue@0.4.1": "patches/vaul-vue@0.4.1.patch"
     }
   }
 }
