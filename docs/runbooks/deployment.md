@@ -112,14 +112,33 @@ script do not need it.
 pnpm --dir apps/indexer install --ignore-workspace --frozen-lockfile
 ```
 
+### Create the database users first
+
+DigitalOcean owns the users of a managed PostgreSQL cluster: it creates them, and it generates and
+stores their passwords. XCS does not create them in SQL, because a role created that way is invisible
+to the managed service and carries a password DigitalOcean neither knows nor can rotate.
+
+So, before anything else, create the three users in the DigitalOcean control panel
+(**Databases → the cluster → Users → Add user**) or with `doctl`:
+
+```sh
+doctl databases user create <cluster-id> xcs_indexer
+doctl databases user create <cluster-id> xcs_api
+doctl databases user create <cluster-id> xcs_monitor
+```
+
+Take the password DigitalOcean generated for each (`doctl databases user get <cluster-id> <name>`,
+or the control panel) and put it in the corresponding runtime connection URL
+(`XCS_INDEXER_DATABASE_URL`, `XCS_DATABASE_URL`, and the exporter's credential). Rotate a runtime
+password through DigitalOcean; nothing in this repository needs rerunning afterwards.
+
 ### Bootstrap once, on a fresh database
+
+Then, with all three users in place, run the grants step once as the administrator:
 
 ```sh
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@db.example:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… \
-  XCS_API_DATABASE_PASSWORD=… \
-  XCS_MONITOR_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
@@ -127,10 +146,11 @@ Run it from an operator machine, or as a one-off job using the indexer image
 (`node dist/lib/db/bin/bootstrap.js`), which is exactly what Compose's `db-bootstrap` service does
 locally.
 
-Bootstrap applies the committed migrations and then provisions the fixed runtime roles in one
-administrative transaction. It is idempotent: a second run reapplies the same role attributes,
-passwords and grants, which is also how a runtime password is rotated. Give the four identities
-distinct, long, URL-safe passwords.
+Bootstrap applies the committed migrations and then assigns the fixed runtime roles' privileges in
+one administrative transaction. It is **grants-only**: it never creates a role and never sets, resets
+or reads a role password. If `xcs_indexer`, `xcs_api` or `xcs_monitor` does not exist it fails before
+changing anything and names the missing role. It is idempotent: a second run reapplies the same role
+attributes and grants.
 
 | Identity      | Use                                       | Database rights                                                                                                                                                                                                      |
 | ------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -139,18 +159,19 @@ distinct, long, URL-safe passwords.
 | `xcs_api`     | Web app (`/v1`) and optional demo pinning | `SELECT` on projections; CRUD on `pin_challenges` and `demo_pins` only                                                                                                                                               |
 | `xcs_monitor` | PostgreSQL exporter                       | `pg_monitor`; no DML rights on XCS application tables                                                                                                                                                                |
 
-`XCS_DATABASE_CLUSTER_SCOPE=dedicated` is mandatory: PostgreSQL login roles are cluster-wide, so
-bootstrap must only ever run on a cluster dedicated to XCS. Grants and `PUBLIC` revocations are
+`XCS_DATABASE_CLUSTER_SCOPE=dedicated` is mandatory: the role attributes and memberships bootstrap
+normalizes are cluster-visible, so it must only ever run on a cluster dedicated to XCS. Grants and `PUBLIC` revocations are
 scoped to the database named by `XCS_BOOTSTRAP_DATABASE_URL`. All runtime roles are denied schema
 creation and `CREATE` on `public` is revoked from `PUBLIC`. The single-replica alpha caps connections
 at 12 for `xcs_indexer`, 12 for `xcs_api` and 3 for `xcs_monitor`, leaving capacity for
 administration and recovery; raise them deliberately before scaling replicas or pool sizes.
 
-Bootstrap overrides any caller-supplied `password_encryption` with transaction-local
-`scram-sha-256`, writes all three runtime passwords, and restores `LOGIN` only after every grant
-succeeds. Configure the matching `pg_hba.conf` entries with `scram-sha-256` as well, and restrict
-each runtime role to the XCS database: verifier storage does not replace an authentication policy.
-Bootstrap reports role names or a stable failure code, never URLs or password values.
+Bootstrap never touches authentication. It asserts `LOGIN` on each role and never revokes it, not
+even transiently, so an interrupted run cannot lock the DigitalOcean-created users out; it leaves
+`VALID UNTIL` alone, because password metadata belongs to whoever issues the password. Configure the
+matching `pg_hba.conf` entries with `scram-sha-256`, and restrict each runtime role to the XCS
+database: verifier storage does not replace an authentication policy. Bootstrap reports role names or
+a stable failure code, never URLs or password values.
 
 Treat the PostgreSQL administrator and reviewed migrations as trusted administrative inputs.
 Bootstrap is not an anti-administrator attestation: it does not audit ownership or ACLs outside the
@@ -212,7 +233,7 @@ indexer exposes nothing.
 ### Indexer configuration
 
 The long-running worker reads only the first ten variables of `apps/indexer/.env.example`; the last
-five are read by `db:bootstrap` alone and must not be given to the service.
+two are read by `db:bootstrap` alone and must not be given to the service.
 
 - `XCS_INDEXER_DATABASE_URL` authenticates as the least-privilege `xcs_indexer` role. Never give the
   service the admin URL.
@@ -444,8 +465,10 @@ secrets or production credentials.
   migrations.
 - Before production, an incompatible schema change means rebuilding and replaying the database; never
   skip a ledger.
-- Rerun `db:bootstrap` after a runtime-password rotation, then restart the affected application with
-  the matching credentials. Keep `xcs_admin` credentials out of runtime services and logs.
+- A runtime-password rotation is a DigitalOcean operation: reset the user's password there, then
+  restart the affected application with the new connection URL. `db:bootstrap` sets no password and
+  does not need rerunning for a rotation. Keep `xcs_admin` credentials out of runtime services and
+  logs.
 - Retain a `pg_hba.conf` role-to-database allowlist as defense in depth.
 - Record the deployed revision of each application separately: they are versioned and deployed
   independently, and a protocol change mirrored into only one of them is a real failure mode (see

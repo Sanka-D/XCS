@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
-  databasePasswordFromUrl,
+  MissingRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
-  provisionRuntimeDatabaseRoles,
+  provisionRuntimeDatabasePrivileges,
 } from '../../src/lib/db/bootstrap.js'
 
 import type { DatabaseClient } from '../../src/lib/db/client.js'
@@ -18,7 +18,32 @@ function client(): DatabaseClient {
   }
 }
 
-describe('runtime database role provisioning', () => {
+/** A `sql` tagged template whose first statement (the advisory lock) resolves
+ * empty and whose second (the role lookup) reports `existingRoles`. */
+function clientWithRoles(existingRoles: readonly string[]): DatabaseClient {
+  const statements: string[] = []
+  const sql = Object.assign(
+    (strings: TemplateStringsArray, ..._values: unknown[]) => {
+      const text = strings.join('?')
+      statements.push(text)
+      return Promise.resolve(
+        text.includes('pg_roles') ? existingRoles.map((roleName) => ({ roleName })) : [],
+      )
+    },
+    {
+      unsafe: vi.fn(() => Promise.resolve([])),
+      begin: vi.fn((handler: (inner: unknown) => Promise<void>) => handler(sql)),
+    },
+  )
+  return {
+    db: {} as DatabaseClient['db'],
+    sql: sql as unknown as DatabaseClient['sql'],
+    close: vi.fn(),
+    statements,
+  } as unknown as DatabaseClient & { statements: string[] }
+}
+
+describe('runtime database privilege provisioning', () => {
   it('requires an explicit dedicated-cluster acknowledgement', async () => {
     expect(parseDatabaseClusterScope('dedicated')).toBe('dedicated')
     expect(() => parseDatabaseClusterScope(undefined)).toThrow('must be dedicated')
@@ -26,114 +51,55 @@ describe('runtime database role provisioning', () => {
 
     const database = client()
     await expect(
-      provisionRuntimeDatabaseRoles(database, {
+      provisionRuntimeDatabasePrivileges(database, {
         clusterScope: 'shared' as 'dedicated',
-        administratorPassword: 'd'.repeat(32),
-        indexerPassword: 'i'.repeat(32),
-        apiPassword: 'a'.repeat(32),
-        monitorPassword: 'm'.repeat(32),
       }),
     ).rejects.toThrow('must be dedicated')
     expect(database.sql.begin).not.toHaveBeenCalled()
   })
 
-  it('derives the administrator password from the database URL actually selected', () => {
-    expect(
-      databasePasswordFromUrl(
-        'postgresql://xcs_admin:administrator%40password%2Fwith%25encoding@postgres:5432/xcs',
-      ),
-    ).toBe('administrator@password/with%encoding')
-  })
-
   it.each([
-    'not-a-url',
-    'https://xcs_admin:administrator-password@example.test/xcs',
-    'postgresql://xcs_admin@postgres:5432/xcs',
-    'postgresql://:administrator-password@postgres:5432/xcs',
-  ])('rejects an unusable administrator database URL without exposing it: %s', (databaseUrl) => {
-    expect(() => databasePasswordFromUrl(databaseUrl)).toThrow(
-      /^The selected administrator database URL/u,
-    )
-  })
-
-  it.each([
-    ['', 'valid', 'valid'],
-    ['valid', 'too-short', 'valid'],
-    ['valid', 'valid', 'contains/slash'],
+    [[], 'xcs_indexer, xcs_api, xcs_monitor'],
+    [['xcs_indexer', 'xcs_monitor'], 'xcs_api'],
+    [['xcs_indexer', 'xcs_api'], 'xcs_monitor'],
   ])(
-    'rejects unsafe runtime passwords before opening a transaction',
-    async (indexer, api, monitor) => {
-      const database = client()
+    'fails by name when the managed database service has not created every role',
+    async (existingRoles, expectedNames) => {
+      const database = clientWithRoles(existingRoles)
 
       await expect(
-        provisionRuntimeDatabaseRoles(database, {
-          clusterScope: 'dedicated',
-          administratorPassword: 'd'.repeat(32),
-          indexerPassword: indexer === 'valid' ? 'i'.repeat(32) : indexer,
-          apiPassword: api === 'valid' ? 'a'.repeat(32) : api,
-          monitorPassword: monitor === 'valid' ? 'm'.repeat(32) : monitor,
-        }),
-      ).rejects.toThrow('32-256 URL-safe characters')
-      expect(database.sql.begin).not.toHaveBeenCalled()
+        provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
+      ).rejects.toThrow(MissingRuntimeDatabaseRolesError)
+      await expect(
+        provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
+      ).rejects.toThrow(expectedNames)
+      await expect(
+        provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
+      ).rejects.toThrow('doctl databases user create')
+
+      // Nothing was applied: the run stops before any grant or ALTER ROLE.
+      expect(database.sql.unsafe).not.toHaveBeenCalled()
     },
   )
 
-  it.each([
-    'too-short',
-    'a'.repeat(257),
-    'administrator-password-with-slash/',
-    'administrateur-password-éééééééé',
-  ])('rejects an unsafe administrator password before opening a transaction', async (password) => {
-    const database = client()
+  it('never creates a role, sets a password or revokes login', async () => {
+    const database = clientWithRoles(['xcs_indexer', 'xcs_api', 'xcs_monitor'])
 
     await expect(
-      provisionRuntimeDatabaseRoles(database, {
-        clusterScope: 'dedicated',
-        administratorPassword: password,
-        indexerPassword: 'i'.repeat(32),
-        apiPassword: 'a'.repeat(32),
-        monitorPassword: 'm'.repeat(32),
-      }),
-    ).rejects.toThrow('32-256 URL-safe characters')
-    expect(database.sql.begin).not.toHaveBeenCalled()
+      provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
+    ).resolves.toBeUndefined()
+
+    const applied = (database.sql.unsafe as unknown as { mock: { calls: [string][] } }).mock.calls
+      .map(([statement]) => statement)
+      .join('\n')
+    expect(applied).not.toMatch(/CREATE ROLE/iu)
+    expect(applied).not.toMatch(/PASSWORD/iu)
+    expect(applied).not.toMatch(/NOLOGIN/iu)
+    expect(applied).not.toMatch(/VALID UNTIL/iu)
+    for (const role of ['xcs_indexer', 'xcs_api', 'xcs_monitor']) {
+      expect(applied).toContain(`ALTER ROLE ${role} WITH LOGIN`)
+    }
+    expect(applied).toContain('GRANT pg_monitor TO xcs_monitor')
+    expect(applied).toContain('statement_timeout')
   })
-
-  it('requires distinct runtime passwords', async () => {
-    const database = client()
-    const password = 'same-runtime-password-000000000000'
-
-    await expect(
-      provisionRuntimeDatabaseRoles(database, {
-        clusterScope: 'dedicated',
-        administratorPassword: 'administrator-password-000000000000',
-        indexerPassword: password,
-        apiPassword: password,
-        monitorPassword: 'monitor-runtime-password-00000000000',
-      }),
-    ).rejects.toThrow('pairwise distinct')
-    expect(database.sql.begin).not.toHaveBeenCalled()
-  })
-
-  it.each(['indexer', 'api', 'monitor'] as const)(
-    'rejects an administrator password reused by %s',
-    async (role) => {
-      const database = client()
-      const administratorPassword = 'administrator-password-000000000000'
-      const runtimePasswords = {
-        indexerPassword: 'indexer-runtime-password-00000000000',
-        apiPassword: 'api-runtime-password-000000000000000',
-        monitorPassword: 'monitor-runtime-password-00000000000',
-      }
-      runtimePasswords[`${role}Password`] = administratorPassword
-
-      await expect(
-        provisionRuntimeDatabaseRoles(database, {
-          clusterScope: 'dedicated',
-          administratorPassword,
-          ...runtimePasswords,
-        }),
-      ).rejects.toThrow('pairwise distinct')
-      expect(database.sql.begin).not.toHaveBeenCalled()
-    },
-  )
 })

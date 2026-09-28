@@ -7,8 +7,9 @@ on-call system remains a deployment-specific external step.
 
 > **Local development only.** Compose is no longer a deployment template (see
 > [`deployment.md`](./deployment.md)), and this profile passes Grafana's admin password
-> (`XCS_GRAFANA_ADMIN_PASSWORD`) and the exporter's database password
-> (`XCS_MONITOR_DATABASE_PASSWORD`) as **plain container environment variables** read from `.env`.
+> (`XCS_GRAFANA_ADMIN_PASSWORD`) as a **plain container environment variable** read from `.env`, and
+> hardcodes the exporter's `xcs_monitor` password, a published local-development literal from
+> `db/compose-initdb/01-runtime-roles.sql`, in `docker-compose.yml`.
 > They are visible to anyone who can run `docker inspect` or read the container's environment. That
 > is acceptable only because this stack is local development with loopback-only ports and disposable
 > credentials. Never run this profile on a shared or public host, never put a real deployment's
@@ -45,7 +46,6 @@ so a typo cannot leave the deployment quietly unmonitored. Set it in `.env` (cop
 
 ```dotenv
 XCS_METRICS_TOKEN=<32+ URL-safe random characters>
-XCS_MONITOR_DATABASE_PASSWORD=<the value db:bootstrap provisioned for xcs_monitor>
 XCS_GRAFANA_ADMIN_USER=xcs_admin
 XCS_GRAFANA_ADMIN_PASSWORD=<a distinct random value; there is no default>
 XCS_GRAFANA_COOKIE_SECURE=false
@@ -161,5 +161,6 @@ external facts.
 records and drill evidence outside Prometheus according to Commons policy. To rotate the metrics
 token, update `XCS_METRICS_TOKEN`, rewrite `ops/secrets/xcs_metrics_token` from it (same `0644`
 mode) and restart both
-the web app and Prometheus; a partial rotation intentionally makes the scrape fail. Rotate the database and Grafana passwords through their normal
-procedures and rerun `pnpm --dir apps/indexer db:bootstrap` after a database password change.
+the web app and Prometheus; a partial rotation intentionally makes the scrape fail. Rotate the Grafana password through its normal
+procedure. A deployed `xcs_monitor` password is rotated through the managed database service, which
+owns it; `db:bootstrap` sets no password and does not need rerunning after a rotation.

@@ -61,6 +61,10 @@ services:
     expose: ['5432']
     volumes:
       - xcs-postgres:/var/lib/postgresql
+      # Local development only: creates xcs_indexer, xcs_api and xcs_monitor with
+      # published non-secret passwords, because there is no managed database
+      # service here to create them. Runs once, on a fresh data directory.
+      - ./db/compose-initdb:/docker-entrypoint-initdb.d:ro
     networks: [database]
     init: true
     shm_size: 256m
@@ -80,8 +84,10 @@ services:
         max-size: ${XCS_LOG_MAX_SIZE:-10m}
         max-file: ${XCS_LOG_MAX_FILES:-5}
 
-  # Migrations plus the xcs_indexer, xcs_api and xcs_monitor roles, from the
-  # indexer image. Restart-safe: running it again is a no-op.
+  # Migrations plus the privileges of the xcs_indexer, xcs_api and xcs_monitor
+  # roles, from the indexer image. It does not create the roles and does not set
+  # their passwords: it fails naming any role that is missing. Restart-safe:
+  # running it again is a no-op.
   db-bootstrap:
     <<: *one-shot-hardening
     image: ${XCS_INDEXER_IMAGE:-xcs-indexer:local}
@@ -90,9 +96,6 @@ services:
     environment:
       XCS_BOOTSTRAP_DATABASE_URL: postgres://xcs_admin:${XCS_POSTGRES_ADMIN_PASSWORD:-}@postgres:5432/xcs
       XCS_DATABASE_CLUSTER_SCOPE: dedicated
-      XCS_INDEXER_DATABASE_PASSWORD: ${XCS_INDEXER_DATABASE_PASSWORD:-}
-      XCS_API_DATABASE_PASSWORD: ${XCS_API_DATABASE_PASSWORD:-}
-      XCS_MONITOR_DATABASE_PASSWORD: ${XCS_MONITOR_DATABASE_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,7 +108,8 @@ services:
     image: ${XCS_INDEXER_IMAGE:-xcs-indexer:local}
     build: *indexer-build
     environment:
-      XCS_INDEXER_DATABASE_URL: postgres://xcs_indexer:${XCS_INDEXER_DATABASE_PASSWORD:-}@postgres:5432/xcs
+      # Local development password from db/compose-initdb/01-runtime-roles.sql; not a secret.
+      XCS_INDEXER_DATABASE_URL: postgres://xcs_indexer:local-development-only-not-a-secret-indexer@postgres:5432/xcs
       XCS_NETWORK_PROFILE: ${XCS_NETWORK_PROFILE:-/workspace/config/networks/testnet.example.json}
       XCS_RPC_URL_PRIMARY: ${XCS_RPC_URL_PRIMARY:-}
       XCS_RPC_URL_SECONDARY: ${XCS_RPC_URL_SECONDARY:-}
@@ -131,7 +135,8 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
-      XCS_DATABASE_URL: postgres://xcs_api:${XCS_API_DATABASE_PASSWORD:-}@postgres:5432/xcs
+      # Local development password from db/compose-initdb/01-runtime-roles.sql; not a secret.
+      XCS_DATABASE_URL: postgres://xcs_api:local-development-only-not-a-secret-api@postgres:5432/xcs
       # Feature flags, the IPFS endpoints, the readiness threshold and the static
       # issuer trust policy are checked-in settings in
       # apps/web/server/xcs/settings.ts, not deployment inputs. The metrics routes
@@ -275,7 +280,8 @@ services:
     environment:
       DATA_SOURCE_URI: postgres:5432/xcs?sslmode=disable
       DATA_SOURCE_USER: xcs_monitor
-      DATA_SOURCE_PASS: ${XCS_MONITOR_DATABASE_PASSWORD:-}
+      # Local development password from db/compose-initdb/01-runtime-roles.sql; not a secret.
+      DATA_SOURCE_PASS: local-development-only-not-a-secret-monitor
     depends_on:
       postgres:
         condition: service_healthy

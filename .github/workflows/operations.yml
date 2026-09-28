@@ -15,9 +15,8 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: xcs-ci-${{ github.run_id }}-${{ github.run_attempt }}
       XCS_POSTGRES_ADMIN_PASSWORD: compose-ci-admin-password-00000001
-      XCS_INDEXER_DATABASE_PASSWORD: compose-ci-indexer-password-0001
-      XCS_API_DATABASE_PASSWORD: compose-ci-api-password-000000001
-      XCS_MONITOR_DATABASE_PASSWORD: compose-ci-monitor-password-000001
+      # The three runtime roles are created by db/compose-initdb/01-runtime-roles.sql
+      # with published local-development passwords; they are not inputs.
       XCS_METRICS_TOKEN: compose-ci-metrics-token-000000000001
       XCS_RPC_URL_PRIMARY: wss://primary.invalid.example
       XCS_RPC_URL_SECONDARY: wss://secondary.invalid.example
@@ -198,6 +197,8 @@ jobs:
             --command "
               SELECT
                 pg_has_role('xcs_monitor', 'pg_monitor', 'MEMBER')
+                AND (SELECT bool_and(rolcanlogin) FROM pg_roles
+                     WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_monitor'))
                 AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_indexer') = 12
                 AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_api') = 12
                 AND (SELECT rolconnlimit FROM pg_roles WHERE rolname = 'xcs_monitor') = 3

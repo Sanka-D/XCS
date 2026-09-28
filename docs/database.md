@@ -171,7 +171,13 @@ finite replays.
 
 Runtime roles own no objects, cannot create database objects, are not superusers, and have finite
 connection limits and statement timeouts. Bootstrap requires an explicit dedicated-cluster
-acknowledgement because PostgreSQL roles are cluster-wide.
+acknowledgement because those role attributes are cluster-visible.
+
+The runtime **users** are created by whoever owns the cluster, not by XCS. On DigitalOcean's managed
+PostgreSQL that is the control panel, `doctl` or the API, which also generates and stores each
+password. Bootstrap only assigns privileges and fails naming any of the three roles it cannot find.
+The local Compose stack has no such service, so `db/compose-initdb/01-runtime-roles.sql` creates the
+three roles there with published, local-development-only passwords.
 
 ## Schema ownership, migrations and bootstrap
 
@@ -226,22 +232,23 @@ This is idempotent: `drizzle-orm`'s migrator records applied migrations in
 
 ### Bootstrap once, then migrate
 
-`db:bootstrap` is migration **plus** role provisioning. Run it once against a fresh database, then
-use `db:migrate` for every later schema change:
+`db:bootstrap` is migration **plus** privilege provisioning. Create `xcs_indexer`, `xcs_api` and
+`xcs_monitor` with the managed database service first (the DigitalOcean control panel or
+`doctl databases user create`), keep the passwords it generates, then run this once against a fresh
+database as the administrator and use `db:migrate` for every later schema change:
 
 ```sh
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@host:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… \
-  XCS_API_DATABASE_PASSWORD=… \
-  XCS_MONITOR_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 
-It applies the migrations and then normalizes the fixed runtime roles (`xcs_indexer`, `xcs_api`,
-`xcs_monitor`), their passwords and their grants in one administrative transaction. Both operations
-are idempotent, so running it again is safe and is also how a runtime password is rotated.
-`XCS_DATABASE_CLUSTER_SCOPE=dedicated` is required because PostgreSQL login roles are cluster-wide
+It applies the migrations and then normalizes the fixed runtime roles' attributes, memberships and
+grants in one administrative transaction. It never creates a role and never sets, resets or reads a
+role password; a missing role fails the run by name, before anything is changed. It asserts `LOGIN`
+and never revokes it, so an interrupted run cannot lock a role out. Both operations are idempotent,
+so running it again is safe; a password rotation goes through the managed service and needs no rerun.
+`XCS_DATABASE_CLUSTER_SCOPE=dedicated` is required because the role attributes are cluster-visible
 even though the grants are scoped to the selected database. Bootstrap reports role names or a stable
 failure code, never URLs or password values.
 

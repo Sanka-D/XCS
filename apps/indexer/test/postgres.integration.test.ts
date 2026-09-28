@@ -24,9 +24,9 @@ import {
   XCS_API_DATABASE_CONNECTION_LIMIT,
   XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
   XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
-  databasePasswordFromUrl,
+  MissingRuntimeDatabaseRolesError,
   initializeDatabase,
-  provisionRuntimeDatabaseRoles,
+  provisionRuntimeDatabasePrivileges,
 } from '../src/lib/db/bootstrap.js'
 import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '../src/lib/xcs/index.js'
 import { and, asc, eq } from 'drizzle-orm'
@@ -865,16 +865,27 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     if (database === undefined) throw new Error('First temporary database was not created')
     if (adminClient === undefined) throw new Error('PostgreSQL admin client is not initialized')
 
-    const passwords = {
-      clusterScope: 'dedicated',
-      administratorPassword: databasePasswordFromUrl(database.url),
-      indexerPassword: INDEXER_DATABASE_PASSWORD,
-      apiPassword: API_DATABASE_PASSWORD,
-      monitorPassword: MONITOR_DATABASE_PASSWORD,
-    } as const
+    const provisioning = { clusterScope: 'dedicated' } as const
+
+    // The roles do not exist yet: provisioning is grants-only and must say so by name.
+    await expect(
+      provisionRuntimeDatabasePrivileges(database.client, provisioning),
+    ).rejects.toBeInstanceOf(MissingRuntimeDatabaseRolesError)
+    await expect(provisionRuntimeDatabasePrivileges(database.client, provisioning)).rejects.toThrow(
+      'xcs_indexer, xcs_api, xcs_monitor',
+    )
+
+    // Stands in for the managed database service: it, not this step, owns the
+    // users and their passwords.
     runtimeRoleCleanupAllowed = true
-    await provisionRuntimeDatabaseRoles(database.client, passwords)
-    await provisionRuntimeDatabaseRoles(database.client, passwords)
+    await adminClient.sql.unsafe(`
+      CREATE ROLE xcs_indexer LOGIN PASSWORD '${INDEXER_DATABASE_PASSWORD}';
+      CREATE ROLE xcs_api LOGIN PASSWORD '${API_DATABASE_PASSWORD}';
+      CREATE ROLE xcs_monitor LOGIN PASSWORD '${MONITOR_DATABASE_PASSWORD}';
+    `)
+
+    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
 
     const roleProperties = await adminClient.sql<
       Array<{

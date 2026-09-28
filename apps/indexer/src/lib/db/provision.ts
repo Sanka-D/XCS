@@ -1,4 +1,5 @@
 // Copied from packages/db/src/provision.ts at 5ce8eaa; keep in sync by hand (see CONTRIBUTING.md).
+// Diverges by design (provisioning is grants-only: the managed PostgreSQL service owns the runtime users and their passwords, so this copy neither creates roles nor sets passwords); source sha256:ad624bb5a8d9403dda699767be589440680ac21bb4e2a3d7cfd648fb592b0fb5.
 import type { DatabaseClient } from './client.js'
 
 export const XCS_INDEXER_DATABASE_ROLE = 'xcs_indexer' as const
@@ -6,20 +7,21 @@ export const XCS_API_DATABASE_ROLE = 'xcs_api' as const
 export const XCS_MONITOR_DATABASE_ROLE = 'xcs_monitor' as const
 export const XCS_DATABASE_CLUSTER_SCOPE = 'dedicated' as const
 
+export const XCS_RUNTIME_DATABASE_ROLES = [
+  XCS_INDEXER_DATABASE_ROLE,
+  XCS_API_DATABASE_ROLE,
+  XCS_MONITOR_DATABASE_ROLE,
+] as const
+
 export const XCS_INDEXER_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_API_DATABASE_CONNECTION_LIMIT = 12
 export const XCS_MONITOR_DATABASE_CONNECTION_LIMIT = 3
 
-const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u
 const PROVISION_LOCK_CLASS_ID = 1_480_807_217
 const PROVISION_LOCK_OBJECT_ID = 1
 
-export interface RuntimeDatabasePasswords {
+export interface RuntimeDatabaseProvisioning {
   clusterScope: typeof XCS_DATABASE_CLUSTER_SCOPE
-  administratorPassword: string
-  indexerPassword: string
-  apiPassword: string
-  monitorPassword: string
 }
 
 export function parseDatabaseClusterScope(
@@ -33,68 +35,27 @@ export function parseDatabaseClusterScope(
   return XCS_DATABASE_CLUSTER_SCOPE
 }
 
-export function databasePasswordFromUrl(databaseUrl: string): string {
-  let url: URL
-  try {
-    url = new URL(databaseUrl)
-  } catch {
-    throw new Error(
-      'The selected administrator database URL must be a PostgreSQL URL with a password',
+/** The managed database service creates the users and holds their passwords; this
+ * step only assigns privileges, so a role it cannot find is an operator error.
+ * It names the missing roles and carries no credential, so the CLI can print it. */
+export class MissingRuntimeDatabaseRolesError extends Error {
+  readonly code = 'DATABASE_ROLES_MISSING' as const
+  readonly roles: readonly string[]
+
+  constructor(missing: readonly string[]) {
+    const names = missing.join(', ')
+    super(
+      `Database ${missing.length === 1 ? 'role' : 'roles'} ${names} ` +
+        `${missing.length === 1 ? 'does' : 'do'} not exist. Database users are owned by the ` +
+        'managed database service, not by this step: create ' +
+        `${names} in the DigitalOcean control panel (Databases -> the cluster -> Users) or with ` +
+        '`doctl databases user create`, then run the grants step again. This step never creates ' +
+        'a role and never sets, resets or reads a role password.',
     )
-  }
-
-  if (
-    !['postgres:', 'postgresql:'].includes(url.protocol) ||
-    url.username.length === 0 ||
-    url.password.length === 0
-  ) {
-    throw new Error(
-      'The selected administrator database URL must be a PostgreSQL URL with a password',
-    )
-  }
-  return decodeURIComponent(url.password)
-}
-
-function assertPassword(value: string, name: string): void {
-  if (!PASSWORD_PATTERN.test(value)) {
-    throw new Error(`${name} must be 32-256 URL-safe characters (A-Z, a-z, 0-9, _ or -)`)
+    this.name = 'MissingRuntimeDatabaseRolesError'
+    this.roles = missing
   }
 }
-
-function assertPasswords(passwords: RuntimeDatabasePasswords): void {
-  parseDatabaseClusterScope(passwords.clusterScope)
-  assertPassword(passwords.administratorPassword, 'administratorPassword')
-  assertPassword(passwords.indexerPassword, 'indexerPassword')
-  assertPassword(passwords.apiPassword, 'apiPassword')
-  assertPassword(passwords.monitorPassword, 'monitorPassword')
-
-  if (
-    new Set([
-      passwords.administratorPassword,
-      passwords.indexerPassword,
-      passwords.apiPassword,
-      passwords.monitorPassword,
-    ]).size !== 4
-  ) {
-    throw new Error('administrator and runtime database passwords must be pairwise distinct')
-  }
-}
-
-const CREATE_ROLES_SQL = `
-  DO $xcs_roles$
-  BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_indexer') THEN
-      CREATE ROLE xcs_indexer NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_api') THEN
-      CREATE ROLE xcs_api NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xcs_monitor') THEN
-      CREATE ROLE xcs_monitor NOLOGIN;
-    END IF;
-  END
-  $xcs_roles$;
-`
 
 const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
   DO $xcs_memberships$
@@ -118,10 +79,14 @@ const NORMALIZE_ROLE_MEMBERSHIPS_SQL = `
   $xcs_memberships$;
 `
 
+// LOGIN is asserted, never revoked: the managed service created these users as
+// login users and a half-finished run must not lock them out of their own
+// cluster. VALID UNTIL is deliberately left alone -- it is password metadata,
+// which belongs to whoever issues the password.
 const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
-  ALTER ROLE xcs_indexer WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_INDEXER_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_api WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
-  ALTER ROLE xcs_monitor WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT} VALID UNTIL 'infinity';
+  ALTER ROLE xcs_indexer WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_INDEXER_DATABASE_CONNECTION_LIMIT};
+  ALTER ROLE xcs_api WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_API_DATABASE_CONNECTION_LIMIT};
+  ALTER ROLE xcs_monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT ${XCS_MONITOR_DATABASE_CONNECTION_LIMIT};
   ALTER ROLE xcs_indexer RESET ALL;
   ALTER ROLE xcs_api RESET ALL;
   ALTER ROLE xcs_monitor RESET ALL;
@@ -134,25 +99,6 @@ const NORMALIZE_ROLE_ATTRIBUTES_SQL = `
   ALTER ROLE xcs_monitor SET statement_timeout = '30s';
   ALTER ROLE xcs_monitor SET lock_timeout = '10s';
   ALTER ROLE xcs_monitor SET idle_in_transaction_session_timeout = '30s';
-`
-
-const SET_ROLE_PASSWORDS_SQL = `
-  DO $xcs_passwords$
-  BEGIN
-    EXECUTE format(
-      'ALTER ROLE xcs_indexer PASSWORD %L',
-      current_setting('xcs.indexer_password')
-    );
-    EXECUTE format(
-      'ALTER ROLE xcs_api PASSWORD %L',
-      current_setting('xcs.api_password')
-    );
-    EXECUTE format(
-      'ALTER ROLE xcs_monitor PASSWORD %L',
-      current_setting('xcs.monitor_password')
-    );
-  END
-  $xcs_passwords$;
 `
 
 const REVOKE_CURRENT_DATABASE_ACCESS_SQL = `
@@ -193,26 +139,29 @@ const GRANT_RUNTIME_ACCESS_SQL = `
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_api;
 `
 
-export async function provisionRuntimeDatabaseRoles(
+export async function provisionRuntimeDatabasePrivileges(
   client: DatabaseClient,
-  passwords: RuntimeDatabasePasswords,
+  provisioning: RuntimeDatabaseProvisioning,
 ): Promise<void> {
-  assertPasswords(passwords)
+  parseDatabaseClusterScope(provisioning.clusterScope)
 
   await client.sql.begin(async (sql) => {
     await sql`SELECT pg_advisory_xact_lock(${PROVISION_LOCK_CLASS_ID}, ${PROVISION_LOCK_OBJECT_ID})`
-    await sql.unsafe(CREATE_ROLES_SQL)
+
+    const present = await sql<{ roleName: string }[]>`
+      SELECT rolname AS "roleName"
+      FROM pg_roles
+      WHERE rolname IN (${XCS_INDEXER_DATABASE_ROLE}, ${XCS_API_DATABASE_ROLE}, ${XCS_MONITOR_DATABASE_ROLE})
+    `
+    const found = new Set(present.map((row) => row.roleName))
+    const missing = XCS_RUNTIME_DATABASE_ROLES.filter((role) => !found.has(role))
+    if (missing.length > 0) {
+      throw new MissingRuntimeDatabaseRolesError(missing)
+    }
+
     await sql.unsafe(NORMALIZE_ROLE_MEMBERSHIPS_SQL)
     await sql.unsafe(NORMALIZE_ROLE_ATTRIBUTES_SQL)
-    await sql`SELECT set_config('password_encryption', 'scram-sha-256', true)`
-    await sql`SELECT set_config('xcs.indexer_password', ${passwords.indexerPassword}, true)`
-    await sql`SELECT set_config('xcs.api_password', ${passwords.apiPassword}, true)`
-    await sql`SELECT set_config('xcs.monitor_password', ${passwords.monitorPassword}, true)`
-    await sql.unsafe(SET_ROLE_PASSWORDS_SQL)
     await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
     await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
-    await sql.unsafe(
-      'ALTER ROLE xcs_indexer LOGIN; ALTER ROLE xcs_api LOGIN; ALTER ROLE xcs_monitor LOGIN;',
-    )
   })
 }

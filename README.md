@@ -76,13 +76,15 @@ pnpm --dir apps/indexer verify
 
 ### Pointing the applications at a database
 
-PostgreSQL is provisioned outside this repository. The indexer owns the tooling; run it once against
-a fresh database, then give each application its least-privilege connection string:
+PostgreSQL is provisioned outside this repository, and so are its users: create `xcs_indexer`,
+`xcs_api` and `xcs_monitor` in the DigitalOcean control panel or with `doctl databases user create`
+and keep the passwords DigitalOcean generates. The indexer then owns the grants; run it once against
+a fresh database as the administrator, then give each application its least-privilege connection
+string:
 
 ```bash
 XCS_BOOTSTRAP_DATABASE_URL=postgres://xcs_admin:…@host:5432/xcs \
   XCS_DATABASE_CLUSTER_SCOPE=dedicated \
-  XCS_INDEXER_DATABASE_PASSWORD=… XCS_API_DATABASE_PASSWORD=… XCS_MONITOR_DATABASE_PASSWORD=… \
   pnpm --dir apps/indexer db:bootstrap
 ```
 

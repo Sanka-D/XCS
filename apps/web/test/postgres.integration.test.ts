@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { computeSchemaUid, parseSchema, type SchemaDefinition } from '#xcs/core/index.js'
 import { schemaEvents, schemas } from '#db/schema'
 import { type DatabaseClient, createDatabaseClient } from '../server/lib/db/client.js'
-import { bootstrapDatabase, databasePasswordFromUrl } from './lib/db/bootstrap.js'
+import { bootstrapDatabase } from './lib/db/bootstrap.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { PostgresOperationalMetricsRepository } from '../server/xcs/operational-metrics-repository.js'
@@ -137,16 +137,17 @@ describePostgres('PostgreSQL 18 API integration', () => {
     `
     temporaryDatabaseUrl = databaseUrl(adminDatabaseUrl, temporaryDatabaseName)
     databaseClient = createDatabaseClient(temporaryDatabaseUrl)
+    // Stands in for the managed database service, which owns the users and their
+    // passwords; bootstrap only assigns privileges to roles that already exist.
     runtimeRoleCleanupAllowed = true
-    const bootstrapPasswords = {
-      clusterScope: 'dedicated',
-      administratorPassword: databasePasswordFromUrl(temporaryDatabaseUrl),
-      indexerPassword: INDEXER_DATABASE_PASSWORD,
-      apiPassword: API_DATABASE_PASSWORD,
-      monitorPassword: MONITOR_DATABASE_PASSWORD,
-    } as const
-    await bootstrapDatabase(databaseClient, bootstrapPasswords)
-    await bootstrapDatabase(databaseClient, bootstrapPasswords)
+    await adminClient.sql.unsafe(`
+      CREATE ROLE xcs_indexer LOGIN PASSWORD '${INDEXER_DATABASE_PASSWORD}';
+      CREATE ROLE xcs_api LOGIN PASSWORD '${API_DATABASE_PASSWORD}';
+      CREATE ROLE xcs_monitor LOGIN PASSWORD '${MONITOR_DATABASE_PASSWORD}';
+    `)
+    const bootstrapProvisioning = { clusterScope: 'dedicated' } as const
+    await bootstrapDatabase(databaseClient, bootstrapProvisioning)
+    await bootstrapDatabase(databaseClient, bootstrapProvisioning)
     runtimeApiClient = createDatabaseClient(
       runtimeDatabaseUrl(temporaryDatabaseUrl, 'xcs_api', API_DATABASE_PASSWORD),
     )

@@ -27,7 +27,7 @@ pnpm --dir apps/indexer verify   # format:check, lint, test, build
 ```
 
 Configuration is the contract in [`.env.example`](./.env.example). The long-running service reads the
-first ten variables; the last five are read only by `db:bootstrap`.
+first ten variables; the last two are read only by `db:bootstrap`.
 
 The committed `config/networks/testnet.example.json` is a placeholder with an invalid registry and
 activation boundary. The indexer refuses it and stops with `SOURCE_REGISTRY_NOT_BLACKHOLED`. **This is
@@ -42,12 +42,16 @@ devDependencies; the web app has none of them.
 ```sh
 pnpm --dir apps/indexer db:generate    # regenerate db/migrations after editing db/schema — commit the result
 pnpm --dir apps/indexer db:migrate     # apply migrations to an existing database (idempotent)
-pnpm --dir apps/indexer db:bootstrap   # migrate + provision xcs_indexer / xcs_api / xcs_monitor
+pnpm --dir apps/indexer db:bootstrap   # migrate + grant privileges to xcs_indexer / xcs_api / xcs_monitor
 ```
 
-`db:bootstrap` runs once against a fresh database and needs `XCS_BOOTSTRAP_DATABASE_URL`,
-`XCS_DATABASE_CLUSTER_SCOPE=dedicated` and the three runtime passwords. It is idempotent, which is
-also how a runtime password is rotated. PostgreSQL is provisioned outside this repository; see
+`db:bootstrap` runs once against a fresh database and needs only `XCS_BOOTSTRAP_DATABASE_URL` and
+`XCS_DATABASE_CLUSTER_SCOPE=dedicated`. It is **grants-only**: the managed database service owns the
+users, so create `xcs_indexer`, `xcs_api` and `xcs_monitor` in the DigitalOcean control panel or with
+`doctl databases user create` first, take the passwords DigitalOcean generates, then run this once as
+the administrator. It never creates a role and never sets, resets or reads a role password; if a role
+is missing it fails and names it. It is idempotent. Rotating a runtime password is now a DigitalOcean
+operation and does not need this step. PostgreSQL is provisioned outside this repository; see
 [`docs/database.md`](../../docs/database.md) and the
 [deployment runbook](../../docs/runbooks/deployment.md).
 

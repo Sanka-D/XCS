@@ -47,10 +47,16 @@ to the copy of `db/migrations` beside the built application).
 pnpm --dir apps/indexer db:bootstrap
 ```
 
-Applies the migrations and then provisions the cluster-wide runtime roles (`xcs_indexer`, `xcs_api`,
-`xcs_monitor`) from `XCS_INDEXER_DATABASE_PASSWORD`, `XCS_API_DATABASE_PASSWORD` and
-`XCS_MONITOR_DATABASE_PASSWORD`. It requires `XCS_DATABASE_CLUSTER_SCOPE=dedicated` because those
-roles are cluster-wide.
+Applies the migrations and then assigns the privileges of the runtime roles (`xcs_indexer`,
+`xcs_api`, `xcs_monitor`). It is grants-only: it does not create the roles and does not set their
+passwords. Create those three users with the managed database service first — the DigitalOcean
+control panel or `doctl databases user create` — and the step fails naming any that is missing. It
+requires `XCS_DATABASE_CLUSTER_SCOPE=dedicated` because the grants and role attributes it applies are
+cluster-visible.
+
+The local Compose stack has no managed service to create the users, so
+`db/compose-initdb/01-runtime-roles.sql` creates them there with published, local-development-only
+passwords when the postgres volume is first initialised.
 
 ### Never edit an applied migration
 
