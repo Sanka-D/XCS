@@ -8,8 +8,13 @@ import {
   type H3Event,
 } from 'h3'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
+import {
+  ApplicationError,
+  inputObject,
+  inputUuid,
+  parseApplicationInput,
+} from '../applications/domain'
 import type { Session } from '../auth/types'
-import { IssuerError, applicationInput, object, uuid } from '../issuer/types'
 import { RecipientError } from '../recipient/types'
 import { readJsonBody } from '../private-body'
 import { historyCsv } from './csv'
@@ -35,7 +40,7 @@ export function createVerifierHandler({
     const query = getQuery(event)
     if (Object.keys(query).some((key) => key !== 'organizationId'))
       throw new VerifierError(400, 'VERIFIER_INPUT_INVALID')
-    return query.organizationId === undefined ? undefined : uuid(query.organizationId)
+    return query.organizationId === undefined ? undefined : inputUuid(query.organizationId)
   }
   router.get(
     '/api/verifier/workspace',
@@ -46,7 +51,7 @@ export function createVerifierHandler({
     defineEventHandler(async (event) =>
       repository.apply(
         sessions.get(event)!,
-        applicationInput(await readJsonBody(event, 22 * 1024 * 1024)),
+        parseApplicationInput(await readJsonBody(event, 22 * 1024 * 1024)),
       ),
     ),
   )
@@ -67,10 +72,10 @@ export function createVerifierHandler({
     defineEventHandler(async (event) => {
       if (Object.keys(getQuery(event)).length)
         throw new VerifierError(400, 'VERIFIER_INPUT_INVALID')
-      object(await readJsonBody(event, 4096), [])
+      inputObject(await readJsonBody(event, 4096), [])
       return repository.reopen(
         sessions.get(event)!,
-        uuid(getRouterParam(event, 'id')),
+        inputUuid(getRouterParam(event, 'id')),
         resolvePresentation,
       )
     }),
@@ -99,7 +104,7 @@ export function createVerifierHandler({
       return {
         error:
           error instanceof VerifierError ||
-          error instanceof IssuerError ||
+          error instanceof ApplicationError ||
           error instanceof RecipientError
             ? error.code
             : status === 401

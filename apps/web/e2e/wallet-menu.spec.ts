@@ -28,13 +28,12 @@ test('reopens the wallet chooser after disconnecting and navigating', async ({ p
   await page.locator('[data-wallet-id="xcs-browser-e2e"]').click()
   await expect(trigger).toContainText('rHb9CJ')
   await expect(page.getByTestId('wallet-status')).toContainText('Connected')
-  await expect(page.getByTestId('wallet-space-link')).toBeVisible()
 
   await trigger.click()
   await expect(trigger).toContainText(/Connecter un wallet|Connect wallet/u)
   await expect(page.getByTestId('wallet-status')).toHaveCount(0)
 
-  await page.goto('/accept')
+  await page.goto('/schemas')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('wallet-toggle').click()
   await expect(page.getByTestId('wallet-toggle')).toHaveAttribute('aria-expanded', 'true')
@@ -46,7 +45,7 @@ test('reopens the wallet chooser after disconnecting and navigating', async ({ p
 })
 
 test('keeps a dismissed wallet chooser closed after slow discovery', async ({ page }) => {
-  await page.goto('/studio')
+  await page.goto('/learn')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.evaluate(() => {
     const controls = globalThis as typeof globalThis & {
@@ -68,7 +67,7 @@ test('keeps a dismissed wallet chooser closed after slow discovery', async ({ pa
 test('shows pending approval, prevents duplicate connections and then shows the account', async ({
   page,
 }) => {
-  await page.goto('/studio')
+  await page.goto('/learn')
   await page.locator('[data-client-ready="true"]').waitFor()
   const trigger = page.getByTestId('wallet-toggle')
   await trigger.click()
@@ -94,7 +93,7 @@ test('shows pending approval, prevents duplicate connections and then shows the 
 test('shows transaction-specific Credential compatibility in the wallet chooser', async ({
   page,
 }) => {
-  await page.goto('/studio')
+  await page.goto('/learn')
   await page.locator('[data-client-ready="true"]').waitFor()
   await page.getByTestId('wallet-toggle').click()
 
@@ -109,7 +108,7 @@ test('shows transaction-specific Credential compatibility in the wallet chooser'
 test('revokes a stale Otsu origin permission before the first explicit connection', async ({
   page,
 }) => {
-  await page.goto('/studio')
+  await page.goto('/learn')
   await page.locator('[data-client-ready="true"]').waitFor()
 
   const trigger = page.getByTestId('wallet-toggle')
@@ -121,7 +120,7 @@ test('revokes a stale Otsu origin permission before the first explicit connectio
 
 test('keeps the wallet chooser inside a 320px viewport', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 })
-  await page.goto('/studio')
+  await page.goto('/learn')
   await page.locator('[data-client-ready="true"]').waitFor()
 
   await page.getByTestId('wallet-toggle').click()

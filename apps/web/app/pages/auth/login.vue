@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { authReturnPath } from '~/utils/authReturnPath'
+import { authReturnPath } from '~/utils/portalRoutes'
 const { t } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()

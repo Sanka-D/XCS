@@ -2,20 +2,20 @@
 const uiLocale = useUiLocale()
 const { locale } = useI18n()
 useHead(() => ({ htmlAttrs: { lang: locale.value === 'fr' ? 'fr-FR' : 'en-US' } }))
-const route = useRoute()
-const localePath = useLocalePath()
-// Issue and operations render recovery in context; other routes keep it reachable.
-const showRecovery = computed(
-  () => ![localePath('/issue'), localePath('/operations')].includes(route.path),
-)
+onMounted(() => {
+  if (window.location.hash !== '#xcs-legacy-redirect') return
+  window.history.replaceState(
+    window.history.state,
+    '',
+    window.location.pathname + window.location.search,
+  )
+})
 </script>
 
 <template>
   <UApp :locale="uiLocale">
+    <span id="xcs-legacy-redirect" hidden aria-hidden="true" />
     <NuxtLayout>
-      <UContainer v-if="showRecovery">
-        <HostedPublicationRecovery />
-      </UContainer>
       <NuxtPage />
     </NuxtLayout>
   </UApp>

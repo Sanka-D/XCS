@@ -20,7 +20,7 @@ import { readJsonBody } from '../private-body'
 import type { AuthIdentityProvider } from './oidc'
 import { hasRole, type AuthRepository, type Session, type AppRole } from './types'
 import { verifyWalletProof } from './wallet-proof'
-import { authReturnPath } from '../../../app/utils/authReturnPath'
+import { authReturnPath } from '../../../app/utils/portalRoutes'
 
 export const SESSION_COOKIE = '__Host-xcs-session'
 const LOGIN_COOKIE = '__Host-xcs-login'

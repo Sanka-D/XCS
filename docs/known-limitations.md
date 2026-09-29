@@ -21,9 +21,9 @@ integrators.
   lists schema registrations, not Credential events.
 - Commons publishes no issuer badges, rankings or universal trust result. Issuer trust remains an
   application policy separate from ledger state, schema validity and payload integrity.
-- Public Studio and verification remain accountless. Optional OIDC accounts, wallet linking,
-  admin approval and issuer workspaces add server sessions and organization records; approval is
-  not issuer endorsement. See [ADR 0005](adr/0005-role-based-application.md). Wallet operations and
+- Public Explorer reads and public presentation resolution remain accountless. OIDC accounts,
+  wallet linking, admin approval and role workspaces add server sessions and organization records;
+  approval is not issuer endorsement. See [ADR 0007](adr/0007-guided-role-portals.md). Wallet operations and
   receipts still use browser-local recovery, lost on site-data clearing or a device change.
 - Issuance is one Credential at a time through a supported wallet. Batch issuance, team membership,
   fine-grained team permissions, hosted automation and GraphQL remain outside this implementation.

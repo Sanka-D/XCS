@@ -1,9 +1,8 @@
 import { sql } from 'drizzle-orm'
 import type { DatabaseClient } from '../../lib/db/index.js'
 import type { XcsDatabase } from '../../lib/db/client.js'
+import type { ApplicationInput, ApplicationRepository } from '../applications/domain'
 import type { Session } from '../auth/types'
-import type { IssuerRepository } from '../issuer/repository'
-import type { ApplicationInput } from '../issuer/types'
 import type { ResolvedPresentation } from '../recipient/types'
 import type { VerificationReport } from '../verification'
 import { VerifierError, type VerifierHistoryEntry, type VerifierWorkspace } from './types'
@@ -17,7 +16,7 @@ export type PresentationResolver = (
 export class VerifierRepository {
   constructor(
     private readonly client: DatabaseClient,
-    private readonly applications: Pick<IssuerRepository, 'apply'>,
+    private readonly applications: ApplicationRepository,
   ) {}
 
   private async session(query: Query, session: Session) {

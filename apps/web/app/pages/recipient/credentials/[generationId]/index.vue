@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import type {
-  RecipientCredentialDetail,
-  RecipientPayload,
-} from '../../../../../server/xcs/recipient/types'
+import type { RecipientCredentialDetail, RecipientPayloadView } from '~/types/portal'
 import { recipientCredentialPath } from '~/utils/presentationView'
 import { singleRouteQueryValue } from '~/utils/operationLinks'
 
@@ -30,7 +27,7 @@ const shareLink = computed(() => ({
   path: localePath(`/recipient/credentials/${generationId.value}/present`),
   query: { profile: profileId.value },
 }))
-const content = shallowRef<RecipientPayload | null>(null)
+const content = shallowRef<RecipientPayloadView | null>(null)
 const contentBusy = ref(false)
 const contentError = ref(false)
 let contentRevision = 0
@@ -57,7 +54,7 @@ async function readContent() {
   const revision = contentRevision
   const identity = auth.user.value?.id
   try {
-    const payload = await request<RecipientPayload>(
+    const payload = await request<RecipientPayloadView>(
       `${recipientCredentialPath(profileId.value, generationId.value)}/payload`,
     )
     if (
@@ -116,19 +113,9 @@ useSeoMeta({
         <p v-else-if="detail.status.state !== 'pending'" class="mt-4 text-muted">
           {{ $t('recipient.inactiveHelp') }}
         </p>
-        <details class="mt-5 rounded border border-default p-4">
-          <summary class="cursor-pointer font-semibold">{{ $t('recipient.evidence') }}</summary>
-          <MetadataList class="mt-3">
-            <dt>{{ $t('recipient.issuerWallet') }}</dt>
-            <dd class="break-all font-mono">{{ detail.issuerAddress }}</dd>
-            <dt>{{ $t('recipient.subjectWallet') }}</dt>
-            <dd class="break-all font-mono">{{ detail.subjectAddress }}</dd>
-            <dt>{{ $t('recipient.generation') }}</dt>
-            <dd class="break-all font-mono">{{ detail.generationId }}</dd>
-            <dt>{{ $t('auth.network') }}</dt>
-            <dd>{{ detail.profileId }}</dd>
-          </MetadataList>
-        </details>
+        <StatusBox class="mt-5">
+          {{ $t(`portal.admission.${detail.issuerAdmission ?? 'unknown'}`) }}
+        </StatusBox>
         <section v-if="detail.status.accepted" class="mt-5">
           <p class="text-sm text-muted">{{ $t('recipient.readHelp') }}</p>
           <UButton

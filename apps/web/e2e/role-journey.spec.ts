@@ -51,6 +51,7 @@ test('guides a recipient without a wallet and limits the local chooser to suppor
     page.getByText('Linking the wallet here sends no transaction', { exact: false }),
   ).toBeVisible()
   await expect(page.getByTestId('wallet-link-continue')).toHaveCount(0)
+  await page.getByRole('button', { name: 'I have prepared my wallet', exact: true }).click()
   await page.getByTestId('wallet-link-toggle').click()
   const choices = await page
     .getByTestId('wallet-link-menu')

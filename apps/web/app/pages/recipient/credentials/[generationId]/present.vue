@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type {
-  CreatedPresentation,
-  Presentation,
+  CreatedPresentationView,
+  PresentationView,
   RecipientCredentialDetail,
-} from '../../../../../server/xcs/recipient/types'
+} from '~/types/portal'
 import { presentationLink, recipientCredentialPath } from '~/utils/presentationView'
 import { singleRouteQueryValue } from '~/utils/operationLinks'
 import { useWallet as useXrplConnectWallet } from '@xrpl-commons/xrpl-connect-vue'
@@ -33,7 +33,7 @@ const { data, error, status, refresh } = useAsyncData(
         recipientCredentialPath(profileId.value, generationId.value),
       ),
       request<{ verifiers: { id: string; name: string }[] }>('/api/recipient/verifiers'),
-      request<{ presentations: Presentation[] }>('/api/recipient/presentations', {
+      request<{ presentations: PresentationView[] }>('/api/recipient/presentations', {
         query: { profileId: profileId.value, generationId: generationId.value },
       }),
     ])
@@ -118,7 +118,7 @@ async function create() {
       challenge.message,
     )
     if (attempt !== formRevision) throw new Error('PRESENTATION_PROOF_CONTEXT_CHANGED')
-    const result = await auth.mutateApplication<CreatedPresentation>(
+    const result = await auth.mutateApplication<CreatedPresentationView>(
       '/api/recipient/presentations',
       {
         ...input,
@@ -256,10 +256,6 @@ useSeoMeta({
         >
           <h3 class="font-semibold">{{ $t('roleJourney.shareProofTitle') }}</h3>
           <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.shareProofHelp') }}</p>
-          <details class="mt-3 text-sm">
-            <summary class="cursor-pointer">{{ $t('simpleRecipient.walletDetails') }}</summary>
-            <p class="mt-2 break-all font-mono">{{ data.credential.subjectAddress }}</p>
-          </details>
           <ClientOnly
             ><div class="mt-3"><WalletButton proof-only test-id-prefix="presentation-wallet" /></div
           ></ClientOnly>

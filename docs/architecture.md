@@ -38,6 +38,20 @@ library that neither application imports. See [ADR 0004](./adr/0004-two-standalo
 - `sdk` builds and validates XRPL transaction JSON and submits signed blobs. It never owns keys.
 - `cli` is a thin command layer over core and SDK.
 
+## Guided application boundary
+
+The browser mutation surface is role-oriented: `/issuer` derives the issuer's next action,
+`/recipient` joins invitation, wallet, review, acceptance and sharing, and `/presentations` resolves
+public or audience-restricted sharing links. Pure application presenters build those views from
+DTOs; their `nextAction` values are never authorization. Server repositories remain authoritative
+for roles, organization approval, wallet ownership, current ledger evidence, audience and replay
+protection.
+
+Technical identifiers remain in internal coordinates and in the public integration surfaces, but
+the role portals do not ask users to type or interpret them. The public `/v1` API, CLI and read-only
+Explorer pages are unchanged. See
+[ADR 0007](./adr/0007-guided-role-portals.md).
+
 The applications do not import `core` or `sdk`. Each carries hand-maintained copies of the protocol
 code it needs, every file headed with its origin; `packages/core` remains the reference
 implementation and the place a protocol change lands first. The mirroring rule is in

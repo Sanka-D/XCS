@@ -710,6 +710,19 @@
     "approvalCaveat": "L’approbation accorde le rôle applicatif sélectionné. Elle ne constitue pas une validation des claims de l’organisation.",
     "privateClaims": "Les claims privés restent sous le contrôle du destinataire. Le rôle administrateur et l’approbation d’un vérificateur ne donnent pas accès aux claims privés.",
     "decision": "Décision d’accès",
+    "revision": "Révision de la décision",
+    "lastReason": "Dernier motif",
+    "checklist": {
+      "title": "Checklist d’examen",
+      "organization": "Organisation",
+      "role": "Rôle demandé",
+      "responsible": "Responsable",
+      "documents": "Justificatifs",
+      "wallet": "Wallet déclaré",
+      "history": "Historique des décisions",
+      "complete": "Disponible",
+      "attention": "À vérifier"
+    },
     "applicationHistory": "Historique de la candidature",
     "reasonRequired": "Motif (obligatoire)",
     "reasonOptional": "Motif (facultatif)",
@@ -939,20 +952,31 @@
     "copyOnce": "Copiez ce lien avant de quitter la page : il n’est affiché qu’une fois. Envoyez-le à la personne qui doit vérifier votre attestation.",
     "qrAlt": "Code QR de ce lien de partage",
     "copy": "Copier le lien",
+    "share": "Partager le lien",
     "copied": "Lien copié.",
+    "shared": "Lien partagé.",
     "copyFailed": "La copie est indisponible. Sélectionnez le lien et copiez-le manuellement.",
     "limitation": "Ces vérifications confirment les enregistrements et signatures disponibles. Elles ne garantissent pas la véracité des déclarations de l’émetteur.",
     "partialHelp": "Seules les informations partagées sont affichées. Le contenu complet n’a pas été vérifié indépendamment dans cette vue.",
     "fullFields": "Contenu complet autorisé",
     "publicFields": "Champs publics",
     "authorizationHelp": "Les détails privés exigent une organisation vérificatrice approuvée et un partage destiné à cette organisation. La connexion ou l’agrément seuls ne donnent pas accès aux champs privés.",
-    "openHelp": "Ouvrez la présentation pour demander les preuves actuelles et les champs que vous êtes autorisé à consulter.",
+    "audienceIncorrect": "Vous êtes connecté, mais votre organisation n’est pas le destinataire autorisé du contenu privé. Les champs publics restent visibles.",
+    "openHelp": "Ouvrez un lien de partage pour demander ses preuves actuelles et les champs que vous êtes autorisé à consulter.",
     "open": "Ouvrir la présentation",
     "checkAgain": "Vérifier à nouveau",
     "unusableHelp": "Ce lien est indisponible ou a été révoqué. Demandez un nouveau lien au destinataire.",
     "unavailableHelp": "Les preuves actuelles n’ont pas pu être vérifiées. Aucun résultat antérieur ne doit être considéré comme actuel.",
+    "failureHelp": {
+      "invalid": "Ce lien de partage est invalide. Demandez au destinataire un nouveau lien complet.",
+      "revoked": "Le destinataire a révoqué ce lien de partage. Demandez-lui d’en créer un nouveau.",
+      "holderProof": "La preuve du wallet destinataire est absente ou invalide. Demandez au destinataire de créer un nouveau lien.",
+      "unavailable": "Les preuves actuelles n’ont pas pu être vérifiées. Réessayez sans recoller le lien."
+    },
     "headlines": {
-      "unusable": "Présentation indisponible",
+      "invalid": "Lien de partage invalide",
+      "revoked": "Lien de partage révoqué",
+      "holderProof": "Preuve du destinataire indisponible",
       "unavailable": "Impossible de vérifier maintenant",
       "pending": "Pas encore acceptée",
       "notFound": "Attestation introuvable",
@@ -1045,6 +1069,109 @@
     },
     "holderProofRecreate": "Demandez au destinataire de créer un nouveau lien avec une nouvelle signature de son wallet.",
     "holderKeyLimit": "La clé publique signataire correspond à cette adresse de wallet. Ce contrôle porte sur l’adresse de la clé maître ; il ne prouve pas que sa signature était activée sur le registre à cette date. Il ne prouve pas une identité civile."
+  },
+  "portal": {
+    "nextAction": "Votre prochaine action",
+    "retry": "Réessayer",
+    "walletRequired": "Liez un wallet d’émission avant de continuer.",
+    "issuer": {
+      "title": "Portail émetteur",
+      "lead": "Reprenez à l’unique action qui fait actuellement avancer votre organisation."
+    },
+    "errors": {
+      "unavailable": "Cet espace est temporairement indisponible.",
+      "unchanged": "Lorsque cet échec est signalé, aucun état du portail n’a été modifié."
+    },
+    "actions": {
+      "apply": {
+        "title": "Déposer une candidature auprès de Commons",
+        "help": "Présentez votre organisation et fournissez ses documents d’examen.",
+        "cta": "Commencer la candidature"
+      },
+      "awaitApproval": {
+        "title": "Attendre la décision Commons",
+        "help": "Votre candidature est examinée. Actualisez cette page après réception de la décision.",
+        "cta": "Actualiser"
+      },
+      "linkWallet": {
+        "title": "Lier le wallet d’émission",
+        "help": "Prouvez le contrôle du wallet Testnet que votre organisation utilisera pour signer les émissions.",
+        "cta": "Préparer le wallet d’émission"
+      },
+      "createTemplate": {
+        "title": "Créer un modèle d’attestation",
+        "help": "Donnez-lui un nom métier, une catégorie et des champs lisibles.",
+        "cta": "Créer le premier modèle"
+      },
+      "invite": {
+        "title": "Inviter un destinataire",
+        "help": "Choisissez un modèle et envoyez une invitation sécurisée par e-mail.",
+        "cta": "Inviter un destinataire"
+      },
+      "awaitRecipient": {
+        "title": "Attendre le destinataire",
+        "help": "Le destinataire doit réclamer l’invitation et prouver le contrôle de son wallet avant l’émission.",
+        "cta": "Actualiser"
+      },
+      "issue": {
+        "title": "Préparer l’attestation",
+        "help": "Le destinataire est prêt. Vérifiez le contenu lisible et la visibilité avant de demander la signature du wallet.",
+        "cta": "Préparer l’attestation"
+      },
+      "review": {
+        "title": "Examiner l’attestation",
+        "help": "Vérifiez l’émetteur, le contenu et la visibilité avant toute action wallet.",
+        "cta": "Examiner"
+      },
+      "accept": {
+        "title": "Accepter l’attestation",
+        "help": "Votre wallet affichera l’action avant que vous ne l’approuviez.",
+        "cta": "Accepter"
+      },
+      "share": {
+        "title": "Partager l’attestation",
+        "help": "Choisissez les données publiques ou complètes et, pour les données complètes, l’organisation destinataire.",
+        "cta": "Partager"
+      },
+      "done": {
+        "title": "Le travail émetteur actuel est terminé",
+        "help": "Vous pouvez inviter un autre destinataire ou consulter les attestations existantes.",
+        "cta": "Inviter un autre destinataire"
+      }
+    },
+    "walletProgress": {
+      "title": "Progression de la préparation du wallet",
+      "prepare": "Préparer le wallet",
+      "connect": "Le connecter",
+      "prove": "Prouver le contrôle",
+      "ready": "Prêt",
+      "prepared": "J’ai préparé mon wallet",
+      "issuerIntro": "Liez le wallet Testnet contrôlé par votre organisation. XCS ne demande ni ne conserve jamais sa clé privée.",
+      "continueIssuer": "Continuer vers le portail émetteur"
+    },
+    "invitationProgress": {
+      "title": "Progression de l’invitation",
+      "email": "E-mail envoyé",
+      "claimed": "Lien réclamé",
+      "wallet": "Wallet vérifié",
+      "issuance": "Attestation émise"
+    },
+    "progress": {
+      "complete": "Terminé",
+      "current": "Étape actuelle",
+      "pending": "En attente",
+      "attention": "À vérifier"
+    },
+    "recipient": {
+      "showAndVerify": "Afficher et vérifier le contenu",
+      "shareNow": "Partager cette attestation"
+    },
+    "admission": {
+      "approved": "Actuellement admise par Commons",
+      "suspended": "Admission Commons suspendue",
+      "not_approved": "Non admise actuellement par Commons",
+      "unknown": "Admission Commons indisponible"
+    }
   },
   "simpleUi": {
     "technicalDetails": "Détails techniques",

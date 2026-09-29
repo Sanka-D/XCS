@@ -1,7 +1,6 @@
 <script setup lang="ts">
 const { locale, locales, setLocale, t } = useI18n()
 const localePath = useLocalePath()
-const { account } = useWallet()
 const auth = useAuth()
 const issuerEnabled = String(useRuntimeConfig().public.issuerEnabled) === '1'
 await auth.load()
@@ -22,17 +21,7 @@ const localeItems = computed(() =>
 
 const protocolNavigation = computed(() => [
   { label: t('nav.explorer'), to: localePath('/schemas') },
-  { label: t('nav.create'), to: localePath('/studio') },
-  { label: t('nav.verify'), to: localePath('/verify') },
-  ...(account.value
-    ? [
-        {
-          label: t('nav.wallet'),
-          to: localePath('/credentials'),
-          'data-testid': 'wallet-space-link',
-        },
-      ]
-    : []),
+  { label: t('simpleNavigation.verify'), to: localePath('/presentations') },
   { label: t('nav.docs'), to: localePath('/developers') },
   ...(auth.hasRole('admin') ? [{ label: t('admin.title'), to: localePath('/admin') }] : []),
   ...(issuerEnabled && auth.user.value
@@ -66,8 +55,6 @@ const navigation = computed(() =>
               ? [{ label: t('admin.title'), to: localePath('/admin') }]
               : []),
             { label: t('nav.explorer'), to: localePath('/schemas') },
-            { label: t('nav.create'), to: localePath('/studio') },
-            ...(account.value ? [{ label: t('nav.wallet'), to: localePath('/credentials') }] : []),
             { label: t('nav.docs'), to: localePath('/developers') },
             { label: t('nav.status'), to: localePath('/status') },
           ],
@@ -78,7 +65,13 @@ const navigation = computed(() =>
 
 const footerLinks = computed(() => [
   { label: t('nav.schemas'), to: localePath('/schemas') },
-  { label: t('nav.create'), to: localePath('/studio') },
+  ...(simpleNavigation.value
+    ? [
+        { label: t('simpleNavigation.receive'), to: localePath('/recipient') },
+        { label: t('simpleNavigation.issue'), to: localePath('/issuer') },
+        { label: t('simpleNavigation.verify'), to: localePath('/presentations') },
+      ]
+    : []),
   { label: t('nav.docs'), to: localePath('/developers') },
   { label: t('nav.activity'), to: localePath('/activity') },
   { label: t('nav.status'), to: localePath('/status') },

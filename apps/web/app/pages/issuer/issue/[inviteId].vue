@@ -17,6 +17,9 @@ const subjectAddress = ref('')
 const error = ref('')
 const engineBusy = ref(false)
 const savedLink = ref('')
+const hasIssuerWallet = computed(
+  () => user.value?.wallets.some((wallet) => wallet.networkId === 1) === true,
+)
 try {
   issuance.value = await api.issuance(inviteId)
   if (issuance.value.existingCredential) {
@@ -78,6 +81,17 @@ useSeoMeta({ robots: 'noindex,nofollow' })
           <code>{{ error }}</code>
         </details></StatusBox
       >
+      <StatusBox v-else-if="!hasIssuerWallet" tone="warning">
+        <p>{{ $t('portal.walletRequired') }}</p>
+        <UButton
+          class="mt-3"
+          :to="{
+            path: localePath('/account'),
+            query: { returnTo: localePath(`/issuer/issue/${inviteId}`) },
+          }"
+          >{{ $t('portal.actions.linkWallet.cta') }}</UButton
+        >
+      </StatusBox>
       <StatusBox v-else-if="!wallets.length" tone="warning">{{
         $t('issuer.engine.walletRequired')
       }}</StatusBox>
@@ -108,7 +122,7 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       }}</UButton>
     </UContainer>
     <CredentialIssueForm
-      v-if="context"
+      v-if="context && hasIssuerWallet"
       :key="`${context.key}:${context.subjectAddress}`"
       :issuer-context="context"
       @busy="engineBusy = $event"

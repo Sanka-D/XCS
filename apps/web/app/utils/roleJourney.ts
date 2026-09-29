@@ -1,7 +1,8 @@
-/** The account wallet step may return only to the recipient workspace. */
+import { walletReturnPath } from './portalRoutes'
+
+/** Backward-compatible name for the recipient wallet onboarding return. */
 export function walletLinkReturnPath(value: unknown, locale: string): string {
-  if (value === '/recipient' || value === '/fr/recipient') return value
-  return locale === 'fr' ? '/fr/recipient' : '/recipient'
+  return walletReturnPath(value, locale)
 }
 
 /** Keep the guided picker aligned with the existing supported ownership proof schemes. */

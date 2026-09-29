@@ -53,7 +53,14 @@ async function mockIssuer(page: Page, state: () => unknown = () => workspace()) 
           email: 'responsible@example.test',
           roles: ['recipient'],
           organizations: [{ id: organizationId, name: organization.name, roles: ['issuer'] }],
-          wallets: [],
+          wallets: [
+            {
+              id: '00000000-0000-4000-8000-000000000035',
+              address: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+              networkId: 1,
+              verifiedAt: '2026-09-24T10:00:00Z',
+            },
+          ],
         },
       },
     }),
@@ -84,9 +91,6 @@ async function fillInvitation(page: Page) {
   await page
     .getByRole('combobox', { name: 'Attestation template', exact: true })
     .selectOption({ label: schema.displayName })
-  await page
-    .getByRole('textbox', { name: 'Optional message', exact: true })
-    .fill('Your synthetic qualification is ready.')
 }
 
 test('shows organization schemas and invites recipients by named schema without a UID input', async ({
@@ -94,18 +98,15 @@ test('shows organization schemas and invites recipients by named schema without 
 }) => {
   await mockIssuer(page)
   await enter(page, '/issuer')
-  await expect(page).toHaveURL(/\/issuer\/schemas$/)
-  await expect(
-    page.getByRole('heading', { name: 'Attestation templates', exact: true }),
-  ).toBeVisible()
-  await expect(page.getByRole('heading', { name: schema.displayName, exact: true })).toBeVisible()
-  await expect(page.getByRole('combobox', { name: 'Organization', exact: true })).toHaveValue(
-    organizationId,
+  await expect(page).toHaveURL(/\/issuer$/)
+  await expect(page.getByRole('heading', { name: 'Issuer portal', exact: true })).toBeVisible()
+  const nextAction = page.getByTestId('issuer-next-action')
+  await expect(nextAction).toContainText('Invite a recipient')
+  await expect(nextAction.getByRole('link', { name: 'Invite a recipient' })).toHaveAttribute(
+    'href',
+    `/issuer/recipients?organizationId=${organizationId}`,
   )
-  await page
-    .getByRole('navigation', { name: 'Issuer navigation' })
-    .getByRole('link', { name: 'Recipients', exact: true })
-    .click()
+  await nextAction.getByRole('link', { name: 'Invite a recipient', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Recipients', exact: true })).toBeVisible()
   await expect(
     page
@@ -113,6 +114,7 @@ test('shows organization schemas and invites recipients by named schema without 
       .getByRole('option', { name: schema.displayName }),
   ).toHaveCount(1)
   await expect(page.getByRole('textbox', { name: /uid/i })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: /message/i })).toHaveCount(0)
   await expect(page.getByText('No invitations yet.', { exact: true })).toBeVisible()
 })
 
@@ -295,12 +297,7 @@ test('keeps the invitation bearer out of URLs and browser storage and claims onl
     await expect(page).toHaveURL(/\/recipient\/invitations$/)
     expect(bodies).toEqual([{ path: '/api/issuer/invitations/preview', body: { token } }])
     await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
-    await expect(
-      page.getByText(
-        'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
-        { exact: true },
-      ),
-    ).toBeVisible()
+    await expect(page.getByText('Your wallet is already linked', { exact: false })).toBeVisible()
     expect(bodies).toEqual([
       { path: '/api/issuer/invitations/preview', body: { token } },
       { path: '/api/issuer/invitations/claim', body: { token } },
@@ -344,12 +341,7 @@ test('replaces a claimed invitation with successive native and router links in t
   await enter(page, `/recipient/invitations#${first}`)
   await expect(page.getByRole('heading', { name: names[first], exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Claim with this account', exact: true }).click()
-  await expect(
-    page.getByText(
-      'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
-      { exact: true },
-    ),
-  ).toBeVisible()
+  await expect(page.getByText('Your wallet is already linked', { exact: false })).toBeVisible()
   await page.evaluate((token) => {
     window.location.hash = token
   }, second)
@@ -453,12 +445,7 @@ test('ignores an old claim response after a different invitation arrived in the 
   await expect.poll(() => claims).toEqual([first, second])
   for (const value of [first, second])
     expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain(value)
-  await expect(
-    page.getByText(
-      'Invitation claimed. Link your wallet in your account so the issuer can review it before issuing.',
-      { exact: true },
-    ),
-  ).toBeVisible()
+  await expect(page.getByText('Your wallet is already linked', { exact: false })).toBeVisible()
 })
 
 test('renders the issuer navigation and unconfirmed delivery guidance in French', async ({

@@ -1,14 +1,13 @@
 import { validatePublicFields } from '../../lib/db/index.js'
 import { isNotificationEmail } from '../admin/notifications'
+import {
+  ApplicationError,
+  parseApplicationInput,
+  type ApplicationInput,
+  type OrganizationApplication,
+} from '../applications/domain'
 
-export interface IssuerOrganization {
-  id: string
-  name: string
-  status: 'active' | 'suspended' | 'closed'
-  applicationStatus: 'pending' | 'approved' | 'rejected' | 'suspended'
-  reviewReason: string | null
-  revision: number
-}
+export type IssuerOrganization = OrganizationApplication
 export interface IssuerSchema {
   profileId: string
   schemaUid: string
@@ -127,47 +126,13 @@ export function disclosure(input: Record<string, unknown>): {
     publicFields: input.publicFields as string[],
   }
 }
-export interface ApplicationInput {
-  name: string
-  website: string
-  contact: string
-  jurisdiction: string
-  description: string
-  purpose: string
-  documents: { mimeType: string; base64: string }[]
-}
+export type { ApplicationInput }
 export function applicationInput(value: unknown): ApplicationInput {
-  const input = object(value, [
-    'name',
-    'website',
-    'contact',
-    'jurisdiction',
-    'description',
-    'purpose',
-    'documents',
-  ])
-  const website = text(input.website, 2048)
   try {
-    const url = new URL(website)
-    if (url.protocol !== 'https:' || url.username || url.password) throw new Error()
-  } catch {
-    throw new IssuerError(400, 'ISSUER_WEBSITE_INVALID')
-  }
-  if (!Array.isArray(input.documents) || input.documents.length < 1 || input.documents.length > 3)
-    throw new IssuerError(400, 'ISSUER_DOCUMENT_REQUIRED')
-  return {
-    name: text(input.name, 200),
-    website,
-    contact: text(input.contact, 1000),
-    jurisdiction: text(input.jurisdiction, 200),
-    description: text(input.description, 5000),
-    purpose: text(input.purpose, 5000),
-    documents: input.documents.map((value) => {
-      const document = object(value, ['mimeType', 'base64'])
-      return {
-        mimeType: text(document.mimeType, 100),
-        base64: text(document.base64, Math.ceil((5 * 1024 * 1024) / 3) * 4),
-      }
-    }),
+    return parseApplicationInput(value)
+  } catch (error) {
+    if (error instanceof ApplicationError)
+      throw new IssuerError(error.statusCode, error.code.replace('APPLICATION_', 'ISSUER_'))
+    throw error
   }
 }

@@ -13,6 +13,8 @@ export interface IssuerNotification {
   recipientEmail: string
   organizationName: string
   claimUrl?: string
+  schemaName?: string
+  expiresAt?: string
   message?: string | null
 }
 
@@ -30,6 +32,13 @@ function hasControlCharacters(value: string, allowWhitespace = false): boolean {
   })
 }
 
+const html = (value: string) =>
+  value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
+  )
+
 export function createIssuerNotificationMessage(
   input: IssuerNotification,
   sender: NotificationSender = DEFAULT_NOTIFICATION_SENDER,
@@ -44,11 +53,16 @@ export function createIssuerNotificationMessage(
     (input.message != null &&
       (typeof input.message !== 'string' ||
         input.message.length > 2000 ||
-        hasControlCharacters(input.message, true)))
+        hasControlCharacters(input.message, true))) ||
+    (input.schemaName != null &&
+      (input.schemaName.length < 1 ||
+        input.schemaName.length > 200 ||
+        hasControlCharacters(input.schemaName)))
   )
     throw new Error('ISSUER_NOTIFICATION_INVALID')
   let subject: string
   let text: string[]
+  let htmlBody: string | undefined
   if (input.kind === 'invitation') {
     let url: URL
     try {
@@ -66,15 +80,33 @@ export function createIssuerNotificationMessage(
       (input.claimUrl?.length ?? 0) > 4096
     )
       throw new Error('ISSUER_NOTIFICATION_INVALID')
+    if (!input.schemaName || !input.expiresAt || !Number.isFinite(Date.parse(input.expiresAt)))
+      throw new Error('ISSUER_NOTIFICATION_INVALID')
+    const expiration = new Date(input.expiresAt).toISOString()
     subject = 'XCS — Credential invitation / Invitation à recevoir une attestation'
     text = [
       `${input.organizationName} invites you to receive a credential.`,
+      `Attestation: ${input.schemaName}`,
+      `Link expires: ${expiration}`,
       `${input.organizationName} vous invite à recevoir une attestation.`,
+      `Attestation : ${input.schemaName}`,
+      `Expiration du lien : ${expiration}`,
       '',
-      'Personal invitation link — do not forward / Lien personnel — ne pas transférer :',
+      'Open my invitation / Ouvrir mon invitation:',
       url.href,
+      '',
+      'This link is personal. Do not forward it. XCS will never ask for a recovery phrase or private key.',
+      'Ce lien est personnel. Ne le transférez pas. XCS ne demandera jamais de phrase de récupération ni de clé privée.',
     ]
     if (input.message) text.push('', input.message)
+    htmlBody = [
+      `<p><strong>${html(input.organizationName)}</strong> invites you to receive / vous invite à recevoir :</p>`,
+      `<p>${html(input.schemaName)}</p>`,
+      `<p>Expires / Expire : ${html(expiration)}</p>`,
+      `<p><a href="${html(url.href)}">Open my invitation / Ouvrir mon invitation</a></p>`,
+      '<p>This link is personal; do not forward it. XCS will never ask for a recovery phrase or private key.<br>Ce lien est personnel ; ne le transférez pas. XCS ne demandera jamais de phrase de récupération ni de clé privée.</p>',
+      input.message ? `<p>${html(input.message).replace(/\n/g, '<br>')}</p>` : '',
+    ].join('')
   } else if (input.kind === 'issued') {
     subject = 'XCS — Credential issued / Attestation émise'
     text = [
@@ -103,6 +135,7 @@ export function createIssuerNotificationMessage(
     messageId: `<issuer-${input.id}@${sender.messageIdDomain}>`,
     subject,
     text: text.join('\n'),
+    ...(htmlBody ? { html: htmlBody } : {}),
   }
 }
 

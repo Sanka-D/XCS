@@ -51,6 +51,7 @@ export interface RecipientWorkspace {
   notifications: RecipientNotification[]
 }
 export interface RecipientCredentialDetail extends RecipientCredential {
+  issuerAdmission: IssuerAdmission['status']
   disclosure: { publicFields: string[]; fields: string[] }
   events: {
     transactionHash: string

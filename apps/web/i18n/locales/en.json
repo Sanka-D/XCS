@@ -710,6 +710,19 @@
     "approvalCaveat": "Approval grants the selected application role. It does not endorse the organization’s claims.",
     "privateClaims": "Private claims remain under recipient control. Administrator access and verifier approval do not grant access to private claims.",
     "decision": "Access decision",
+    "revision": "Decision revision",
+    "lastReason": "Latest reason",
+    "checklist": {
+      "title": "Review checklist",
+      "organization": "Organization",
+      "role": "Requested role",
+      "responsible": "Responsible person",
+      "documents": "Supporting documents",
+      "wallet": "Declared wallet",
+      "history": "Decision history",
+      "complete": "Available",
+      "attention": "Needs attention"
+    },
     "applicationHistory": "Application history",
     "reasonRequired": "Reason (required)",
     "reasonOptional": "Reason (optional)",
@@ -939,20 +952,31 @@
     "copyOnce": "Copy this link before leaving the page; it is shown only once. Send it to the person who needs to check your attestation.",
     "qrAlt": "QR code for this sharing link",
     "copy": "Copy link",
+    "share": "Share link",
     "copied": "Link copied.",
+    "shared": "Link shared.",
     "copyFailed": "Copying was unavailable. Select the link and copy it manually.",
     "limitation": "These checks confirm the available records and signatures. They do not guarantee that the issuer’s statements are true.",
     "partialHelp": "Only the shared information is shown. The complete content has not been independently checked in this view.",
     "fullFields": "Authorized complete content",
     "publicFields": "Public fields",
     "authorizationHelp": "Private details require both an approved verifier organization and a sharing grant addressed to that organization. Signing in or receiving approval alone does not grant access.",
-    "openHelp": "Open the presentation to request its current evidence and the fields you are allowed to see.",
+    "audienceIncorrect": "You are signed in, but your organization is not the approved audience for the private content. The public fields remain visible.",
+    "openHelp": "Open a sharing link to request its current evidence and the fields you are allowed to see.",
     "open": "Open presentation",
     "checkAgain": "Check again",
     "unusableHelp": "This link is unavailable or has been revoked. Ask the recipient for a new link.",
     "unavailableHelp": "Current evidence could not be checked. No earlier result should be treated as current.",
+    "failureHelp": {
+      "invalid": "This sharing link is invalid. Ask the recipient for a new complete link.",
+      "revoked": "The recipient revoked this sharing link. Ask them to create a new one.",
+      "holderProof": "The recipient wallet proof for this link is missing or invalid. Ask the recipient to create a new link.",
+      "unavailable": "Current evidence could not be checked. Retry without pasting the link again."
+    },
     "headlines": {
-      "unusable": "Presentation unavailable",
+      "invalid": "Invalid sharing link",
+      "revoked": "Sharing link revoked",
+      "holderProof": "Recipient proof unavailable",
       "unavailable": "Cannot verify now",
       "pending": "Not yet accepted",
       "notFound": "Attestation not found",
@@ -1045,6 +1069,109 @@
     },
     "holderProofRecreate": "Ask the recipient to create a new link with a fresh wallet signature.",
     "holderKeyLimit": "The signing public key derives this wallet address. This is a master-key address check; it does not establish whether master-key signing was enabled on the ledger at that time. It does not prove a civil identity."
+  },
+  "portal": {
+    "nextAction": "Your next action",
+    "retry": "Retry",
+    "walletRequired": "Link an issuer wallet before continuing.",
+    "issuer": {
+      "title": "Issuer portal",
+      "lead": "Continue from the one action that currently moves your organization forward."
+    },
+    "errors": {
+      "unavailable": "This space is temporarily unavailable.",
+      "unchanged": "When this failure is reported, no portal state was changed."
+    },
+    "actions": {
+      "apply": {
+        "title": "Apply to the Commons",
+        "help": "Describe your organization and provide its review documents.",
+        "cta": "Start the application"
+      },
+      "awaitApproval": {
+        "title": "Wait for the Commons decision",
+        "help": "Your application is under review. Refresh this page after you receive the decision.",
+        "cta": "Refresh"
+      },
+      "linkWallet": {
+        "title": "Link the issuer wallet",
+        "help": "Prove control of the Testnet wallet your organization will use to sign issuance actions.",
+        "cta": "Prepare the issuer wallet"
+      },
+      "createTemplate": {
+        "title": "Create an attestation template",
+        "help": "Give the template a business name, category and readable fields.",
+        "cta": "Create the first template"
+      },
+      "invite": {
+        "title": "Invite a recipient",
+        "help": "Choose a template and send one secure invitation by email.",
+        "cta": "Invite a recipient"
+      },
+      "awaitRecipient": {
+        "title": "Wait for the recipient",
+        "help": "The recipient must claim the invitation and prove control of their wallet before issuance.",
+        "cta": "Refresh"
+      },
+      "issue": {
+        "title": "Prepare the attestation",
+        "help": "The recipient is ready. Review the readable content and visibility before asking your wallet to sign.",
+        "cta": "Prepare the attestation"
+      },
+      "review": {
+        "title": "Review the attestation",
+        "help": "Check the issuer, content and visibility before taking a wallet action.",
+        "cta": "Review"
+      },
+      "accept": {
+        "title": "Accept the attestation",
+        "help": "Your wallet will show the action before you approve it.",
+        "cta": "Accept"
+      },
+      "share": {
+        "title": "Share the attestation",
+        "help": "Choose public or complete data and, for complete data, its recipient organization.",
+        "cta": "Share"
+      },
+      "done": {
+        "title": "Current issuer work is complete",
+        "help": "You can invite another recipient or review existing attestations.",
+        "cta": "Invite another recipient"
+      }
+    },
+    "walletProgress": {
+      "title": "Wallet preparation progress",
+      "prepare": "Prepare the wallet",
+      "connect": "Connect it",
+      "prove": "Prove control",
+      "ready": "Ready",
+      "prepared": "I have prepared my wallet",
+      "issuerIntro": "Link the Testnet wallet your organization controls. XCS never asks for or stores its private key.",
+      "continueIssuer": "Continue to the issuer portal"
+    },
+    "invitationProgress": {
+      "title": "Invitation progress",
+      "email": "Email sent",
+      "claimed": "Link claimed",
+      "wallet": "Wallet verified",
+      "issuance": "Attestation issued"
+    },
+    "progress": {
+      "complete": "Complete",
+      "current": "Current step",
+      "pending": "Pending",
+      "attention": "Needs attention"
+    },
+    "recipient": {
+      "showAndVerify": "Show and verify the content",
+      "shareNow": "Share this attestation"
+    },
+    "admission": {
+      "approved": "Currently admitted by the Commons",
+      "suspended": "Commons admission suspended",
+      "not_approved": "Not currently admitted by the Commons",
+      "unknown": "Commons admission unavailable"
+    }
   },
   "simpleUi": {
     "technicalDetails": "Technical details",

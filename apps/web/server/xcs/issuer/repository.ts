@@ -228,7 +228,7 @@ export class IssuerRepository {
     const secret = createAppToken(),
       id = randomUUID(),
       deliveryId = randomUUID()
-    const org = await this.client.sql.begin(async (transaction) => {
+    const invitation = await this.client.sql.begin(async (transaction) => {
       const sql = transaction as unknown as Query
       const org = await this.organization(sql, session, input.organizationId)
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.organizationId + ':invites'},0))`
@@ -236,19 +236,24 @@ export class IssuerRepository {
         await sql`SELECT count(*)::int AS count FROM app_invites WHERE organization_id=${input.organizationId}`
       if (count!.count >= 2000) throw new IssuerError(409, 'ISSUER_INVITE_LIMIT')
       const [schema] =
-        await sql`SELECT schema_uid FROM app_schema_metadata WHERE organization_id=${input.organizationId} AND profile_id=${input.profileId} AND schema_uid=${input.schemaUid}`
+        await sql`SELECT COALESCE(m.display_name,s.name,m.category,'Attestation') AS schema_name
+        FROM app_schema_metadata m LEFT JOIN schemas s ON s.profile_id=m.profile_id AND s.schema_uid=m.schema_uid
+        WHERE m.organization_id=${input.organizationId} AND m.profile_id=${input.profileId} AND m.schema_uid=${input.schemaUid}`
       if (!schema) throw new IssuerError(404, 'ISSUER_SCHEMA_NOT_FOUND')
-      await sql`INSERT INTO app_invites(id,organization_id,profile_id,schema_uid,delivery_email,token_hash,created_by,expires_at)
-        VALUES (${id},${input.organizationId},${input.profileId},${input.schemaUid},${input.email},${secret.tokenHash},${session.userId},statement_timestamp()+${this.options.inviteDays}*interval '1 day')`
+      const [created] =
+        await sql`INSERT INTO app_invites(id,organization_id,profile_id,schema_uid,delivery_email,token_hash,created_by,expires_at)
+        VALUES (${id},${input.organizationId},${input.profileId},${input.schemaUid},${input.email},${secret.tokenHash},${session.userId},statement_timestamp()+${this.options.inviteDays}*interval '1 day') RETURNING expires_at`
       await sql`INSERT INTO app_invite_deliveries(id,invite_id,kind,recipient_email,status) VALUES (${deliveryId},${id},'invitation',${input.email},'sending')`
-      return org
+      return { org, schemaName: schema.schema_name, expiresAt: iso(created!.expires_at)! }
     })
     const delivery = await this.deliver({
       id: deliveryId,
       kind: 'invitation',
       recipientEmail: input.email,
-      organizationName: org.name,
+      organizationName: invitation.org.name,
       claimUrl: `${this.options.origin}/recipient/invitations#${secret.token}`,
+      schemaName: invitation.schemaName,
+      expiresAt: invitation.expiresAt,
       message: input.message,
     })
     return { id, deliveryStatus: delivery.status }
@@ -264,12 +269,19 @@ export class IssuerRepository {
       const org = await this.organization(sql, session, invite.organization_id)
       if (invite.claimed_by || invite.revoked_at) throw new IssuerError(409, 'ISSUER_INVITE_FINAL')
       await sql`UPDATE app_invite_deliveries SET status='cancelled',error_code=NULL WHERE invite_id=${id} AND status='sending'`
+      let expiresAt = invite.expires_at
       if (action === 'resend') {
-        await sql`UPDATE app_invites SET token_hash=${secret.tokenHash},expires_at=statement_timestamp()+${this.options.inviteDays}*interval '1 day' WHERE id=${id}`
+        const [updated] =
+          await sql`UPDATE app_invites SET token_hash=${secret.tokenHash},expires_at=statement_timestamp()+${this.options.inviteDays}*interval '1 day' WHERE id=${id} RETURNING expires_at`
+        expiresAt = updated!.expires_at
         await sql`INSERT INTO app_invite_deliveries(id,invite_id,kind,recipient_email,status) VALUES (${deliveryId},${id},'invitation',${invite.delivery_email},'sending')`
       } else
         await sql`UPDATE app_invites SET revoked_at=statement_timestamp(),token_hash=NULL WHERE id=${id}`
-      return { invite, org }
+      const [schema] =
+        await sql`SELECT COALESCE(m.display_name,s.name,m.category,'Attestation') AS schema_name
+        FROM app_schema_metadata m LEFT JOIN schemas s ON s.profile_id=m.profile_id AND s.schema_uid=m.schema_uid
+        WHERE m.organization_id=${invite.organization_id} AND m.profile_id=${invite.profile_id} AND m.schema_uid=${invite.schema_uid}`
+      return { invite, org, schemaName: schema?.schema_name ?? 'Attestation', expiresAt }
     })
     if (action === 'revoke') return { id, status: 'revoked' }
     const delivery = await this.deliver({
@@ -278,6 +290,8 @@ export class IssuerRepository {
       recipientEmail: result.invite.delivery_email,
       organizationName: result.org.name,
       claimUrl: `${this.options.origin}/recipient/invitations#${secret.token}`,
+      schemaName: result.schemaName,
+      expiresAt: iso(result.expiresAt)!,
     })
     return { id, deliveryStatus: delivery.status }
   }

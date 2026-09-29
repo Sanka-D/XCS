@@ -15,6 +15,8 @@ const invitation: IssuerNotification = {
   recipientEmail: 'recipient@example.test',
   organizationName: 'Synthetic school',
   claimUrl: `https://xcs.example.test/recipient/invitations#${token}`,
+  schemaName: 'Course completion',
+  expiresAt: '2026-10-15T12:00:00.000Z',
   message: 'A personal message.\nUn message personnel.',
 }
 const transport = (
@@ -28,8 +30,10 @@ describe('issuer notification delivery', () => {
     expect(message.messageId).toBe(`<issuer-${invitation.id}@xcs.test>`)
     expect(message.text).toContain(invitation.claimUrl)
     expect(message.text).toContain(invitation.message)
-    expect(JSON.stringify({ ...message, text: undefined })).not.toContain(token)
-    expect(message).not.toHaveProperty('html')
+    expect(JSON.stringify({ ...message, text: undefined, html: undefined })).not.toContain(token)
+    expect(message.html).toContain('Open my invitation')
+    expect(message.html).toContain(invitation.schemaName)
+    expect(message.text).toContain(invitation.expiresAt)
     expect(message).not.toHaveProperty('attachments')
   })
 

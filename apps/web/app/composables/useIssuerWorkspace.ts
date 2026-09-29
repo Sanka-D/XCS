@@ -1,4 +1,4 @@
-import type { IssuerWorkspace } from '../../server/xcs/issuer/types'
+import type { IssuerWorkspaceView } from '~/types/portal'
 
 export function useIssuerWorkspace() {
   const route = useRoute()
@@ -10,7 +10,7 @@ export function useIssuerWorkspace() {
   const state = useAsyncData(
     'issuer-workspace',
     () =>
-      request<IssuerWorkspace>('/api/issuer/workspace', {
+      request<IssuerWorkspaceView>('/api/issuer/workspace', {
         query: organizationId.value ? { organizationId: organizationId.value } : {},
       }),
     { watch: [organizationId] },

@@ -1,6 +1,6 @@
 import { expect, test, type Route } from '@playwright/test'
 
-test('signs in through OIDC, persists a session, denies issuer access, links and unlinks a wallet, then signs out', async ({
+test('signs in through OIDC, persists a session, opens issuer onboarding, links and unlinks a wallet, then signs out', async ({
   page,
   context,
 }) => {
@@ -20,7 +20,8 @@ test('signs in through OIDC, persists a session, denies issuer access, links and
   await page.reload()
   await expect(page.getByText('Test recipient', { exact: true })).toBeVisible()
   await page.goto('/issuer')
-  await expect(page).toHaveURL(/\/auth\/not-authorized/)
+  await expect(page).toHaveURL(/\/issuer$/)
+  await expect(page.getByRole('heading', { name: 'Issuer portal', exact: true })).toBeVisible()
   await page.goto('/account')
   await page.getByTestId('wallet-toggle').click()
   await page.locator('[data-wallet-id="gemwallet"]').click()

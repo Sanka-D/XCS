@@ -31,6 +31,20 @@ const documentBusy = ref<string | null>(null)
 const failedDocument = ref<string | null>(null)
 const documentLinks = ref<Record<string, { url: string; expiresAt: string }>>({})
 const requiredReason = computed(() => action.value === 'reject' || action.value === 'suspend')
+const checklist = computed(() => {
+  if (!data.value) return []
+  return [
+    { label: t('admin.checklist.organization'), complete: Boolean(data.value.application.name) },
+    { label: t('admin.checklist.role'), complete: Boolean(data.value.application.role) },
+    {
+      label: t('admin.checklist.responsible'),
+      complete: Boolean(data.value.application.responsible_name),
+    },
+    { label: t('admin.checklist.documents'), complete: data.value.documents.length > 0 },
+    { label: t('admin.checklist.wallet'), complete: data.value.wallets.length > 0 },
+    { label: t('admin.checklist.history'), complete: true },
+  ]
+})
 const actions = computed<AdminAction[]>(() => {
   const application = data.value?.application
   if (!application || conflict.value) return []
@@ -178,6 +192,22 @@ useSeoMeta({ title: () => `${t('admin.reviewTitle')} — XCS`, robots: 'noindex,
       <div class="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div class="space-y-6">
           <UCard>
+            <h2 class="text-xl font-semibold">{{ $t('admin.checklist.title') }}</h2>
+            <ul class="mt-4 grid gap-3 sm:grid-cols-2">
+              <li
+                v-for="item in checklist"
+                :key="item.label"
+                class="flex items-center gap-3 rounded border border-default p-3"
+              >
+                <span aria-hidden="true">{{ item.complete ? '✓' : '!' }}</span>
+                <span>{{ item.label }}</span>
+                <span class="sr-only">{{
+                  $t(item.complete ? 'admin.checklist.complete' : 'admin.checklist.attention')
+                }}</span>
+              </li>
+            </ul>
+          </UCard>
+          <UCard>
             <div class="flex flex-wrap items-center justify-between gap-3">
               <h2 class="text-2xl font-semibold">{{ data.application.name }}</h2>
               <UBadge color="neutral">{{ $t(`admin.status.${data.application.status}`) }}</UBadge>
@@ -267,9 +297,23 @@ useSeoMeta({ title: () => `${t('admin.reviewTitle')} — XCS`, robots: 'noindex,
             </ul>
           </UCard>
         </div>
-        <div>
+        <div class="lg:sticky lg:top-6 lg:self-start">
           <UCard>
             <h2 class="text-xl font-semibold">{{ $t('admin.decision') }}</h2>
+            <dl class="mt-4 grid gap-2 text-sm">
+              <div class="flex justify-between gap-4">
+                <dt>{{ $t('admin.currentStatus') }}</dt>
+                <dd class="font-semibold">{{ $t(`admin.status.${data.application.status}`) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt>{{ $t('admin.revision') }}</dt>
+                <dd>{{ data.application.revision }}</dd>
+              </div>
+              <div v-if="data.application.review_reason">
+                <dt class="font-semibold">{{ $t('admin.lastReason') }}</dt>
+                <dd class="mt-1 whitespace-pre-wrap">{{ data.application.review_reason }}</dd>
+              </div>
+            </dl>
             <p class="mt-3 text-sm">{{ $t('admin.approvalCaveat') }}</p>
             <p class="mt-3 text-sm text-muted">{{ $t('admin.privateClaims') }}</p>
             <div v-if="actions.length" class="mt-5 flex flex-wrap gap-3">

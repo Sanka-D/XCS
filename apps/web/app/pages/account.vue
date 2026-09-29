@@ -9,6 +9,7 @@ const localePath = useLocalePath()
 const route = useRoute()
 const onboarding = computed(() => route.query.returnTo !== undefined)
 const returnPath = computed(() => walletLinkReturnPath(route.query.returnTo, locale.value))
+const issuerOnboarding = computed(() => returnPath.value.startsWith(localePath('/issuer')))
 const auth = useAuth()
 const { user, expiresAt, absoluteExpiresAt } = auth
 const wallet = import.meta.client ? useXrplConnectWallet() : undefined
@@ -38,6 +39,19 @@ const isLinked = computed(() =>
 const hasLinkedWallet = computed(
   () => user.value?.wallets.some((link) => link.networkId === 1) === true,
 )
+const prepared = ref(!onboarding.value)
+watch(
+  hasLinkedWallet,
+  (linked) => {
+    if (linked) prepared.value = true
+  },
+  { immediate: true },
+)
+const walletStage = computed<'prepare' | 'connect' | 'prove' | 'ready'>(() => {
+  if (hasLinkedWallet.value) return 'ready'
+  if (canLink.value) return 'prove'
+  return prepared.value ? 'connect' : 'prepare'
+})
 const formatDate = (value?: string) =>
   value
     ? new Intl.DateTimeFormat(locale.value, {
@@ -90,7 +104,15 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
   <UContainer class="py-10 sm:py-14">
     <PageHeader
       :title="$t(onboarding ? 'roleJourney.walletTitle' : 'auth.account')"
-      :lead="$t(onboarding ? 'roleJourney.walletIntro' : 'auth.accountIntro')"
+      :lead="
+        $t(
+          onboarding
+            ? issuerOnboarding
+              ? 'portal.walletProgress.issuerIntro'
+              : 'roleJourney.walletIntro'
+            : 'auth.accountIntro',
+        )
+      "
     />
     <StatusBox v-if="error" tone="error" class="mb-5" role="alert">{{ error }}</StatusBox>
     <StatusBox v-if="notice" tone="success" class="mb-5" role="status">{{ notice }}</StatusBox>
@@ -151,6 +173,7 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
 
       <section class="mt-8" aria-labelledby="account-wallets">
         <h2 id="account-wallets" class="text-2xl font-semibold">{{ $t('auth.linkedWallets') }}</h2>
+        <WalletProgress v-if="onboarding" class="mt-5" :stage="walletStage" />
         <StatusBox v-if="hasLinkedWallet" class="mt-6" tone="success">{{
           $t('roleJourney.walletReady')
         }}</StatusBox>
@@ -159,7 +182,13 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
           :to="returnPath"
           class="mt-3"
           data-testid="wallet-link-continue"
-          >{{ $t('roleJourney.continueRecipient') }}</UButton
+          >{{
+            $t(
+              issuerOnboarding
+                ? 'portal.walletProgress.continueIssuer'
+                : 'roleJourney.continueRecipient',
+            )
+          }}</UButton
         >
 
         <details
@@ -189,10 +218,16 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             </li>
           </ol>
         </details>
-        <ClientOnly
+        <UButton
+          v-if="onboarding && !hasLinkedWallet && !prepared"
+          class="mt-5"
+          @click="prepared = true"
+          >{{ $t('portal.walletProgress.prepared') }}</UButton
+        >
+        <ClientOnly v-if="prepared"
           ><div class="mt-5"><WalletButton proof-only test-id-prefix="wallet-link" /></div
         ></ClientOnly>
-        <p v-if="!canLink && !hasLinkedWallet" class="mt-3 text-sm text-muted">
+        <p v-if="prepared && !canLink && !hasLinkedWallet" class="mt-3 text-sm text-muted">
           {{ $t('roleJourney.walletSelectionHelp') }}
         </p>
         <p class="mt-3 text-toned">{{ $t('auth.walletLinkHelp') }}</p>
@@ -242,7 +277,7 @@ useSeoMeta({ title: () => `${t('auth.account')} — XCS`, robots: 'noindex,nofol
             </table>
           </div>
         </details>
-        <ClientOnly>
+        <ClientOnly v-if="prepared">
           <div class="mt-5">
             <details v-if="walletAccount && !isLinked" class="mb-3 text-sm">
               <summary class="cursor-pointer">{{ $t('simpleRecipient.walletDetails') }}</summary>

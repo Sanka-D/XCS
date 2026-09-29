@@ -34,6 +34,7 @@ export interface ClaimedNotification {
   organizationName: string
   role: string
   status: string
+  reason: string | null
 }
 
 export type NotificationOutcome = 'idle' | 'sent' | 'failed' | 'blocked' | 'uncertain'
@@ -65,7 +66,7 @@ export class PostgresNotificationRepository implements NotificationRepository {
     const result = await this.client.sql.begin(async (sql): Promise<ClaimResult> => {
       const [row] = await sql`SELECT n.id, n.decision_id, n.recipient_email,
         u.email AS current_email, u.email_verified_at, u.status AS user_status,
-        d.role, d.after_status, o.name AS organization_name
+        d.role, d.after_status, d.reason, o.name AS organization_name
         FROM app_admin_notifications n
         JOIN app_users u ON u.id = n.recipient_user_id
         JOIN app_admin_decisions d ON d.id = n.decision_id
@@ -97,6 +98,7 @@ export class PostgresNotificationRepository implements NotificationRepository {
           organizationName: row.organization_name,
           role: row.role,
           status: row.after_status,
+          reason: row.reason,
         },
       }
     })
@@ -118,6 +120,7 @@ export class PostgresNotificationRepository implements NotificationRepository {
 export function createNotificationMessage(
   notification: ClaimedNotification,
   sender: NotificationSender = DEFAULT_NOTIFICATION_SENDER,
+  portalOrigin?: string,
 ): NotificationMessage {
   const statuses: Record<string, [string, string]> = {
     approved: ['approved', 'approuvé'],
@@ -128,20 +131,43 @@ export function createNotificationMessage(
     notification.status,
     notification.status,
   ]
+  const destination = portalOrigin
+    ? `${new URL(portalOrigin).origin}/${notification.role === 'issuer' ? 'issuer' : 'verifier'}`
+    : undefined
+  const reason = notification.reason?.trim()
+  const escapeHtml = (value: string) =>
+    value.replace(
+      /[&<>"']/g,
+      (character) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
+    )
+  const text = [
+    `The ${notification.role} access for ${notification.organizationName} is now ${english}.`,
+    ...(reason ? [`Reason: ${reason}`] : []),
+    ...(destination ? [`Open your space: ${destination}`] : []),
+    '',
+    `L’accès ${notification.role} de ${notification.organizationName} est maintenant ${french}.`,
+    ...(reason ? [`Motif : ${reason}`] : []),
+    ...(destination ? [`Ouvrir votre espace : ${destination}`] : []),
+  ]
   return {
     from: { name: sender.name, address: sender.address },
     to: { name: '', address: notification.recipientEmail },
     envelope: { from: sender.envelopeFrom, to: [notification.recipientEmail] },
     messageId: `<admin-decision-${notification.decisionId}@${sender.messageIdDomain}>`,
     subject: 'XCS — Access decision / Décision concernant votre accès',
-    // No profile, document, wallet, private claim, or internal moderation reason is sent.
-    text: [
-      `The ${notification.role} access for ${notification.organizationName} is now ${english}.`,
-      `Decision reference: ${notification.decisionId}`,
-      '',
-      `L’accès ${notification.role} de ${notification.organizationName} est maintenant ${french}.`,
-      `Référence de la décision : ${notification.decisionId}`,
-    ].join('\n'),
+    // No profile, document, wallet, private claim, token, or protocol identifier is sent.
+    text: text.join('\n'),
+    ...(destination
+      ? {
+          html: [
+            `<p>The ${escapeHtml(notification.role)} access for <strong>${escapeHtml(notification.organizationName)}</strong> is now ${escapeHtml(english)}.<br>`,
+            `L’accès ${escapeHtml(notification.role)} de <strong>${escapeHtml(notification.organizationName)}</strong> est maintenant ${escapeHtml(french)}.</p>`,
+            reason ? `<p>Reason / Motif: ${escapeHtml(reason).replace(/\n/g, '<br>')}</p>` : '',
+            `<p><a href="${escapeHtml(destination)}">Open your space / Ouvrir votre espace</a></p>`,
+          ].join(''),
+        }
+      : {}),
   }
 }
 
@@ -149,6 +175,7 @@ export async function processNextNotification(
   repository: NotificationRepository,
   transport: NotificationTransport,
   sender?: NotificationSender,
+  portalOrigin?: string,
 ): Promise<NotificationOutcome> {
   await repository.recoverStale()
   const result = await repository.claim()
@@ -159,7 +186,7 @@ export async function processNextNotification(
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const info = await Promise.race([
-      transport.sendMail(createNotificationMessage(notification, sender)),
+      transport.sendMail(createNotificationMessage(notification, sender, portalOrigin)),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('SMTP_DEADLINE')), SMTP_DEADLINE_MS)
       }),

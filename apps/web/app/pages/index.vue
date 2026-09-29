@@ -102,7 +102,7 @@ useSeoMeta({
           </h1>
           <p class="mt-6 max-w-2xl text-lg text-neutral-200">{{ $t('home.description') }}</p>
           <div class="mt-8 flex flex-wrap gap-3">
-            <UButton :to="localePath('/studio')" color="neutral" variant="outline" size="lg">
+            <UButton :to="localePath('/issuer')" color="neutral" variant="outline" size="lg">
               <span class="font-mono" aria-hidden="true">&gt;_</span>
               {{ $t('home.start') }}
             </UButton>

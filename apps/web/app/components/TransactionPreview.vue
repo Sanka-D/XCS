@@ -69,7 +69,7 @@ function confirm() {
     <p v-if="paymentAmount !== null" class="mt-2">
       {{ $t('simpleUi.paymentAmount', { amount: paymentAmount }) }}
     </p>
-    <details class="mt-4" data-testid="transaction-technical-details">
+    <details v-if="!compact" class="mt-4" data-testid="transaction-technical-details">
       <summary class="cursor-pointer font-semibold">{{ $t('simpleUi.technicalDetails') }}</summary>
       <MetadataList>
         <template v-for="(value, key) in transaction" :key="key">

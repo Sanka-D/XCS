@@ -131,7 +131,7 @@ async function enter(page: Page, path: string) {
 }
 
 // Synthetic browser fixtures check visible consent and disclosure, not PostgreSQL authorization or real wallets.
-test('requires explicit opening, keeps the bearer out of URLs and reports a public subset as partial on mobile', async ({
+test('opens automatically, keeps the bearer out of URLs and reports a public subset as partial on mobile', async ({
   page,
 }) => {
   const consoleMessages: string[] = []
@@ -147,12 +147,10 @@ test('requires explicit opening, keeps the bearer out of URLs and reports a publ
     return route.fulfill({ json: publicResult })
   })
   await enter(page, `/presentations#${token}`)
-  await expect(page.getByRole('button', { name: 'Open presentation', exact: true })).toBeVisible()
-  expect(opens).toBe(0)
   expect(page.url()).not.toContain(token)
   expect(await page.evaluate(() => JSON.stringify(window.history.state))).not.toContain(token)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Partially checked', exact: true })).toBeVisible()
+  expect(opens).toBe(1)
   await expect(page.getByText('Synthetic course', { exact: true })).toBeVisible()
   await expect(page.getByText('Synthetic private person')).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Who issued it?', exact: true })).toContainText(
@@ -209,7 +207,6 @@ test('distinguishes Commons approval, ledger acceptance and a dated wallet signa
     }),
   )
   await enter(page, `/presentations#${token}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(
     page.getByRole('heading', { name: 'Issuer trust not established', exact: true }),
   ).toBeVisible()
@@ -248,17 +245,16 @@ test('clears previously disclosed claims when a presentation is revoked', async 
             verification: { ...report, payload: 'valid' },
           },
         })
-      : route.fulfill({ status: 404, json: { statusCode: 404 } })
+      : route.fulfill({ status: 410, json: { error: 'PRESENTATION_REVOKED' } })
   })
   await enter(page, `/presentations#${token}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Synthetic private person', { exact: true })).toBeVisible()
   await expect(
     page.getByRole('heading', { name: 'Issuer trust not established', exact: true }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Check again', exact: true }).click()
   await expect(
-    page.getByRole('heading', { name: 'Presentation unavailable', exact: true }),
+    page.getByRole('heading', { name: 'Sharing link revoked', exact: true }),
   ).toBeVisible()
   await expect(page.getByText('Synthetic private person', { exact: true })).toHaveCount(0)
 })
@@ -282,15 +278,12 @@ test('opens successive native and router fragment links in the same component wi
     })
   })
   await enter(page, `/presentations#${tokens[0]}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Synthetic course 0', { exact: true })).toBeVisible()
   await page.goto(`/presentations#${tokens[1]}`)
-  await expect(page.getByRole('button', { name: 'Open presentation', exact: true })).toBeEnabled()
   await expect(page.getByText('Synthetic course 0', { exact: true })).toHaveCount(0)
-  expect(requested).toEqual([tokens[0]])
   expect(new URL(page.url()).hash).toBe('')
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Synthetic course 1', { exact: true })).toBeVisible()
+  expect(requested).toEqual(tokens.slice(0, 2))
   await page.evaluate(async (path) => {
     const root = document.querySelector('#__nuxt') as Element & {
       __vue_app__: {
@@ -299,11 +292,8 @@ test('opens successive native and router fragment links in the same component wi
     }
     await root.__vue_app__.config.globalProperties.$router.push(path)
   }, `/presentations#${tokens[2]}`)
-  await expect(page.getByRole('button', { name: 'Open presentation', exact: true })).toBeEnabled()
   await expect(page.getByText('Synthetic course 1', { exact: true })).toHaveCount(0)
-  expect(requested).toEqual(tokens.slice(0, 2))
   expect(new URL(page.url()).hash).toBe('')
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Synthetic course 2', { exact: true })).toBeVisible()
   expect(requested).toEqual(tokens)
   for (const currentToken of tokens)
@@ -353,10 +343,8 @@ test('ignores an older link response arriving after a new fragment was opened', 
       })
   })
   await enter(page, `/presentations#${token}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect.poll(() => started).toBe(true)
   await page.goto(`/presentations#${nextToken}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect(page.getByText('Newest synthetic course', { exact: true })).toBeVisible()
   const oldResponse = page.waitForResponse(
     (response) =>
@@ -393,7 +381,6 @@ test('does not redisplay private claims when a delayed request finishes after th
     })
   })
   await enter(page, `/presentations#${token}`)
-  await page.getByRole('button', { name: 'Open presentation', exact: true }).click()
   await expect.poll(() => started).toBe(true)
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
@@ -657,9 +644,7 @@ for (const locale of ['en', 'fr'] as const) {
     await expect(result.getByText('First module', { exact: true })).toBeVisible()
     await expect(result.getByText(credential.subjectAddress, { exact: true })).not.toBeVisible()
     await expect(result.getByText(generationId, { exact: true })).not.toBeVisible()
-    const details = result.locator('details').first()
-    await details.locator('summary').first().click()
-    await expect(result.getByText(generationId, { exact: true })).toBeVisible()
+    await expect(result.locator('details')).toHaveCount(0)
     expect(new URL(page.url()).hash).toBe('')
     expect(
       await page.evaluate(() =>

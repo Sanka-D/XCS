@@ -216,8 +216,10 @@ rate limits. Authenticated mutations require CSRF. They are separate from the pu
 | `POST /api/auth/link-handoff`                             | Same-origin invitation/presentation token cookie before login                |
 | `POST /api/auth/link-handoff/consume`                     | Authenticated, CSRF-protected one-time cookie retrieval                      |
 
-Bearer links use fragments, then explicit JSON POSTs, never token query parameters. Unknown/revoked
-presentations are indistinguishable. Wrong-audience full grants disclose only the public projection.
+Bearer links use fragments, then explicit JSON POSTs, never token query parameters. The browser
+purges the fragment before resolution. The private handler distinguishes invalid, revoked,
+holder-proof-invalid and temporarily unavailable links so the guided page can give the correct next
+action; it never returns the bearer. Wrong-audience full grants disclose only the public projection.
 See [recipient/verifier boundaries and limits](runbooks/recipient-verifier.md).
 
 Presentation creation now requires `proof: { challengeId, signature, publicKey, scheme }` alongside
@@ -225,6 +227,11 @@ profile, generation, scope and optional designated organization. `scheme` is `ri
 wallet linking, but a wallet-link challenge cannot authorize sharing. Resolution adds `issuerAdmission`
 (current portal status, organization and observation/review timestamps) and `holderProof` (dated
 signature evidence, or `not_provided` for legacy links). These facts do not change issuer trust,
-payload-integrity dimensions or private-field access. Corrupted stored proofs make a link unavailable.
+payload-integrity dimensions or private-field access. Corrupted stored proofs produce the bounded
+`PRESENTATION_HOLDER_PROOF_INVALID` portal error and no claims.
 Issuer workspace invitations additionally report recipient readiness and wallet verification time;
 the issuance context distinguishes delivery email from the actual claimant's linked address.
+
+The former web mutation pages are not integration APIs. They now issue fixed redirects to the role
+portals and discard all legacy query/fragment input. Public `/v1` paths, the CLI, documentation and
+read-only Explorer pages are unchanged by this UI routing decision.

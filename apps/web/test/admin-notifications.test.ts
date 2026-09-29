@@ -20,6 +20,7 @@ const notification: ClaimedNotification = {
   organizationName: 'Example organization',
   role: 'verifier',
   status: 'approved',
+  reason: 'The application meets the access requirements.',
 }
 
 function setup() {
@@ -50,7 +51,8 @@ describe('admin notification delivery', () => {
     expect(message.envelope.to).toEqual([notification.recipientEmail])
     expect(message.text).toContain('now approved')
     expect(message.text).toContain('maintenant approuvé')
-    expect(message.text).toContain(notification.decisionId)
+    expect(message.text).toContain(notification.reason)
+    expect(message.text).not.toContain(notification.decisionId)
     expect(repository.finish).toHaveBeenCalledWith(notification, 'sent', null)
     expect(repository.recoverStale).toHaveBeenCalledOnce()
   })
@@ -121,6 +123,13 @@ describe('admin notification delivery', () => {
     expect(createNotificationMessage(notification).messageId).toBe(
       createNotificationMessage({ ...notification, attemptId: 'another-attempt' }).messageId,
     )
+  })
+
+  it('links to the role space without exposing the decision identifier', () => {
+    const message = createNotificationMessage(notification, undefined, 'https://xcs.example.test')
+    expect(message.text).toContain('https://xcs.example.test/verifier')
+    expect(message.html).toContain('Open your space / Ouvrir votre espace')
+    expect(message.text).not.toContain(notification.decisionId)
   })
 })
 

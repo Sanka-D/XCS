@@ -4,6 +4,7 @@ import { renderSVG } from 'uqr'
 const props = defineProps<{ url: string }>()
 const copied = ref(false)
 const failed = ref(false)
+const shared = ref(false)
 const qr = computed(
   () => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(renderSVG(props.url))}`,
 )
@@ -12,6 +13,7 @@ watch(
   () => {
     copied.value = false
     failed.value = false
+    shared.value = false
   },
 )
 async function copy() {
@@ -21,6 +23,16 @@ async function copy() {
     failed.value = false
   } catch {
     failed.value = true
+  }
+}
+async function share() {
+  if (!navigator.share) return copy()
+  try {
+    await navigator.share({ title: 'XCS', url: props.url })
+    shared.value = true
+    failed.value = false
+  } catch (cause) {
+    if ((cause as { name?: string }).name !== 'AbortError') failed.value = true
   }
 }
 </script>
@@ -47,8 +59,14 @@ async function copy() {
       height="240"
       class="mx-auto my-4 bg-white p-3"
     />
-    <UButton @click="copy">{{ $t('presentation.copy') }}</UButton>
+    <div class="flex flex-wrap gap-3">
+      <UButton @click="copy">{{ $t('presentation.copy') }}</UButton>
+      <UButton color="neutral" variant="outline" @click="share">{{
+        $t('presentation.share')
+      }}</UButton>
+    </div>
     <p v-if="copied" role="status" class="mt-2">{{ $t('presentation.copied') }}</p>
+    <p v-if="shared" role="status" class="mt-2">{{ $t('presentation.shared') }}</p>
     <p v-if="failed" role="alert" class="mt-2">{{ $t('presentation.copyFailed') }}</p>
   </section>
 </template>

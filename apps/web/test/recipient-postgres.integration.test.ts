@@ -120,11 +120,11 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     await recipient.revokePresentation(f.sessions.recipient, disposable.id)
     await expect(presentations.resolve(null, disposable.token)).rejects.toMatchObject({
       statusCode: 404,
-      code: 'PRESENTATION_UNAVAILABLE',
+      code: 'PRESENTATION_REVOKED',
     })
     await expect(presentations.resolve(f.sessions.verifier, 'x'.repeat(43))).rejects.toMatchObject({
       statusCode: 404,
-      code: 'PRESENTATION_UNAVAILABLE',
+      code: 'PRESENTATION_INVALID',
     })
   })
   it('keeps already-public credential claims public even when the private-field selector is empty', async () => {
@@ -643,7 +643,7 @@ describe.skipIf(!url)('recipient and presentation actual PostgreSQL authorizatio
     await f.db
       .sql`UPDATE app_presentation_proofs SET signature=${'0'.repeat(128)} WHERE presentation_id=${created.id}`
     await expect(presentations.resolve(null, created.token)).rejects.toMatchObject({
-      code: 'PRESENTATION_UNAVAILABLE',
+      code: 'PRESENTATION_HOLDER_PROOF_INVALID',
     })
   })
 })

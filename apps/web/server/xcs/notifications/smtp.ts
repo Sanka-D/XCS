@@ -8,6 +8,7 @@ export interface NotificationMessage {
   messageId: string
   subject: string
   text: string
+  html?: string
 }
 
 export interface NotificationTransport {

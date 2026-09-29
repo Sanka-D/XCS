@@ -4,9 +4,10 @@
 
 # Issuer workspace
 
-Issue #31 adds optional issuer onboarding, owned schemas, invitations, managed payloads and issuance
-tracking. The public Studio and wallet compatibility rules remain available. Real OIDC registration,
-external delivery and extension-wallet approvals are separate release checks.
+The issuer portal provides onboarding, owned templates, invitations, managed payloads and issuance
+tracking. It derives one next action at `/issuer`; the former public mutation pages now redirect to
+the role portals. Real OIDC registration, external delivery and extension-wallet approvals remain
+separate release checks.
 
 ## Provision and enable
 
@@ -47,7 +48,8 @@ restrictive modes and recorded MIME/length/digest support the existing verified 
 Organizations start pending. `/issuer/application` shows the actual status and decision reason.
 Approval grants portal permission, not endorsement; ordinary signup cannot grant admin.
 
-Approved users navigate schemas, recipients, credentials and settings. The server derives the
+Approved users navigate templates, recipients, credentials and settings. Template creation and
+issuance first require a linked Testnet issuer wallet. The server derives the
 organization owner from the session and checks current approval on mutations. Schema association
 requires an accepted indexed registration and a linked publisher wallet. The public and issuer
 pages reuse the same signing components; URL parameters are never treated as authorization.
@@ -69,7 +71,8 @@ Resend requires confirmation, rotates the token and renews the deadline. Only un
 invitations may be resent or revoked. An already-issued invitation cannot issue again. Email
 delivery, claiming, wallet readiness and ledger acceptance are separate states.
 
-SMTP attempts are recorded before sending. Lost acknowledgement/timeout produces `uncertain`,
+Invitation mail contains the organization, template, expiry, one action link and a wallet-safety
+warning; it contains no protocol identifier. SMTP attempts are recorded before sending. Lost acknowledgement/timeout produces `uncertain`,
 never automatic retry. Interrupted `sending` records are shown as uncertain after their bound.
 Issuance/revocation notifications target the actual claimant's current verified email, not an
 unverified delivery contact. A missing verified address blocks notification without undoing the

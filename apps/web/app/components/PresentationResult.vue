@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { ResolvedPresentation } from '../../server/xcs/recipient/types'
+import type { ResolvedPresentationView } from '~/types/portal'
 import { presentationHeadline } from '~/utils/presentationView'
 
-const props = defineProps<{ result: ResolvedPresentation }>()
+const props = defineProps<{ result: ResolvedPresentationView }>()
+const auth = useAuth()
 const { locale } = useI18n()
 const date = (value: string) =>
   new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(
@@ -90,29 +91,8 @@ const headline = computed(() =>
       {{ $t('presentation.noFields') }}
     </p>
     <AttestationFields v-else class="mt-3" :claims="result.claims" />
-    <StatusBox v-if="result.requiresAuthorization" class="mt-5">{{
-      $t('presentation.authorizationHelp')
+    <StatusBox v-if="result.requiresAuthorization" class="mt-5" tone="warning">{{
+      $t(auth.user.value ? 'presentation.audienceIncorrect' : 'presentation.authorizationHelp')
     }}</StatusBox>
-    <details class="mt-5 rounded border border-default p-4">
-      <summary class="cursor-pointer font-semibold">{{ $t('simpleUi.technicalDetails') }}</summary>
-      <VerificationGrid :report="result.verification" test-id-prefix="presentation" :note="false" />
-      <MetadataList class="mt-3">
-        <dt>{{ $t('recipient.subjectWallet') }}</dt>
-        <dd class="break-all font-mono">{{ result.credential.subjectAddress }}</dd>
-        <dt>{{ $t('recipient.issuerWallet') }}</dt>
-        <dd class="break-all font-mono">{{ result.credential.issuerAddress }}</dd>
-        <dt>{{ $t('recipient.generation') }}</dt>
-        <dd class="break-all font-mono">{{ result.credential.generationId }}</dd>
-        <dt>{{ $t('auth.network') }}</dt>
-        <dd>{{ result.credential.profileId }}</dd>
-      </MetadataList>
-      <details v-if="holderProof" class="mt-4">
-        <summary class="cursor-pointer font-semibold">
-          {{ $t('roleJourney.signedProofDetails') }}
-        </summary>
-        <p class="mt-2 text-sm text-muted">{{ $t('roleJourney.holderKeyLimit') }}</p>
-        <JsonBlock :code="JSON.stringify(holderProof, null, 2)" />
-      </details>
-    </details>
   </article>
 </template>

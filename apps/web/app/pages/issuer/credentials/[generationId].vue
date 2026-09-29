@@ -80,13 +80,7 @@ useSeoMeta({ robots: 'noindex,nofollow' })
       <UButton :to="localePath('/issuer')" color="neutral" variant="outline">{{
         $t('issuer.engine.back')
       }}</UButton>
-      <StatusBox v-if="error" tone="error"
-        ><p>{{ $t('simpleIssuer.error') }}</p>
-        <details>
-          <summary>{{ $t('simpleIssuer.technical') }}</summary>
-          <code>{{ error }}</code>
-        </details></StatusBox
-      >
+      <StatusBox v-if="error" tone="error">{{ $t('simpleIssuer.error') }}</StatusBox>
       <IssuerEngineRecovery
         :pending="recovery.pending.value"
         :saved="recovery.saved.value"

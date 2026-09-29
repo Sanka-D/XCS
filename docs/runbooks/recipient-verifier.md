@@ -2,8 +2,8 @@
 
 These optional workspaces implement issues #32 and #33 under [ADR 0005](../adr/0005-role-based-application.md).
 Enable the existing authentication and issuer services, with their separate restricted database
-connections. No additional recipient/verifier pool or environment variable is required. Public Studio
-and public verification remain accountless; portal approval does not establish issuer trust.
+connections. No additional recipient/verifier pool or environment variable is required. Public
+presentation resolution remains accountless; portal approval does not establish issuer trust.
 
 ## Upgrade and recovery
 
@@ -79,12 +79,14 @@ are protected against spreadsheet formula evaluation.
 
 Private credentials' public views contain only issuer-selected public fields. A wrong audience or
 anonymous viewer of a full link receives that public subset and an authorization hint. Already-public
-credentials retain their public claims. Unknown/revoked tokens return the same unavailable response.
+credentials retain their public claims. The private portal response distinguishes invalid, revoked,
+holder-proof-invalid and temporarily unavailable links without returning the bearer.
 An administrator has no special private-view permission. Suspension blocks subsequent full access.
 
 Opening a link requires no manually entered URI, address or schema identifier. Three factual cards
-show the issuer organization's **current** portal admission, the credential's indexed lifecycle and
-recipient address, and the dated recipient signature authorizing this presentation. Admission is
+show the issuer organization's **current** portal admission, the credential's indexed lifecycle,
+and the dated recipient signature authorizing this presentation. Addresses, hashes, UIDs and
+network profiles are not rendered in this business result. Admission is
 read from the application database; no historical approval at issuance is invented. A suspension
 changes that admission result without rewriting the ledger or revoking the credential.
 

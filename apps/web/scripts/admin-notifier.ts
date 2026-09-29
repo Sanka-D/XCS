@@ -12,6 +12,20 @@ async function main(): Promise<void> {
   if (args.some((arg) => arg !== '--once')) throw new Error('Unsupported argument')
   const databaseUrl = adminSecret(process.env, 'XCS_NOTIFIER_DATABASE_URL')
   if (!databaseUrl) throw new Error('XCS_NOTIFIER_DATABASE_URL is required')
+  const portalOrigin = adminSecret(process.env, 'XCS_AUTH_ORIGIN')
+  let parsedOrigin: URL
+  try {
+    parsedOrigin = new URL(portalOrigin)
+  } catch {
+    throw new Error('XCS_AUTH_ORIGIN must be an exact HTTPS origin')
+  }
+  if (
+    parsedOrigin.protocol !== 'https:' ||
+    parsedOrigin.origin !== portalOrigin ||
+    parsedOrigin.username ||
+    parsedOrigin.password
+  )
+    throw new Error('XCS_AUTH_ORIGIN must be an exact HTTPS origin')
   const { transport, sender } = createSmtpDelivery(process.env)
   const client = createDatabaseClient(databaseUrl, { onNotice: () => {} })
   const controller = new AbortController()
@@ -24,7 +38,7 @@ async function main(): Promise<void> {
       throw new Error('The notifier requires the xcs_notifier DB role')
     const repository = new PostgresNotificationRepository(client)
     do {
-      const outcome = await processNextNotification(repository, transport, sender)
+      const outcome = await processNextNotification(repository, transport, sender, portalOrigin)
       if (outcome !== 'idle') console.log(`admin-notifier: ${outcome}`)
       if (args.includes('--once') || controller.signal.aborted) break
       if (outcome === 'idle') {

@@ -21,6 +21,7 @@ import {
 import type { Session } from '../auth/types'
 import { verifyWalletProof } from '../auth/wallet-proof'
 import { presentationProofMessage, proofMatchesCredential } from '../presentations/proof'
+import { issuerAdmission } from '../presentations/admission'
 import {
   managedCredentialEvidence,
   type CredentialMetadata,
@@ -210,8 +211,10 @@ export class RecipientRepository {
       .from(schemas)
       .where(and(eq(schemas.profileId, profileId), eq(schemas.schemaUid, row.metadata.schemaUid)))
     const fields = (schema?.definition as { fields?: Record<string, unknown> } | undefined)?.fields
+    const admission = await issuerAdmission(db, row.metadata.issuerOrganizationId)
     return {
       ...recipientCredentialDto(row, state),
+      issuerAdmission: admission.status,
       disclosure: {
         publicFields: row.metadata.publicFields,
         fields: fields && typeof fields === 'object' ? Object.keys(fields) : [],

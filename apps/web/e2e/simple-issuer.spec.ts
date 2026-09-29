@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test'
-import { createHttpsPayloadUri, payloadDigest } from '../app/lib/xcs/core/index.js'
 
 const organizationId = '00000000-0000-4000-8000-000000000091'
 const inviteId = '00000000-0000-4000-8000-000000000092'
@@ -16,7 +15,7 @@ const schema = {
 }
 
 // UI fixtures prove wording and preserved form values, not live authorization or signatures.
-async function setup(page: Page, invitations: () => unknown[] = () => []) {
+async function setup(page: Page, invitations: () => unknown[] = () => [], linked = true) {
   await page.route('**/api/auth/session', (route) =>
     route.fulfill({
       json: {
@@ -27,7 +26,16 @@ async function setup(page: Page, invitations: () => unknown[] = () => []) {
           displayName: 'Issuer',
           email: 'issuer@example.test',
           roles: ['recipient'],
-          wallets: [],
+          wallets: linked
+            ? [
+                {
+                  id: '00000000-0000-4000-8000-000000000095',
+                  address: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+                  networkId: 1,
+                  verifiedAt: '2026-09-24T10:00:00Z',
+                },
+              ]
+            : [],
           organizations: [{ id: organizationId, name: 'Learning school', roles: ['issuer'] }],
         },
       },
@@ -86,9 +94,7 @@ test('inviting from a named template keeps that selection without requesting an 
   await expect(page.getByRole('textbox', { name: /uid|hash|identifier/i })).toHaveCount(0)
 })
 
-test('template creation starts with readable formats and keeps JSON an explicit advanced choice', async ({
-  page,
-}) => {
+test('template creation exposes readable fields without a JSON editor', async ({ page }) => {
   await setup(page)
   await enter(page, `/issuer/schemas/new?organizationId=${organizationId}`)
   await expect(
@@ -98,11 +104,8 @@ test('template creation starts with readable formats and keeps JSON an explicit 
   await expect(page.getByRole('button', { name: 'Edit JSON', exact: true })).not.toBeVisible()
   const visible = await page.locator('main').innerText()
   expect(visible).not.toMatch(/UTF-8|canonical|\buint\b|\bbool\b/)
-  await page.getByText('Advanced options', { exact: true }).click()
-  await page.getByRole('button', { name: 'Edit JSON', exact: true }).click()
-  await expect(page.locator('#schema-json')).toBeVisible()
-  await page.getByRole('button', { name: 'Edit the form', exact: true }).click()
-  await expect(page.locator('#schema-name')).toHaveValue('Course Completion')
+  await expect(page.getByText('Advanced options', { exact: true })).toHaveCount(0)
+  await expect(page.locator('#schema-json')).toHaveCount(0)
 })
 
 test('managed issuance names the recipient and keeps full account references out of the main form', async ({
@@ -155,8 +158,8 @@ test('managed issuance names the recipient and keeps full account references out
   await expect(
     page.getByRole('button', { name: 'Review before sending', exact: true }),
   ).toBeVisible()
-  await page.getByText('Verified account details', { exact: true }).click()
-  await expect(page.getByText(subject, { exact: true })).toBeVisible()
+  await expect(page.getByText('Verified account details', { exact: true })).toHaveCount(0)
+  await expect(page.getByText(subject, { exact: true })).toHaveCount(0)
 })
 
 for (const deliveryStatus of ['failed', 'uncertain', 'sent'] as const) {
@@ -224,110 +227,17 @@ for (const deliveryStatus of ['failed', 'uncertain', 'sent'] as const) {
   })
 }
 
-test('an unsupported template version keeps its exact diagnostic in optional details', async ({
+test('template creation requires a linked issuer wallet before showing the form', async ({
   page,
 }) => {
-  await setup(page)
+  await setup(page, () => [], false)
   await enter(page, `/issuer/schemas/new?organizationId=${organizationId}`)
-  await page.getByText('Advanced options', { exact: true }).click()
-  await page.getByRole('button', { name: 'Edit JSON', exact: true }).click()
-  await page.locator('#schema-json').fill(
-    JSON.stringify({
-      xcsVersion: '0.2',
-      name: 'Course',
-      description: 'Course completed',
-      fields: { course: { type: 'string' } },
-    }),
-  )
-  await page.getByRole('button', { name: 'Edit the form', exact: true }).click()
-  const error = page.getByRole('alert')
-  await expect(error).toContainText(
-    'This template could not be read. Check its format in the advanced editor.',
-  )
-  expect(await error.innerText()).not.toContain('SCHEMA_INVALID')
-  expect(await error.innerText()).not.toContain('Each name must be unique')
-  await error.getByText('Technical details', { exact: true }).click()
-  await expect(error).toContainText('SCHEMA_INVALID ($.xcsVersion): Unsupported XCS schema version')
-  await expect(page.getByTestId('transaction-preview')).toHaveCount(0)
-})
-
-test('publication recovery hides technical references and preserves retry, download and removal actions after failure', async ({
-  page,
-}) => {
-  await setup(page)
-  const canonicalPayload = '{"claims":{"course":"Synthetic course"}}'
-  const locator = payloadDigest(canonicalPayload).slice(0, 18)
-  const fetchUrl = `https://x.test/p/${locator}`
-  const transactionHash = 'ab'.repeat(32)
-  const job = {
-    id: '00000000-0000-4000-8000-000000000094',
-    createdAt: '2026-09-25T10:00:00Z',
-    payload: {
-      network: profileId,
-      locator,
-      canonicalPayload,
-      credentialUri: createHttpsPayloadUri(fetchUrl, canonicalPayload),
-      transactionHash,
-      signedTransactionBlob: '00',
-    },
-  }
-  const key = `xcs-hosted-publication-v1:${job.id}`
-  // This isolated context contains only a synthetic public recovery copy.
-  await page.addInitScript(
-    ({ key, job }) => {
-      localStorage.setItem(key, JSON.stringify(job))
-    },
-    { key, job },
-  )
-  let attempts = 0
-  await page.route(`**/v1/payloads/${locator}`, (route) => {
-    expect(route.request().method()).toBe('POST')
-    expect(route.request().postDataJSON()).toMatchObject({
-      network: profileId,
-      payloadBase64: Buffer.from(canonicalPayload).toString('base64'),
-      signedTransactionBlob: '00',
-    })
-    attempts += 1
-    return route.fulfill({ status: 503, json: { error: 'PAYLOAD_SERVICE_UNAVAILABLE' } })
-  })
-  await enter(page, '/issuer/schemas')
-  const recovery = page.getByTestId('publication-recovery')
-  await expect(recovery).toBeVisible()
-  const details = recovery.getByTestId('publication-technical-details')
-  await expect(details).not.toHaveAttribute('open', '')
-  expect(await recovery.innerText()).not.toContain(fetchUrl)
-  expect(await recovery.innerText()).not.toContain(transactionHash)
-  const retry = recovery.getByRole('button', { name: 'Finish publication', exact: true })
-  const remove = recovery.getByRole('button', { name: 'Remove recovery copy', exact: true })
-  const download = recovery.getByRole('button', { name: 'Download saved content', exact: true })
-  await expect(retry).toBeVisible()
-  await expect(remove).toBeVisible()
-  await expect(download).toBeVisible()
-  await details.locator('summary').click()
-  await expect(details).toContainText(fetchUrl)
-  await expect(details).toContainText(transactionHash)
-  await details.locator('summary').click()
-
-  await retry.click()
-  const error = recovery.getByRole('alert')
-  await expect(error).toContainText(
-    'Publication could not be completed. The recovery copy is retained.',
-  )
-  expect(await error.innerText()).not.toContain('PAYLOAD_SERVICE_UNAVAILABLE')
-  await error.locator('details > summary').click()
-  await expect(error).toContainText('PAYLOAD_SERVICE_UNAVAILABLE')
-  expect(attempts).toBe(1)
-  await expect(retry).toBeEnabled()
-  await expect(remove).toBeVisible()
-  await expect(download).toBeVisible()
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), key)).toEqual(job)
-
-  const downloadEvent = page.waitForEvent('download')
-  await download.click()
-  const stream = await (await downloadEvent).createReadStream()
-  if (!stream) throw new Error('Recovery download unavailable')
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk))
-  expect(Buffer.concat(chunks).toString('utf8')).toBe(canonicalPayload)
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), key)).toEqual(job)
+  await expect(
+    page.getByText('Link an issuer wallet before continuing.', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('link', { name: 'Prepare the issuer wallet', exact: true }),
+  ).toHaveAttribute('href', '/account?returnTo=/issuer/schemas/new')
+  await expect(page.getByRole('textbox', { name: 'Template name', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Edit JSON', exact: true })).toHaveCount(0)
 })

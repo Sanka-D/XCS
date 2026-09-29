@@ -1,8 +1,8 @@
-import type { RecipientWorkspace } from '../../server/xcs/recipient/types'
+import type { RecipientWorkspaceView } from '~/types/portal'
 
 export function useRecipientWorkspace() {
   const request = useRequestFetch()
   return useAsyncData('recipient-workspace', () =>
-    request<RecipientWorkspace>('/api/recipient/workspace'),
+    request<RecipientWorkspaceView>('/api/recipient/workspace'),
   )
 }

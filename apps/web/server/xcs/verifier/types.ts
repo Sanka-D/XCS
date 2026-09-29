@@ -1,7 +1,7 @@
-import type { IssuerOrganization } from '../issuer/types'
+import type { OrganizationApplication } from '../applications/domain'
 import type { VerificationReport } from '../verification'
 
-export type VerifierOrganization = IssuerOrganization
+export type VerifierOrganization = OrganizationApplication
 
 export interface VerifierHistoryEntry {
   id: string

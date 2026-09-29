@@ -1,8 +1,8 @@
-import type { Account, AppRole } from '../../server/xcs/auth/types'
+import type { AppRole, PortalAccount } from '~/types/portal'
 
 export interface AuthSessionView {
   enabled: boolean
-  user: Account | null
+  user: PortalAccount | null
   csrfToken?: string
   expiresAt?: string
   absoluteExpiresAt?: string

@@ -1,6 +1,6 @@
-import type { IssuerCredential, IssuerInvite } from '../../server/xcs/issuer/types'
+import type { IssuerCredentialCard, IssuerInvitationCard } from '~/types/portal'
 
-export function issuerCredentialState(credential: IssuerCredential, now = Date.now()): string {
+export function issuerCredentialState(credential: IssuerCredentialCard, now = Date.now()): string {
   const state = credential.status
   if (state.accepted === null) return 'unavailable'
   if (state.deletedLedgerIndex !== null) {
@@ -14,7 +14,7 @@ export function issuerCredentialState(credential: IssuerCredential, now = Date.n
   return state.accepted ? 'accepted' : 'issued'
 }
 
-export function issuerInvitationState(invite: IssuerInvite, now = Date.now()): string {
+export function issuerInvitationState(invite: IssuerInvitationCard, now = Date.now()): string {
   if (invite.revokedAt) return 'revoked'
   // Expiry bounds claiming; it does not erase an already-bound recipient.
   if (invite.claimedAt) return 'claimed'

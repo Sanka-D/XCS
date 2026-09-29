@@ -5,10 +5,9 @@
 # XRP Identity authentication
 
 Issue #27 adds optional sign-in, PostgreSQL sessions, current role guards and wallet linking to the
-Nuxt application. Authentication is disabled by default. Public discovery, verification, Studio and
-existing wallet transaction flows remain available without an account. Role-specific issuance,
-invitation, approval and private-delivery workflows are available through the optional role
-workspaces; see the [recipient/verifier journey](recipient-verifier.md).
+Nuxt application. Authentication is disabled by default. Public discovery and public presentation
+resolution remain available without an account. Business mutations are available through the
+optional role workspaces; see the [recipient/verifier journey](recipient-verifier.md).
 
 ## Register the client
 
@@ -91,10 +90,11 @@ Current account, personal grants and organization approvals are checked on reque
 into an indefinitely trusted cookie. Admin does not imply private-claim access.
 
 `/account` shows profile, approved organizations, linked wallets and session controls. `/issuer`
-provides a guarded organization overview. Middleware `auth` and `role` with `requiredRole` metadata
+derives the next approved issuer action; `/recipient` resumes claimed invitations and attestations.
+Middleware `auth` and `role` with `requiredRole` metadata
 protect navigation; API handlers enforce their own server authorization. Future organization
 mutations must also scope the exact organization ID and recheck authorization in their transaction.
-The public Studio has not been retired or made approval-gated by this change.
+Retired technical mutation URLs redirect to the role portals and discard their old inputs.
 
 `POST /api/auth/refresh` rotates the bearer and CSRF value without extending the eight-hour absolute
 limit. The account page offers an explicit extension action. `POST /api/auth/logout` revokes the

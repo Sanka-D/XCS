@@ -272,7 +272,7 @@ async function submit() {
             @click="selectEditorMode('guided')"
             >{{ $t('simpleIssuer.guided') }}</UButton
           >
-          <details>
+          <details v-if="!issuerContext">
             <summary class="cursor-pointer text-sm text-muted">
               {{ $t('simpleIssuer.advanced') }}
             </summary>
@@ -401,7 +401,7 @@ async function submit() {
           </fieldset>
           <StatusBox v-if="guidedError" tone="error" role="alert"
             ><p>{{ readableSchemaError(guidedError) }}</p>
-            <details>
+            <details v-if="!issuerContext">
               <summary>{{ $t('simpleIssuer.technical') }}</summary>
               {{ guidedError }}
             </details></StatusBox
@@ -430,7 +430,7 @@ async function submit() {
     </UCard>
 
     <StatusBox v-if="formError" tone="error" role="alert" :title="formErrorMessage">
-      <details v-if="formErrorMessage !== formError">
+      <details v-if="formErrorMessage !== formError && !issuerContext">
         <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ formError }}</code>
       </details>
@@ -455,7 +455,7 @@ async function submit() {
           </dd>
         </div>
       </dl>
-      <details class="mt-5">
+      <details v-if="!issuerContext" class="mt-5">
         <summary class="cursor-pointer text-sm text-muted">
           {{ $t('simpleIssuer.technical') }}
         </summary>
@@ -480,6 +480,7 @@ async function submit() {
       :ledger-index="result.ledgerIndex"
       :business-confirmation="result.businessConfirmation"
       :business-evidence="result.businessEvidence"
+      :compact="!!issuerContext"
     />
     <StatusBox
       v-if="result?.businessConfirmation === 'confirmed' && result.businessEvidence?.schemaUid"

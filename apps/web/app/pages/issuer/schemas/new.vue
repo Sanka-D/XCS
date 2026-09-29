@@ -18,6 +18,9 @@ const organizationId = ref(
 const profileId = ref('')
 const error = ref('')
 const engineBusy = ref(false)
+const hasIssuerWallet = computed(
+  () => auth.user.value?.wallets.some((wallet) => wallet.networkId === 1) === true,
+)
 try {
   profileId.value = (await getActiveNetworkProfile()).profileId
 } catch (cause) {
@@ -65,8 +68,19 @@ useSeoMeta({ robots: 'noindex,nofollow' })
         </details></StatusBox
       >
     </UContainer>
+    <StatusBox v-if="!hasIssuerWallet" class="mt-5" tone="warning">
+      <p>{{ $t('portal.walletRequired') }}</p>
+      <UButton
+        class="mt-3"
+        :to="{
+          path: localePath('/account'),
+          query: { returnTo: localePath('/issuer/schemas/new') },
+        }"
+        >{{ $t('portal.actions.linkWallet.cta') }}</UButton
+      >
+    </StatusBox>
     <SchemaRegistrationForm
-      v-if="context"
+      v-if="context && hasIssuerWallet"
       :key="context.key"
       :issuer-context="context"
       @busy="engineBusy = $event"

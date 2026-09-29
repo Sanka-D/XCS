@@ -26,7 +26,7 @@ import {
 } from '~/utils/operationLinks'
 import { LOCAL_PAYLOAD_LOCATION } from '~/utils/localPayloadStore'
 import { readRecipientPayload } from '~/utils/recipientPayload'
-import type { RecipientPayload } from '../../server/xcs/recipient/types'
+import type { RecipientPayloadView } from '~/types/portal'
 import { walletTransactionErrorMessage } from '~/utils/walletCompatibility'
 
 const props = defineProps<{
@@ -38,6 +38,7 @@ const props = defineProps<{
     schemaUid: string
     visibility: 'public' | 'private'
     organizationName?: string
+    issuerAdmission?: 'approved' | 'suspended' | 'not_approved' | 'unknown'
   }
   initialAction?: 'accept' | 'reject' | 'remove'
 }>()
@@ -127,6 +128,16 @@ const resultCredentialLink = computed(() => {
     profileId: reviewProfileId.value,
     generationId,
   })
+})
+const resultShareLink = computed(() => {
+  const fixed = props.fixedCredential
+  if (!fixed || action.value !== 'accept' || result.value?.businessConfirmation !== 'confirmed') {
+    return null
+  }
+  return {
+    path: localePath(`/recipient/credentials/${fixed.generationId}/present`),
+    query: { profile: fixed.profileId },
+  }
 })
 const blockReason = computed(() => {
   if (!review.value) return undefined
@@ -421,7 +432,7 @@ async function fetchExactReview(input: {
   const verifiedReport =
     privateReview.value && fixed
       ? (
-          await request<RecipientPayload>(
+          await request<RecipientPayloadView>(
             `/api/recipient/credentials/${encodeURIComponent(fixed.profileId)}/${fixed.generationId}/payload`,
           )
         ).verification
@@ -861,7 +872,7 @@ async function submit() {
       data-testid="accept-error"
       :title="messageDisplay"
     >
-      <details v-if="messageIsLocalized">
+      <details v-if="messageIsLocalized && !fixedCredential">
         <summary class="cursor-pointer">{{ $t('accept.technicalDetails') }}</summary>
         <code>{{ message }}</code>
       </details>
@@ -882,10 +893,6 @@ async function submit() {
         <dt>{{ $t('simpleRecipient.reviewSubject') }}</dt>
         <dd v-if="fixedCredential">
           {{ $t('simpleRecipient.yourWallet') }}
-          <details class="mt-1 text-sm">
-            <summary class="cursor-pointer">{{ $t('simpleRecipient.walletIdentity') }}</summary>
-            <code class="break-all">{{ review.subject }}</code>
-          </details>
         </dd>
         <dd v-else>
           <code>{{ review.subject }}</code>
@@ -921,16 +928,13 @@ async function submit() {
         <StatusBox v-if="payloadHostBlockReason" tone="error">{{
           payloadHostBlockMessage
         }}</StatusBox>
-        <UCheckbox
+        <UButton
           v-else
           data-testid="payload-consent"
-          :model-value="payloadConsent"
           :disabled="busy"
-          :label="
-            $t(payloadUsesLocalStore ? 'accept.localPayloadConsent' : 'accept.payloadConsent')
-          "
-          @update:model-value="setPayloadConsent(Boolean($event))"
-        />
+          @click="setPayloadConsent(true)"
+          >{{ $t('portal.recipient.showAndVerify') }}</UButton
+        >
       </StatusBox>
       <p v-if="reviewBusy" role="status" aria-live="polite">{{ $t('accept.checking') }}</p>
       <template
@@ -961,6 +965,9 @@ async function submit() {
         />
       </StatusBox>
       <p v-if="action === 'accept'" class="text-sm text-muted">{{ $t('accept.notTruth') }}</p>
+      <StatusBox v-if="action === 'accept' && fixedCredential?.issuerAdmission" class="mt-4">
+        {{ $t(`portal.admission.${fixedCredential.issuerAdmission}`) }}
+      </StatusBox>
       <p v-if="blockReason === 'CREDENTIAL_ISSUER_TRUST_ACK_REQUIRED'" class="text-sm text-muted">
         {{ blockReasonMessage }}
       </p>
@@ -978,7 +985,7 @@ async function submit() {
         data-testid="accept-error"
         :title="messageDisplay"
       >
-        <details v-if="messageIsLocalized">
+        <details v-if="messageIsLocalized && !fixedCredential">
           <summary>{{ $t('accept.technicalDetails') }}</summary>
           <code>{{ message }}</code>
         </details>
@@ -1004,7 +1011,7 @@ async function submit() {
         @click="buildPreview"
         >{{ $t('accept.retry') }}</UButton
       >
-      <details class="mt-5 rounded-lg p-4 ring-1 ring-default">
+      <details v-if="!fixedCredential" class="mt-5 rounded-lg p-4 ring-1 ring-default">
         <summary class="cursor-pointer font-semibold">{{ $t('accept.technicalDetails') }}</summary>
         <MetadataList class="mt-4">
           <template v-if="fixedCredential">
@@ -1044,6 +1051,7 @@ async function submit() {
       v-if="action !== 'accept'"
       :transaction="transaction"
       :busy="busy"
+      :compact="!!fixedCredential"
       @confirm="submit"
     />
     <BusinessFinality
@@ -1053,9 +1061,13 @@ async function submit() {
       :ledger-index="result.ledgerIndex"
       :business-confirmation="result.businessConfirmation"
       :business-evidence="result.businessEvidence"
+      :compact="!!fixedCredential"
     />
+    <UButton v-if="resultShareLink" :to="resultShareLink">
+      {{ $t('portal.recipient.shareNow') }}
+    </UButton>
     <UButton
-      v-if="resultCredentialLink"
+      v-else-if="resultCredentialLink && !fixedCredential"
       color="neutral"
       variant="outline"
       data-testid="subject-result-permalink"

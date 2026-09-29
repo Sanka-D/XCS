@@ -1,12 +1,21 @@
-import type { IssuerServices } from '../issuer/services'
+import type { DatabaseClient } from '../../lib/db/index.js'
+import type { ApplicationRepository } from '../applications/domain'
 import { PresentationRepository } from '../presentations/repository'
 import type { EvidencePolicy } from '../presentations/evidence'
 import { VerifierRepository } from './repository'
 
-export function createVerifierServices(issuer: IssuerServices, policy: EvidencePolicy = {}) {
-  const repository = new VerifierRepository(issuer.database, issuer.repository)
+export interface VerifierDependencies {
+  database: DatabaseClient
+  repository: ApplicationRepository
+}
+
+export function createVerifierServices(
+  dependencies: VerifierDependencies,
+  policy: EvidencePolicy = {},
+) {
+  const repository = new VerifierRepository(dependencies.database, dependencies.repository)
   const presentations = new PresentationRepository(
-    issuer.database,
+    dependencies.database,
     (db, session, result) => repository.record(db, session, result),
     policy,
   )

@@ -7,6 +7,7 @@ defineProps<{
   ledgerIndex?: number | undefined
   businessConfirmation?: Exclude<BusinessConfirmation, 'pending'> | undefined
   businessEvidence?: BusinessEvidence | undefined
+  compact?: boolean
 }>()
 </script>
 
@@ -40,7 +41,7 @@ defineProps<{
     <StatusBox v-else tone="notice" :title="$t('simpleUi.processing')" data-testid="xcs-pending">
       <p>{{ $t('simpleUi.noRepeat') }}</p>
     </StatusBox>
-    <details class="mt-5" data-testid="finality-technical-details">
+    <details v-if="!compact" class="mt-5" data-testid="finality-technical-details">
       <summary class="cursor-pointer font-semibold">{{ $t('simpleUi.technicalDetails') }}</summary>
       <p class="mt-3 break-all">
         <code>{{ txHash }}</code>

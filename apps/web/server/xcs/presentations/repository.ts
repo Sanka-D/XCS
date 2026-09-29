@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { appOrganizations, appPresentations } from '#db/schema/app'
 import {
   filterCredentialClaims,
@@ -42,11 +42,13 @@ export class PresentationRepository {
         const db = tx as unknown as XcsDatabase
         if (session) await currentPortalSession(db, session)
         // Share lock serializes disclosure with recipient revocation without consuming a grant.
-        await db.execute(
+        const locked = await db.execute(
           'tokenHash' in selector
-            ? sql`SELECT id FROM app_presentations WHERE token_hash=${selector.tokenHash} AND revoked_at IS NULL FOR SHARE`
-            : sql`SELECT id FROM app_presentations WHERE id=${selector.id} AND revoked_at IS NULL FOR SHARE`,
+            ? sql`SELECT id,revoked_at AS "revokedAt" FROM app_presentations WHERE token_hash=${selector.tokenHash} FOR SHARE`
+            : sql`SELECT id,revoked_at AS "revokedAt" FROM app_presentations WHERE id=${selector.id} FOR SHARE`,
         )
+        if (!locked[0]) throw new RecipientError(404, 'PRESENTATION_INVALID')
+        if (locked[0].revokedAt) throw new RecipientError(404, 'PRESENTATION_REVOKED')
         const [row] = await db
           .select({ presentation: appPresentations, name: appOrganizations.name })
           .from(appPresentations)
@@ -55,14 +57,11 @@ export class PresentationRepository {
             eq(appOrganizations.id, appPresentations.verifierOrganizationId),
           )
           .where(
-            and(
-              isNull(appPresentations.revokedAt),
-              'tokenHash' in selector
-                ? eq(appPresentations.tokenHash, selector.tokenHash)
-                : eq(appPresentations.id, selector.id),
-            ),
+            'tokenHash' in selector
+              ? eq(appPresentations.tokenHash, selector.tokenHash)
+              : eq(appPresentations.id, selector.id),
           )
-        if (!row) throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
+        if (!row) throw new RecipientError(404, 'PRESENTATION_INVALID')
         const credential = await managedCredentialRow(
           db,
           row.presentation.profileId,
@@ -72,7 +71,7 @@ export class PresentationRepository {
           throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
         const holderProof = await loadPresentationProof(db, row.presentation.id, credential)
         if (holderProof.status === 'invalid')
-          throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
+          throw new RecipientError(422, 'PRESENTATION_HOLDER_PROOF_INVALID')
         let scope: 'public' | 'full' = 'public'
         if (row.presentation.scope === 'full' && session) {
           const authorized = await db.execute(sql`SELECT o.id FROM app_organizations o
@@ -123,7 +122,7 @@ export class PresentationRepository {
   }
   resolve(session: Session | null, token: string) {
     const tokenHash = hashAppToken(token)
-    if (!tokenHash) throw new RecipientError(404, 'PRESENTATION_UNAVAILABLE')
+    if (!tokenHash) throw new RecipientError(404, 'PRESENTATION_INVALID')
     return this.resolveWhere(session, { tokenHash })
   }
   /** Only a history controller that already proved ownership may resolve an internal ID. */

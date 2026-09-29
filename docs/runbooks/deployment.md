@@ -402,7 +402,7 @@ representative localized route:
 
 ```sh
 curl --fail --silent --show-error --dump-header - --output /dev/null https://xcs.example/
-curl --fail --silent --show-error --dump-header - --output /dev/null https://xcs.example/studio
+curl --fail --silent --show-error --dump-header - --output /dev/null https://xcs.example/issuer
 ```
 
 Verify in the output that there is exactly one `Content-Security-Policy-Report-Only`, no
@@ -411,7 +411,7 @@ Verify in the output that there is exactly one `Content-Security-Policy-Report-O
 fingerprinted `/_nuxt/` asset must remain `public, max-age=31536000, immutable`. Then use a clean
 Chromium profile with DevTools open:
 
-1. Load Explorer, Studio, Developers and an exact Credential permalink; record every CSP violation
+1. Load Explorer, the role portals, Developers and an exact Credential permalink; record every CSP violation
    from the Console and the document's response headers from the Network panel.
 2. For each configured adapter—Xaman, Crossmark, GemWallet, WalletConnect, Ledger, Xyra, Otsu and
    MetaMask Snap—exercise connect, cancellation, schema registration, `CredentialCreate`,

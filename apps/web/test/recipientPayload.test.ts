@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { canonicalJson, payloadDigest } from '#xcs/core/index.js'
 import { readRecipientPayload } from '../app/utils/recipientPayload'
-import { authReturnPath } from '../app/utils/authReturnPath'
+import { authReturnPath } from '../app/utils/portalRoutes'
 
 const content = canonicalJson({ synthetic: 'private' })
 const uri = `https://xcs.test/q/${'a'.repeat(18)}#xcs-sha256=${payloadDigest(content)}`

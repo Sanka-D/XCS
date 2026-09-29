@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RecipientCredential } from '../../../server/xcs/recipient/types'
+import type { RecipientCredentialCard } from '~/types/portal'
 
 definePageMeta({ middleware: ['auth'] })
 const { t, locale } = useI18n()
@@ -27,7 +27,7 @@ const groups = computed(() => [
   },
 ])
 const waiting = computed(() => data.value?.invitations.filter((item) => !item.generationId) ?? [])
-function credentialLink(item: Pick<RecipientCredential, 'generationId' | 'profileId'>) {
+function credentialLink(item: Pick<RecipientCredentialCard, 'generationId' | 'profileId'>) {
   return {
     path: localePath(`/recipient/credentials/${item.generationId}`),
     query: { profile: item.profileId },

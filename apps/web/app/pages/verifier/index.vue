@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { VerifierWorkspace } from '../../../server/xcs/verifier/types'
-import type { ResolvedPresentation } from '../../../server/xcs/recipient/types'
+import type { ResolvedPresentationView, VerifierWorkspaceView } from '~/types/portal'
 import { presentationHeadline } from '~/utils/presentationView'
 
 definePageMeta({ middleware: ['auth'] })
@@ -15,7 +14,7 @@ const organizationId = computed(() =>
 const { data, error, status, refresh } = useAsyncData(
   'verifier-workspace',
   () =>
-    request<VerifierWorkspace>('/api/verifier/workspace', {
+    request<VerifierWorkspaceView>('/api/verifier/workspace', {
       query: organizationId.value ? { organizationId: organizationId.value } : {},
     }),
   { watch: [organizationId] },
@@ -33,7 +32,7 @@ const csvUrl = computed(() =>
 )
 const busy = ref(false)
 const openError = ref(false)
-const result = shallowRef<ResolvedPresentation | null>(null)
+const result = shallowRef<ResolvedPresentationView | null>(null)
 let revision = 0
 let disposed = false
 function clearResult() {
@@ -70,7 +69,7 @@ async function reopen(id: string) {
   const identity = auth.user.value?.id
   try {
     await auth.load(true)
-    const current = await auth.mutateApplication<ResolvedPresentation>(
+    const current = await auth.mutateApplication<ResolvedPresentationView>(
       `/api/verifier/history/${encodeURIComponent(id)}/presentation`,
       {},
     )

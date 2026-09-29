@@ -470,13 +470,12 @@ describe.skipIf(!enabled)(
           { hex: false, address: subjectAddress },
         ])
         await context.clearCookies()
-        await page.goto(runtime.origin + '/presentations#' + full.body.token)
         const anonymousResolution = page.waitForResponse(
           (response) =>
             new URL(response.url()).pathname === '/api/presentations/resolve' &&
             response.request().method() === 'POST',
         )
-        await page.getByRole('button', { name: en.presentation.open, exact: true }).click()
+        await page.goto(runtime.origin + '/presentations#' + full.body.token)
         const anonymousResponse = await anonymousResolution
         expect(anonymousResponse.status()).toBe(200)
         const anonymous = await anonymousResponse.json()
@@ -497,22 +496,11 @@ describe.skipIf(!enabled)(
           exact: true,
         })
         await browserExpect(ledgerSection).toContainText(en.roleJourney.ledgerStatuses.active)
-        const presentationDetails = page
-          .getByTestId('presentation-result')
-          .locator('details')
-          .filter({
-            has: page.locator('summary').filter({ hasText: en.simpleUi.technicalDetails }),
-          })
-          .first()
-        await browserExpect(presentationDetails).not.toHaveAttribute('open', '')
-        expect(await page.getByTestId('presentation-result').innerText()).not.toContain(
-          subjectAddress,
-        )
-        await presentationDetails.locator(':scope > summary').click()
-        await browserExpect(presentationDetails).toHaveAttribute('open', '')
-        await browserExpect(presentationDetails).toContainText(subjectAddress)
-        await browserExpect(presentationDetails).toContainText(issuerAddress)
-        await presentationDetails.locator(':scope > summary').click()
+        const presentationText = await page.getByTestId('presentation-result').innerText()
+        expect(presentationText).not.toContain(subjectAddress)
+        expect(presentationText).not.toContain(issuerAddress)
+        expect(presentationText).not.toContain(generationId)
+        expect(presentationText).not.toContain(profileId)
         const proofDate = await page.evaluate(
           (value) =>
             new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
@@ -532,7 +520,6 @@ describe.skipIf(!enabled)(
         )
         await signIn(verifier)
         await page.goto(runtime.origin + '/presentations#' + full.body.token)
-        await page.getByRole('button', { name: en.presentation.open, exact: true }).click()
         await browserExpect(page.getByTestId('presentation-result')).toContainText(
           'PRIVATE RUNTIME CLAIM',
         )

@@ -1,10 +1,10 @@
 # XCS Testnet web app
 
-The Nuxt application is the non-custodial Testnet site for XCS, with accountless public routes
-and optional authenticated account, admin and issuer workspaces. Its public navigation
-keeps four entries—Explorer, Create, Verify and Docs—while preserving the schema, issuance,
-lifecycle and developer workflows in one deployment. EAS and EASScan are interaction-design
-references only; the site constructs native XRPL transactions under the frozen XCS v0.1 protocol.
+The Nuxt application is the non-custodial Testnet site for XCS. Public read-only discovery remains
+accountless; authenticated business mutations use the guided `/issuer` and `/recipient` portals,
+and shared attestations open through `/presentations`. The site constructs native XRPL transactions
+under the frozen XCS v0.1 protocol while keeping protocol identifiers in integration surfaces, not
+business forms.
 
 The same Nitro server also **is** the XCS read and verification API: `/v1/**`, `/health/*`,
 `/internal/metrics*` and `/documentation` are served from this application, on the same origin as the
@@ -37,10 +37,10 @@ The site is built on Nuxt UI 4 and Tailwind CSS 4. The XCS identity lives in
 `EmptyState`); pages compose Nuxt UI primitives with it and keep their workflow logic in
 `composables/` and `utils/`.
 
-For every write, the application constructs and autofills an XRPL transaction, shows those exact
-final fields to the user, then asks an external wallet to sign without submitting. The private key
-or seed never enters the application. Optional application accounts and organization approval do not
-replace wallet authorization. One wallet action is prepared at a time; batch issuance is not implemented.
+For every write, the application constructs and autofills an XRPL transaction, presents a readable
+business summary, then asks an external wallet to sign without submitting. The private key or seed
+never enters the application. Application accounts and organization approval do not replace wallet
+authorization. One wallet action is prepared at a time; batch issuance is not implemented.
 
 Immediately before opening the wallet, the site requires a fresh, profile-bound readiness proof
 from the authoritative indexer. It repeats that proof after the wallet returns and before retaining
@@ -66,14 +66,15 @@ The current application organizes the existing workflows as follows:
   statistics and exact search. `/schemas` and `/schemas/:uid` provide paginated schema discovery,
   `/activity` shows schema registrations only, `/credentials/:generationId` and
   `/transactions/:hash` expose exact evidence, and `/status` shows the indexer/network view;
-- **Create:** `/studio` is the single creation hub. It emphasizes schema registration and
-  single-credential issuance, then links acceptance, revocation and local operation recovery.
-  Schema registration has a guided scalar-field editor, course-completion and diploma templates,
-  plus the advanced JSON editor. Issuance can derive a guided claims form from a compatible
-  resolved schema and retains the advanced JSON path;
-- **Verify:** `/verify` accepts a shared generation ID and opens its exact permalink, or exposes the
-  complete issuer/subject/schema tuple as an advanced lookup. The permalink reports ledger state,
-  schema validity, payload integrity and issuer trust separately;
+- **Issuer:** `/issuer` derives one next action from application approval, linked issuer wallet,
+  templates, invitations and issuance state. The guided screens use business names and readable
+  fields; wallet signing remains explicit;
+- **Recipient:** `/recipient` joins claimed invitations, external wallet preparation, attestation
+  review, acceptance and sharing. Private content is fetched only after the explicit “show and
+  verify” action;
+- **Verify:** `/presentations` removes a bearer fragment before resolving it, opens public shares
+  without an account, resumes private shares through the one-time login handoff, and leads with
+  issuer admission, XRPL lifecycle and recipient-wallet proof;
 - **Docs:** `/developers` loads the active runtime profile, executes the privacy-explicit
   exact-generation verification flow, derives REST/cURL, TypeScript and monorepo CLI examples from
   that evidence, documents the wallet `Signer` boundary and catalogs aggregate versus exact API
@@ -283,7 +284,7 @@ signature, persistence and submission invariants, not a released wallet UI.
 
 The required Playwright gate exercises schema registration and credential issuance in Chromium,
 including the two distinct finality stages. Issuance first receives deliberately mismatched indexed
-evidence, withholds XCS success, then proves that `/operations` can re-confirm the exact event
+evidence, withholds XCS success, then proves that role recovery can re-confirm the exact event
 without signing or submitting again. The same deterministic journey accepts the pending Credential,
 removes the resulting active generation through the subject wallet, opens its exact deleted
 permalink and exports the sanitized `subject_removed` receipt. A separate case proves that rejecting
@@ -532,13 +533,12 @@ resolve the URI, so its remote resolver may remain disabled. There is intentiona
 fetch proxy, avoiding an SSRF trust boundary. IPFS remains part of the protocol and CLI, but is
 outside the Commons-hosted browser beta.
 
-The standalone `/verify` page opens `/credentials/:generationId` directly when the verifier has a
-shared generation ID. Its advanced tuple flow follows the same privacy boundary: it first reads and
-displays indexed credential metadata without contacting the issuer. Only after the verifier consents
-to the exact displayed host does the browser fetch the payload with credentials omitted, CORS
-enabled and redirects disabled, then POST the parsed object to the API. Verification never requests
-API-side URI resolution. A link generation constraint is checked before the host fetch and again
-before the result is accepted.
+The read-only exact Credential page preserves the integration-oriented verification boundary: it
+first reads indexed metadata without contacting the issuer. Only after explicit host consent does
+the browser fetch the payload with credentials omitted, CORS enabled and redirects disabled, then
+POST the parsed object to the API. Verification never requests API-side URI resolution. This is an
+Explorer/integrator surface; the guided verifier journey uses `/presentations` and never asks for a
+generation ID or tuple.
 
 The exact `/credentials/:generationId` permalink applies the same boundary while also showing the
 schema and bounded lifecycle timeline. Its server-rendered response loads only indexed generation,
@@ -564,8 +564,9 @@ exactly equal the reviewed transaction. SDK journal stages are retained with the
 operation. Schema registration stores publisher, canonical schema digest and exact memo size.
 Issuance stores the tuple, public URI, payload digest and optional expiration. Tuple-only actions
 store the exact reviewed generation ID. Managed issuer records keep only nonsecret references and
-visibility selections locally, never private claims, invitation tokens or email addresses. The `/operations` page first checks transaction status by
-hash, but only after decoding the blob and matching its derived hash, `LastLedgerSequence`, account,
+visibility selections locally, never private claims, invitation tokens or email addresses. Role
+recovery first checks transaction status by hash, but only after decoding the blob and matching its
+derived hash, `LastLedgerSequence`, account,
 transaction type and any explicit `NetworkID` against the journal. Only a still-unvalidated
 transaction may be resubmitted, after checking that its generation is still current. The blob is
 removed from the local record as soon as the operation becomes `validated`, `expired`, or `failed`.
@@ -617,8 +618,8 @@ treated as XCS-confirmed without new exact evidence.
 Receipts are sanitized local records, not signatures from Commons or independent trust anchors; a
 verifier must still resolve the referenced transaction against an authoritative XCS indexer.
 
-For any complete operation already validated with `tesSUCCESS`, `/operations` can re-check a
-`pending`, `timeout` or `mismatch` business confirmation. Schema registration uses the exact
+For any complete operation already validated with `tesSUCCESS`, the originating role screen can
+re-check a `pending`, `timeout` or `mismatch` business confirmation. Schema registration uses the exact
 `GET /v1/networks/:network/schema-registrations/:transactionHash` proof and requires its publisher
 and canonical digest before accepting the returned UID. Credential issuance and lifecycle actions
 use `GET /v1/networks/:network/credentials/:issuer/:subject/:schemaUid/events/:transactionHash` and
@@ -639,8 +640,8 @@ Authentication is disabled by default. `/account` supports XRP Identity authoriz
 PostgreSQL sessions, CSRF-protected mutations, role guards and verified Testnet wallet linking.
 Provision the application migrations and dedicated `xcs_app` pool before enabling it. Supported
 wallet message formats and real OIDC registration requirements are in the
-[authentication runbook](../../docs/runbooks/authentication.md). Public Studio and verification
-remain accountless.
+[authentication runbook](../../docs/runbooks/authentication.md). Public Explorer reads and public
+presentation resolution remain accountless; web mutations are role-guided.
 
 The admin workspace reviews issuer/verifier applications and documents, records decisions and
 manages approval/suspension. Approval grants application access, not issuer trust or protocol validity;

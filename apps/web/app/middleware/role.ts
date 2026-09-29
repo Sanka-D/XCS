@@ -1,4 +1,4 @@
-import type { AppRole } from '../../server/xcs/auth/types'
+import type { AppRole } from '~/types/portal'
 
 export default defineNuxtRouteMiddleware(async (to) => {
   const role = to.meta.requiredRole

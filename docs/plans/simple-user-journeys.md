@@ -1,5 +1,8 @@
 # Simple attestation journeys
 
+> Superseded by [ADR 0007](../adr/0007-guided-role-portals.md). Its secondary technical controls
+> were retired from web mutation journeys; public integration and read-only surfaces remain.
+
 Goal: let issuers, recipients and verifiers complete their work without entering or interpreting
 hashes, schema identifiers, JSON or ledger terminology. The existing technical tools remain
 available through explicit secondary controls. Base: 7080dce; its functional CI jobs passed,

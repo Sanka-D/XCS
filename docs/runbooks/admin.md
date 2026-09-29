@@ -25,6 +25,7 @@ the two components, then run the grants-only bootstrap:
 | `NUXT_ADMIN_DATABASE_URL`           | Web administrative connection as `xcs_admin_app`    |
 | `XCS_NOTIFIER_DATABASE_URL`         | Worker connection as `xcs_notifier`                 |
 | `XCS_ADMIN_DOCUMENT_KEY`            | Random signing key of at least 32 UTF-8 bytes       |
+| `XCS_AUTH_ORIGIN`                   | Exact HTTPS origin used in decision email buttons   |
 | `XCS_DOCUMENT_STORAGE_DRIVER`       | `filesystem` locally; `s3` in production            |
 | `XCS_DOCUMENT_FILESYSTEM_DIRECTORY` | Absolute local-only private directory               |
 | `XCS_DOCUMENT_S3_*`                 | Private production bucket, endpoint, region and key |
@@ -133,7 +134,9 @@ links. The document volume is private even though the filenames themselves are o
 
 A candidature is identified by organization and role. Pending applications can be approved or
 rejected; an approved verifier can be suspended and reinstated. Rejection and suspension require
-a reason. The application update, before/after audit record and one logical notification are committed
+a reason. The detail page presents organization, requested role, responsible person, documents,
+declared wallet and history as a checklist, with the current decision summary kept alongside it.
+The application update, before/after audit record and one logical notification are committed
 atomically. Revision conflicts expose the decision already recorded; repeating the same idempotency
 key does not create another decision. Approval is administrative and requires no XRPL transaction
 or running indexer. Linked wallets belong to the responsible person and do not prove organization
@@ -141,7 +144,8 @@ identity.
 
 The worker claims one pending notification per transaction, rechecks the current verified email
 against its stored recipient, and persists an attempt before SMTP. It emits a bilingual message
-without documents, wallet data, private claims or internal moderation reasons. Missing, unverified,
+with the resulting status, optional decision reason and one button to the appropriate role space.
+It includes no decision identifier, documents, wallet data, private claims or token. Missing, unverified,
 changed or unavailable recipients produce `blocked`; the decision remains effective. SMTP failures
 also leave the decision intact.
 

@@ -6,7 +6,6 @@ import {
   type WalletCredentialInboxItem,
 } from '~/utils/credentialInbox'
 import { displayDate, httpStatusFromError } from '~/utils/explorer'
-import { buildCredentialAcceptLink } from '~/utils/operationLinks'
 import { assertPublicRpcUrl } from '~/utils/publicRpcUrl'
 
 const { t, locale } = useI18n()
@@ -21,16 +20,6 @@ const errorCode = ref('')
 let requestRevision = 0
 
 const subject = computed(() => account.value?.address ?? '')
-
-function actionLink(credential: WalletCredentialInboxItem): string {
-  return buildCredentialAcceptLink({
-    profileId: profileId.value,
-    issuer: credential.issuer,
-    schemaUid: credential.schemaUid,
-    generationId: credential.generationId,
-    action: credential.state === 'expired' ? 'reject' : 'accept',
-  })
-}
 
 function expirationLabel(credential: WalletCredentialInboxItem): string {
   if (credential.expiration === null) return t('walletSpace.noExpiration')
@@ -149,15 +138,7 @@ useSeoMeta({
                 </p>
                 <h2 class="text-xl font-semibold">{{ $t('walletSpace.credential') }}</h2>
               </div>
-              <UButton :to="localePath(actionLink(credential))">
-                {{
-                  $t(
-                    credential.state === 'expired'
-                      ? 'walletSpace.reviewExpired'
-                      : 'walletSpace.reviewPending',
-                  )
-                }}
-              </UButton>
+              <UButton :to="localePath('/recipient')">{{ $t('recipient.title') }}</UButton>
             </div>
           </template>
           <MetadataList>

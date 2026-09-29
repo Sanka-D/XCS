@@ -318,7 +318,7 @@ async function submit() {
     </UCard>
 
     <StatusBox v-if="message" tone="error" data-testid="revoke-error" :title="messageDisplay">
-      <details v-if="messageIsLocalized">
+      <details v-if="messageIsLocalized && !issuerContext">
         <summary>{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ message }}</code>
       </details>
@@ -332,7 +332,7 @@ async function submit() {
       <p class="mt-2">
         {{ $t('simpleIssuer.expiration') }} : {{ expiration ?? $t('revoke.noExpiration') }}
       </p>
-      <details class="mt-4">
+      <details v-if="!issuerContext" class="mt-4">
         <summary class="cursor-pointer text-sm text-muted">
           {{ $t('simpleIssuer.technical') }}
         </summary>
@@ -379,6 +379,7 @@ async function submit() {
       :ledger-index="result.ledgerIndex"
       :business-confirmation="result.businessConfirmation"
       :business-evidence="result.businessEvidence"
+      :compact="!!issuerContext"
     />
     <UButton
       v-if="resultCredentialLink"

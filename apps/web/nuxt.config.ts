@@ -109,12 +109,18 @@ export default defineNuxtConfig({
       // Force a fresh pre-bundle on each server start so a changed dependency
       // cannot be replaced by Nuxt's persistent dependency cache.
       force: true,
-      // `xrpl-connect` is reached only from the lazily loaded wallet adapters,
+      // The wallet plugin and its adapters are reached only after hydration,
       // and `vendoredPrebundleDependencies` covers the vendored protocol code
       // under `app/lib/xcs` (see that module, and the test that keeps it
       // honest). Without pre-bundling, Vite discovers them after the first page
       // load and re-optimizes mid-run, which 504s the in-flight requests.
-      include: [...vendoredPrebundleDependencies, 'xrpl-connect', 'ripple-keypairs'],
+      include: [
+        ...vendoredPrebundleDependencies,
+        '@xrpl-commons/xrpl-connect-vue',
+        'xrpl-connect',
+        'ripple-keypairs',
+        'uqr',
+      ],
       // Served unbundled so the CSS-injection strip above also runs in dev.
       exclude: ['vaul-vue'],
     },

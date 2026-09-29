@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { issuerCredentialState, issuerInvitationState } from '~/utils/issuerWorkspace'
+import { invitationProgress } from '~/utils/portalPresenters'
 const props = defineProps<{ section: 'schemas' | 'recipients' | 'credentials' }>()
+const invitationSteps = ['email', 'claimed', 'wallet', 'issuance'] as const
 const { t, locale } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()
@@ -196,14 +198,6 @@ useSeoMeta({
               </option>
             </select></label
           >
-          <label
-            >{{ $t('issuer.message')
-            }}<textarea
-              v-model="message"
-              maxlength="2000"
-              class="mt-1 block w-full rounded border border-default bg-default p-3"
-            />
-          </label>
           <UButton type="submit" :loading="busy" :disabled="busy || !selectedSchema">{{
             $t('issuer.sendInvite')
           }}</UButton>
@@ -215,6 +209,14 @@ useSeoMeta({
           <UCard>
             <h2 class="font-semibold break-all">{{ item.recipientDisplayName || item.email }}</h2>
             <p v-if="item.recipientDisplayName" class="mt-1 text-sm text-muted">{{ item.email }}</p>
+            <p class="mt-2 font-semibold">
+              {{
+                data.schemas.find(
+                  (schema) =>
+                    schema.profileId === item.profileId && schema.schemaUid === item.schemaUid,
+                )?.displayName || $t('recipient.credential')
+              }}
+            </p>
             <p class="mt-2">{{ $t(`issuer.states.${issuerInvitationState(item)}`) }}</p>
             <p v-if="!item.revokedAt" class="mt-2 font-semibold">
               {{ $t(`roleJourney.recipientStates.${item.recipientStatus ?? 'unavailable'}`) }}
@@ -239,6 +241,21 @@ useSeoMeta({
             <StatusBox v-else-if="item.deliveryStatus === 'uncertain'" tone="warning" class="mt-3">
               {{ $t('issuer.uncertain') }}
             </StatusBox>
+            <ol
+              class="mt-4 grid gap-2 sm:grid-cols-4"
+              :aria-label="$t('portal.invitationProgress.title')"
+            >
+              <li
+                v-for="step in invitationSteps"
+                :key="step"
+                class="rounded border border-default p-3 text-sm"
+              >
+                <span class="font-semibold">{{ $t(`portal.invitationProgress.${step}`) }}</span>
+                <span class="mt-1 block text-muted">
+                  {{ $t(`portal.progress.${invitationProgress(item)[step]}`) }}
+                </span>
+              </li>
+            </ol>
             <div class="mt-4 flex flex-wrap gap-3">
               <UButton
                 v-if="item.claimedAt && !item.revokedAt && item.recipientStatus === 'ready'"
@@ -249,7 +266,11 @@ useSeoMeta({
                 v-if="!item.claimedAt && !item.revokedAt"
                 :disabled="busy"
                 color="neutral"
-                variant="outline"
+                :variant="
+                  item.deliveryStatus === 'failed' || item.deliveryStatus === 'uncertain'
+                    ? 'solid'
+                    : 'outline'
+                "
                 @click="confirmation = `resend:${item.id}`"
                 >{{ $t('issuer.resend') }}</UButton
               >

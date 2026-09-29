@@ -230,7 +230,6 @@ describe.skipIf(!enabled)('compiled recipient and verifier portals over HTTPS', 
       page.on('request', (request) => paths.push(request.url()))
       const openPresentation = async (token: string) => {
         await page.goto(runtime!.origin + '/presentations#' + token)
-        await page.getByRole('button', { name: en.presentation.open, exact: true }).click()
         await browserExpect(page.getByTestId('presentation-result')).toBeVisible()
       }
       await signIn()

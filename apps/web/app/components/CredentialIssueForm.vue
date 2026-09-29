@@ -624,14 +624,6 @@ const credentialLink = computed(() => {
           <p>
             <strong>{{ $t('simpleIssuer.recipient') }}:</strong> {{ issuerContext.recipientLabel }}
           </p>
-          <details>
-            <summary class="cursor-pointer text-sm text-muted">
-              {{ $t('simpleIssuer.accountDetails') }}
-            </summary>
-            <p class="mt-2 break-all">
-              <code>{{ issuerContext.subjectAddress }}</code>
-            </p>
-          </details>
         </template>
         <UFormField v-if="!issuerContext" label="Schema UID">
           <UInput
@@ -669,7 +661,7 @@ const credentialLink = computed(() => {
             @click="loadGuidedClaimForm"
             >{{ $t('issue.loadSchema') }}</UButton
           >
-          <details>
+          <details v-if="!issuerContext">
             <summary class="cursor-pointer text-sm text-muted">
               {{ $t('simpleIssuer.advanced') }}
             </summary>
@@ -721,7 +713,7 @@ const credentialLink = computed(() => {
           <p v-else class="text-sm text-muted">{{ $t('issue.advancedClaimsHint') }}</p>
           <StatusBox v-if="guidedClaimsError && guidedClaims.length" tone="error">
             <p>{{ $t('simpleIssuer.fieldError') }}</p>
-            <details>
+            <details v-if="!issuerContext">
               <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
               <code>{{ guidedClaimsError }}</code>
             </details>
@@ -814,7 +806,7 @@ const credentialLink = computed(() => {
       :title="formErrorMessage"
       role="alert"
     >
-      <details v-if="formErrorIsLocalized">
+      <details v-if="formErrorIsLocalized && !issuerContext">
         <summary class="cursor-pointer">{{ $t('simpleIssuer.technical') }}</summary>
         <code>{{ formError }}</code>
       </details>
@@ -841,7 +833,7 @@ const credentialLink = computed(() => {
         :disabled="submissionBusy"
         :label="$t('simpleIssuer.visibilityReviewed')"
       />
-      <details v-if="issuerContext" class="mt-4">
+      <details v-if="!issuerContext" class="mt-4">
         <summary class="cursor-pointer text-sm text-muted">
           {{ $t('simpleIssuer.technical') }}
         </summary>
@@ -853,7 +845,7 @@ const credentialLink = computed(() => {
           $t('simpleIssuer.download')
         }}</UButton>
       </details>
-      <p v-else class="text-sm break-all">
+      <p v-if="!issuerContext" class="text-sm break-all">
         <code>{{ credentialUri }}</code>
       </p>
       <UCheckbox
@@ -907,8 +899,9 @@ const credentialLink = computed(() => {
       :ledger-index="result.ledgerIndex"
       :business-confirmation="result.businessConfirmation"
       :business-evidence="result.businessEvidence"
+      :compact="!!issuerContext"
     />
-    <UCard v-if="acceptLink && credentialLink" class="mb-6">
+    <UCard v-if="!issuerContext && acceptLink && credentialLink" class="mb-6">
       <template #header>
         <h2 class="text-xl font-semibold">{{ $t('issue.links') }}</h2>
       </template>

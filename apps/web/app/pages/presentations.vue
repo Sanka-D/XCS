@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ResolvedPresentation } from '../../server/xcs/recipient/types'
+import type { ResolvedPresentationView } from '~/types/portal'
 import { purgePrivateLinkFragment } from '~/utils/privateLinkHistory'
 import { presentationTokenFromLink } from '~/utils/presentationView'
 
@@ -11,8 +11,9 @@ const { t } = useI18n()
 const token = ref('')
 const ready = ref(false)
 const busy = ref(false)
-const failed = ref<'unusable' | 'unavailable' | null>(null)
-const result = shallowRef<ResolvedPresentation | null>(null)
+type PresentationFailure = 'invalid' | 'revoked' | 'holderProof' | 'unavailable'
+const failed = ref<PresentationFailure | null>(null)
+const result = shallowRef<ResolvedPresentationView | null>(null)
 const receivedLink = ref('')
 const invalidLink = ref(false)
 let revision = 0
@@ -33,7 +34,8 @@ function captureFragment() {
   busy.value = false
   clearResult()
   token.value = fragment.slice(1)
-  failed.value = /^[A-Za-z0-9_-]{43}$/.test(token.value) ? null : 'unusable'
+  failed.value = /^[A-Za-z0-9_-]{43}$/.test(token.value) ? null : 'invalid'
+  if (ready.value && !failed.value) void open()
 }
 // Native fragment navigation and Vue Router navigation can reuse this component.
 // Read the current URL so both listeners cannot consume the same fragment twice.
@@ -60,8 +62,9 @@ onMounted(async () => {
     }
   }
   if (token.value && !failed.value && !/^[A-Za-z0-9_-]{43}$/.test(token.value))
-    failed.value = 'unusable'
+    failed.value = 'invalid'
   ready.value = true
+  if (token.value && !failed.value) await open()
 })
 onBeforeUnmount(() => {
   disposed = true
@@ -99,7 +102,7 @@ async function open() {
     await auth.load(true)
     if (disposed || attempt !== revision || requestId !== activeRequest) return
     identity = auth.user.value?.id
-    const resolved = await $fetch<ResolvedPresentation>('/api/presentations/resolve', {
+    const resolved = await $fetch<ResolvedPresentationView>('/api/presentations/resolve', {
       method: 'POST',
       body: { token: requestToken },
       ...(auth.csrfToken.value ? { headers: { 'x-xcs-csrf': auth.csrfToken.value } } : {}),
@@ -119,8 +122,14 @@ async function open() {
       requestId === activeRequest &&
       identity === auth.user.value?.id
     )
-      failed.value =
-        (cause as { statusCode?: number }).statusCode === 404 ? 'unusable' : 'unavailable'
+      failed.value = (() => {
+        const error = cause as { statusCode?: number; data?: { error?: string } }
+        if (error.data?.error === 'PRESENTATION_REVOKED') return 'revoked'
+        if (error.data?.error === 'PRESENTATION_HOLDER_PROOF_INVALID') return 'holderProof'
+        if (error.data?.error === 'PRESENTATION_INVALID' || error.statusCode === 404)
+          return 'invalid'
+        return 'unavailable'
+      })()
   } finally {
     if (requestId === activeRequest) busy.value = false
   }
@@ -158,14 +167,14 @@ useSeoMeta({
           {{ failed ? $t(`presentation.headlines.${failed}`) : $t('presentation.title') }}
         </h1>
         <p class="mt-3 text-muted">
-          {{ $t(failed === 'unusable' ? 'presentation.unusableHelp' : 'presentation.openHelp') }}
+          {{ $t(failed ? `presentation.failureHelp.${failed}` : 'presentation.openHelp') }}
         </p>
       </template>
       <StatusBox v-if="failed === 'unavailable'" class="mt-5" tone="error">{{
         $t('presentation.unavailableHelp')
       }}</StatusBox>
       <form
-        v-if="!token || failed === 'unusable'"
+        v-if="!token || failed === 'invalid' || failed === 'revoked'"
         class="mt-5 grid gap-4"
         @submit.prevent="openReceivedLink"
       >
@@ -195,7 +204,10 @@ useSeoMeta({
           $t('simpleUi.verifyLink')
         }}</UButton>
       </form>
-      <div v-if="token && failed !== 'unusable'" class="mt-5 flex flex-wrap gap-3">
+      <div
+        v-if="token && failed !== 'invalid' && failed !== 'revoked'"
+        class="mt-5 flex flex-wrap gap-3"
+      >
         <UButton :loading="busy" :disabled="busy" @click="open">{{
           $t(result ? 'presentation.checkAgain' : 'presentation.open')
         }}</UButton>
