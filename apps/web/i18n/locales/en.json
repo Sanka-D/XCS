@@ -455,7 +455,10 @@
       "catching_up": "Catching up",
       "ready": "Ready",
       "halted": "Halted"
-    }
+    },
+    "catchingUpTitle": "The indexer is catching up",
+    "catchingUpBody": "This network is being read from its activation ledger. Verification stays closed until the indexer reaches the network tip, so some figures below are not available yet.",
+    "catchingUpProgress": "Indexed to ledger {indexed} of {tip}, {remaining} remaining."
   },
   "studio": {
     "title": "Create verifiable credentials.",

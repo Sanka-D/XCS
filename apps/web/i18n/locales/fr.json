@@ -455,7 +455,10 @@
       "catching_up": "Rattrapage en cours",
       "ready": "Prêt",
       "halted": "Arrêté"
-    }
+    },
+    "catchingUpTitle": "L'indexeur rattrape son retard",
+    "catchingUpBody": "Ce réseau est lu depuis son ledger d'activation. La vérification reste fermée tant que l'indexeur n'a pas atteint la tête du réseau, donc certaines valeurs ci-dessous ne sont pas encore disponibles.",
+    "catchingUpProgress": "Indexé jusqu’au ledger {indexed} sur {tip}, {remaining} restants."
   },
   "studio": {
     "title": "Créer des credentials vérifiables.",

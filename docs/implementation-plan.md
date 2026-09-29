@@ -102,8 +102,9 @@ requires the exclusive mode.
 
 PostgreSQL bootstrap treats fixed cluster-wide roles as a dedicated-cluster boundary. It applies the
 single current-schema baseline, validates provider-created users and their membership graph, and
-normalizes current-database grants. The managed service alone creates users and manages passwords,
-connection limits and role defaults. A provider-side role-to-database policy remains required
+normalizes current-database grants. The managed service alone creates users and manages passwords;
+bootstrap attempts bounded connection limits, timeout defaults and the monitoring membership, then
+reports any control the provider refuses. A provider-side role-to-database policy remains required
 defense in depth.
 
 Runtime database serialization no longer relies on advisory locks. Concurrent profile

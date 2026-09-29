@@ -28,6 +28,10 @@ export const XCS_RUNTIME_DATABASE_ROLES = [
   XCS_ISSUER_DATABASE_ROLE,
 ] as const
 
+export const XCS_INDEXER_DATABASE_CONNECTION_LIMIT = 12
+export const XCS_API_DATABASE_CONNECTION_LIMIT = 12
+export const XCS_MONITOR_DATABASE_CONNECTION_LIMIT = 3
+
 export interface RuntimeDatabaseProvisioning {
   clusterScope: typeof XCS_DATABASE_CLUSTER_SCOPE
 }
@@ -77,20 +81,198 @@ export class MissingRuntimeDatabaseRolesError extends Error {
   }
 }
 
+/** A runtime role the managed database service has configured in a way this
+ * deployment must not run against: it cannot log in, or it holds an attribute
+ * that would defeat least privilege. Provisioning does not own role attributes
+ * -- altering them requires a superuser, which a managed cluster's
+ * administrator is not -- so it verifies them and refuses to continue.
+ * It names roles and findings only, never a credential, so the CLI can print it. */
 export class UnsafeRuntimeDatabaseRolesError extends Error {
   readonly code = 'DATABASE_ROLES_UNSAFE' as const
   readonly roles: readonly string[]
+  readonly findings: readonly string[]
 
-  constructor(roles: readonly string[]) {
-    const names = [...new Set(roles)].sort()
+  constructor(findings: readonly string[], roles: readonly string[]) {
     super(
-      `Database roles ${names.join(', ')} do not match the managed-user safety contract. ` +
-        'Recreate them as normal DigitalOcean PostgreSQL users with LOGIN and no elevated role ' +
-        'attributes or unexpected memberships, then run the grants step again.',
+      `Database ${roles.length === 1 ? 'role' : 'roles'} ${roles.join(', ')} ` +
+        `${roles.length === 1 ? 'is' : 'are'} not configured safely for least-privilege ` +
+        `runtime access: ${findings.join('; ')}. Role attributes and role memberships belong to ` +
+        'the managed database service, not to this step: a managed cluster administrator is not a ' +
+        'superuser and cannot change them. Fix them in the DigitalOcean control panel ' +
+        '(Databases -> the cluster -> Users) or with `doctl databases user` and run the grants ' +
+        'step again. This step never creates a role and never sets, resets or reads a role password.',
     )
     this.name = 'UnsafeRuntimeDatabaseRolesError'
-    this.roles = names
+    this.roles = roles
+    this.findings = findings
   }
+}
+
+/** Per-role resource and safety controls. These are not security attributes:
+ * a non-superuser administrator holding CREATEROLE and ADMIN OPTION on the
+ * role may set them (verified against PostgreSQL 16 and 17), so provisioning
+ * still applies them -- one statement each, outside the grants, so a cluster
+ * that refuses one cannot cost the deployment its privileges. */
+interface RuntimeRoleResourceControls {
+  readonly connectionLimit: number
+  readonly settings: Readonly<Record<string, string>>
+}
+
+const XCS_RUNTIME_DATABASE_ROLE_RESOURCE_CONTROLS: Readonly<
+  Record<(typeof XCS_RUNTIME_DATABASE_ROLES)[number], RuntimeRoleResourceControls>
+> = {
+  xcs_indexer: {
+    connectionLimit: XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '5min',
+      lock_timeout: '30s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_api: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_payload_writer: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_monitor: {
+    connectionLimit: XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '10s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_app: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_admin_app: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_notifier: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+  xcs_issuer: {
+    connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
+    settings: {
+      statement_timeout: '30s',
+      lock_timeout: '15s',
+      idle_in_transaction_session_timeout: '30s',
+    },
+  },
+}
+
+/** A resource control the cluster refused and that is not already in effect.
+ * Reported rather than thrown: the privilege grants are the point of this step
+ * and must not be lost to a missing timeout, but a deployment must never
+ * quietly lose one either. */
+export interface UnappliedRuntimeRoleResourceControl {
+  readonly role: string
+  readonly control: string
+  readonly intended: string
+  readonly actual: string
+}
+
+export interface RuntimeDatabaseProvisioningReport {
+  /** The cluster administrator this run authenticated as, read from the live
+   * session. Its membership in the runtime roles is how a managed service
+   * administers its own users and is accepted, not revoked. */
+  readonly administrator: string
+  readonly unappliedResourceControls: readonly UnappliedRuntimeRoleResourceControl[]
+}
+
+interface RuntimeRoleAttributes {
+  roleName: string
+  canLogin: boolean
+  isSuperuser: boolean
+  canCreateDatabase: boolean
+  canCreateRole: boolean
+  canReplicate: boolean
+  canBypassRls: boolean
+  connectionLimit: number
+  configuration: string[] | null
+}
+
+const UNSAFE_ROLE_ATTRIBUTES = [
+  ['isSuperuser', 'is a superuser'],
+  ['canCreateDatabase', 'can create databases'],
+  ['canCreateRole', 'can create roles'],
+  ['canReplicate', 'can replicate'],
+  ['canBypassRls', 'can bypass row-level security'],
+] as const
+
+function unsafeRoleAttributeFindings(roles: readonly RuntimeRoleAttributes[]): string[] {
+  const findings: string[] = []
+  for (const role of roles) {
+    const reasons: string[] = []
+    if (!role.canLogin) reasons.push('cannot log in')
+    for (const [attribute, reason] of UNSAFE_ROLE_ATTRIBUTES) {
+      if (role[attribute]) reasons.push(reason)
+    }
+    if (reasons.length > 0) findings.push(`${role.roleName} ${reasons.join(' and ')}`)
+  }
+  return findings
+}
+
+interface RuntimeRoleMembership {
+  grantedRole: string
+  memberRole: string
+}
+
+function unsafeRoleMembershipFindings(
+  memberships: readonly RuntimeRoleMembership[],
+  administrator: string,
+): string[] {
+  const runtimeRoles = new Set<string>(XCS_RUNTIME_DATABASE_ROLES)
+  const findings: string[] = []
+  for (const { grantedRole, memberRole } of memberships) {
+    // The one membership this deployment grants itself.
+    if (grantedRole === 'pg_monitor' && memberRole === XCS_MONITOR_DATABASE_ROLE) continue
+    // The cluster administrator is a member of every user the managed service
+    // creates for it, granted by the platform's own superuser. That is how the
+    // service administers those users; it is not ours to remove.
+    if (memberRole === administrator && runtimeRoles.has(grantedRole)) continue
+    if (runtimeRoles.has(memberRole)) {
+      findings.push(`${memberRole} is a member of ${grantedRole}`)
+    } else {
+      findings.push(
+        `${memberRole} is a member of ${grantedRole} but is not the cluster administrator`,
+      )
+    }
+  }
+  return findings
+}
+
+function unsafeRoleNames(findings: readonly string[]): string[] {
+  const named = XCS_RUNTIME_DATABASE_ROLES.filter((role) =>
+    findings.some((finding) => finding.includes(role)),
+  )
+  return named.length > 0 ? [...named] : [...XCS_RUNTIME_DATABASE_ROLES]
 }
 
 const REVOKE_CURRENT_DATABASE_ACCESS_SQL = `
@@ -173,7 +355,6 @@ const GRANT_ISSUER_ACCESS_SQL = `
 
 const GRANT_RUNTIME_ACCESS_SQL = `
   GRANT USAGE ON SCHEMA public TO xcs_indexer, xcs_api, xcs_payload_writer;
-  GRANT pg_monitor TO xcs_monitor WITH INHERIT TRUE, SET FALSE;
 
   GRANT SELECT, INSERT ON TABLE
     network_profiles, ledger_checkpoints, schema_events, schemas, credential_events
@@ -196,103 +377,77 @@ const GRANT_RUNTIME_ACCESS_SQL = `
   GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_payload_writer;
 `
 
+const RUNTIME_ROLE_ATTRIBUTES_SQL = `
+  SELECT
+    rolname AS "roleName",
+    rolcanlogin AS "canLogin",
+    rolsuper AS "isSuperuser",
+    rolcreatedb AS "canCreateDatabase",
+    rolcreaterole AS "canCreateRole",
+    rolreplication AS "canReplicate",
+    rolbypassrls AS "canBypassRls",
+    rolconnlimit AS "connectionLimit",
+    rolconfig AS "configuration"
+  FROM pg_roles
+  WHERE rolname IN ('xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor', 'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer')
+  ORDER BY rolname
+`
+
+const RUNTIME_ROLE_MEMBERSHIPS_SQL = `
+  SELECT granted_role.rolname AS "grantedRole", member_role.rolname AS "memberRole"
+  FROM pg_auth_members auth_membership
+  JOIN pg_roles granted_role ON granted_role.oid = auth_membership.roleid
+  JOIN pg_roles member_role ON member_role.oid = auth_membership.member
+  WHERE granted_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor', 'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer')
+     OR member_role.rolname IN ('xcs_indexer', 'xcs_api', 'xcs_payload_writer', 'xcs_monitor', 'xcs_app', 'xcs_admin_app', 'xcs_notifier', 'xcs_issuer')
+  ORDER BY granted_role.rolname, member_role.rolname
+`
+
+function settingOf(configuration: readonly string[] | null, name: string): string | undefined {
+  const prefix = `${name}=`
+  const entry = configuration?.find((candidate) => candidate.startsWith(prefix))
+  return entry === undefined ? undefined : entry.slice(prefix.length)
+}
+
 export async function prepareRuntimeDatabaseProvisioningInTransaction(
   sql: TransactionSql,
   provisioning: RuntimeDatabaseProvisioning,
-): Promise<void> {
+): Promise<string> {
   parseDatabaseClusterScope(provisioning.clusterScope)
   await sql`SELECT pg_advisory_xact_lock(${PROVISION_LOCK_CLASS_ID}, ${PROVISION_LOCK_OBJECT_ID})`
 
-  const present = await sql<
-    Array<{
-      roleName: string
-      canLogin: boolean
-      isSuperuser: boolean
-      canCreateDatabase: boolean
-      canCreateRole: boolean
-      canReplicate: boolean
-      canBypassRls: boolean
-    }>
-  >`
-    SELECT
-      rolname AS "roleName",
-      rolcanlogin AS "canLogin",
-      rolsuper AS "isSuperuser",
-      rolcreatedb AS "canCreateDatabase",
-      rolcreaterole AS "canCreateRole",
-      rolreplication AS "canReplicate",
-      rolbypassrls AS "canBypassRls"
-    FROM pg_roles
-    WHERE rolname IN (
-      ${XCS_INDEXER_DATABASE_ROLE},
-      ${XCS_API_DATABASE_ROLE},
-      ${XCS_PAYLOAD_WRITER_DATABASE_ROLE},
-      ${XCS_MONITOR_DATABASE_ROLE},
-      ${XCS_APP_DATABASE_ROLE},
-      ${XCS_ADMIN_APP_DATABASE_ROLE},
-      ${XCS_NOTIFIER_DATABASE_ROLE},
-      ${XCS_ISSUER_DATABASE_ROLE}
-    )
+  const [session] = await sql<{ administrator: string }[]>`
+    SELECT current_user AS "administrator"
   `
+  const administrator = session?.administrator
+  if (administrator === undefined) {
+    throw new DatabaseBootstrapConfigurationError(
+      'The database session reported no current user, so the cluster administrator could not ' +
+        'be identified. Provisioning verifies role memberships against it and cannot continue.',
+    )
+  }
+
+  const present = await sql.unsafe<RuntimeRoleAttributes[]>(RUNTIME_ROLE_ATTRIBUTES_SQL)
   const found = new Set(present.map((row) => row.roleName))
   const missing = XCS_RUNTIME_DATABASE_ROLES.filter((role) => !found.has(role))
   if (missing.length > 0) throw new MissingRuntimeDatabaseRolesError(missing)
 
-  const unsafeAttributes = present
-    .filter(
-      (role) =>
-        !role.canLogin ||
-        role.isSuperuser ||
-        role.canCreateDatabase ||
-        role.canCreateRole ||
-        role.canReplicate ||
-        role.canBypassRls,
-    )
-    .map((role) => role.roleName)
-  const memberships = await sql<Array<{ grantedRole: string; memberRole: string }>>`
-    SELECT
-      granted_role.rolname AS "grantedRole",
-      member_role.rolname AS "memberRole"
-    FROM pg_auth_members membership
-    JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
-    JOIN pg_roles member_role ON member_role.oid = membership.member
-    WHERE granted_role.rolname IN (
-      ${XCS_INDEXER_DATABASE_ROLE},
-      ${XCS_API_DATABASE_ROLE},
-      ${XCS_PAYLOAD_WRITER_DATABASE_ROLE},
-      ${XCS_MONITOR_DATABASE_ROLE},
-      ${XCS_APP_DATABASE_ROLE},
-      ${XCS_ADMIN_APP_DATABASE_ROLE},
-      ${XCS_NOTIFIER_DATABASE_ROLE},
-      ${XCS_ISSUER_DATABASE_ROLE}
-    ) OR member_role.rolname IN (
-      ${XCS_INDEXER_DATABASE_ROLE},
-      ${XCS_API_DATABASE_ROLE},
-      ${XCS_PAYLOAD_WRITER_DATABASE_ROLE},
-      ${XCS_MONITOR_DATABASE_ROLE},
-      ${XCS_APP_DATABASE_ROLE},
-      ${XCS_ADMIN_APP_DATABASE_ROLE},
-      ${XCS_NOTIFIER_DATABASE_ROLE},
-      ${XCS_ISSUER_DATABASE_ROLE}
-    )
-  `
-  const unsafeMemberships = memberships
-    .filter(
-      ({ grantedRole, memberRole }) =>
-        grantedRole !== 'pg_monitor' || memberRole !== XCS_MONITOR_DATABASE_ROLE,
-    )
-    .flatMap(({ grantedRole, memberRole }) =>
-      [grantedRole, memberRole].filter((role) =>
-        XCS_RUNTIME_DATABASE_ROLES.includes(role as (typeof XCS_RUNTIME_DATABASE_ROLES)[number]),
-      ),
-    )
-  const unsafe = [...unsafeAttributes, ...unsafeMemberships]
-  if (unsafe.length > 0) throw new UnsafeRuntimeDatabaseRolesError(unsafe)
+  const memberships = await sql.unsafe<RuntimeRoleMembership[]>(RUNTIME_ROLE_MEMBERSHIPS_SQL)
+  const findings = [
+    ...unsafeRoleAttributeFindings(present),
+    ...unsafeRoleMembershipFindings(memberships, administrator),
+  ]
+  if (findings.length > 0) {
+    throw new UnsafeRuntimeDatabaseRolesError(findings, unsafeRoleNames(findings))
+  }
+
+  return administrator
 }
 
 export async function applyRuntimeDatabasePrivilegesInTransaction(
   sql: TransactionSql,
-): Promise<void> {
+  administrator: string,
+): Promise<RuntimeDatabaseProvisioningReport> {
   await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
   await sql.unsafe(REVOKE_RUNTIME_COLUMNS_SQL)
   await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
@@ -300,15 +455,101 @@ export async function applyRuntimeDatabasePrivilegesInTransaction(
   await sql.unsafe(GRANT_ADMIN_ACCESS_SQL)
   await sql.unsafe(GRANT_NOTIFIER_ACCESS_SQL)
   await sql.unsafe(GRANT_ISSUER_ACCESS_SQL)
-}
 
+  // pg_monitor is a predefined role the cluster owns. Passing it on requires
+  // the administrator to hold it WITH ADMIN OPTION, which a managed provider
+  // need not grant, so this is attempted rather than assumed: DigitalOcean
+  // refuses it at `check_role_membership_authorization`. A refusal costs the
+  // monitor role its server statistics, not the deployment, and it is named
+  // in the report rather than passing unnoticed.
+  const monitorGrants: { role: string; control: string; intended: string }[] = []
+  try {
+    await sql.savepoint(async (scoped) => {
+      await scoped.unsafe('GRANT pg_monitor TO xcs_monitor WITH INHERIT TRUE, SET FALSE')
+    })
+  } catch {
+    monitorGrants.push({
+      role: XCS_MONITOR_DATABASE_ROLE,
+      control: 'pg_monitor membership',
+      intended: 'granted',
+    })
+  }
+
+  // Resource controls last, one statement each inside its own savepoint, so
+  // a cluster that refuses one keeps the grants above.
+  const refused: { role: string; control: string; intended: string }[] = []
+  for (const role of XCS_RUNTIME_DATABASE_ROLES) {
+    const controls = XCS_RUNTIME_DATABASE_ROLE_RESOURCE_CONTROLS[role]
+    const statements: { control: string; intended: string; statement: string }[] = [
+      {
+        control: 'CONNECTION LIMIT',
+        intended: String(controls.connectionLimit),
+        statement: `ALTER ROLE ${role} WITH CONNECTION LIMIT ${controls.connectionLimit}`,
+      },
+      ...Object.entries(controls.settings).map(([name, value]) => ({
+        control: name,
+        intended: value,
+        statement: `ALTER ROLE ${role} SET ${name} = '${value}'`,
+      })),
+    ]
+    for (const { control, intended, statement } of statements) {
+      try {
+        await sql.savepoint(async (scoped) => {
+          await scoped.unsafe(statement)
+        })
+      } catch {
+        refused.push({ role, control, intended })
+      }
+    }
+  }
+
+  // A refusal is only a loss if the intended value is not already in effect.
+  let unappliedResourceControls: UnappliedRuntimeRoleResourceControl[] = []
+  if (refused.length > 0) {
+    const effective = await sql.unsafe<RuntimeRoleAttributes[]>(RUNTIME_ROLE_ATTRIBUTES_SQL)
+    const byRole = new Map(effective.map((row) => [row.roleName, row]))
+    unappliedResourceControls = refused.flatMap(({ role, control, intended }) => {
+      const row = byRole.get(role)
+      const actual =
+        control === 'CONNECTION LIMIT'
+          ? row === undefined
+            ? undefined
+            : String(row.connectionLimit)
+          : settingOf(row?.configuration ?? null, control)
+      return actual === intended ? [] : [{ role, control, intended, actual: actual ?? 'unset' }]
+    })
+  }
+
+  // A refused pg_monitor grant is only a loss when the membership is absent.
+  const unappliedMonitorGrants: UnappliedRuntimeRoleResourceControl[] = []
+  if (monitorGrants.length > 0) {
+    const [held] = await sql<Array<{ present: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_auth_members membership
+        JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+        JOIN pg_roles member_role ON member_role.oid = membership.member
+        WHERE granted_role.rolname = 'pg_monitor'
+          AND member_role.rolname = ${XCS_MONITOR_DATABASE_ROLE}
+      ) AS present
+    `
+    if (held?.present !== true) {
+      unappliedMonitorGrants.push(...monitorGrants.map((entry) => ({ ...entry, actual: 'absent' })))
+    }
+  }
+
+  return {
+    administrator,
+    unappliedResourceControls: [...unappliedResourceControls, ...unappliedMonitorGrants],
+  }
+}
 export async function provisionRuntimeDatabasePrivileges(
   client: DatabaseClient,
   provisioning: RuntimeDatabaseProvisioning,
-): Promise<void> {
+): Promise<RuntimeDatabaseProvisioningReport> {
   parseDatabaseClusterScope(provisioning.clusterScope)
-  await client.sql.begin(async (sql) => {
-    await prepareRuntimeDatabaseProvisioningInTransaction(sql, provisioning)
-    await applyRuntimeDatabasePrivilegesInTransaction(sql)
+  return await client.sql.begin(async (sql) => {
+    const administrator = await prepareRuntimeDatabaseProvisioningInTransaction(sql, provisioning)
+    return await applyRuntimeDatabasePrivilegesInTransaction(sql, administrator)
   })
 }

@@ -181,9 +181,11 @@ finite replays.
 | `xcs_issuer`          | Issuer applications, invitations, managed credentials, recipient access and presentations.                                             | Web app role-workspace pool.                    |
 
 Runtime roles own no objects and must be normal managed users with `LOGIN` and no elevated role
-attributes or unexpected memberships. The managed service creates them and owns their passwords,
-connection limits and role defaults; bootstrap validates that boundary and applies only grants. It
-requires an explicit dedicated-cluster acknowledgement because PostgreSQL roles are cluster-wide.
+attributes or unexpected memberships. The managed service creates them and owns their passwords;
+bootstrap validates that boundary, applies grants and attempts bounded connection limits and timeout
+defaults. Providers may refuse those resource controls or the `pg_monitor` membership without
+rolling back the grants, so bootstrap reports every control that remains unapplied. It requires an
+explicit dedicated-cluster acknowledgement because PostgreSQL roles are cluster-wide.
 
 ## Schema ownership, migrations and bootstrap
 

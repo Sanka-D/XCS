@@ -12,55 +12,67 @@ import {
 import type { DatabaseClient } from '../../src/lib/db/client.js'
 
 interface FakeDatabase extends DatabaseClient {
-  statements: string[]
   unsafeStatements: string[]
 }
+
+const ADMINISTRATOR = 'cluster_admin'
 
 function databaseWithRoles(
   existingRoles: readonly string[],
   options: {
     unsafeAttributes?: readonly string[]
     memberships?: ReadonlyArray<{ grantedRole: string; memberRole: string }>
+    monitorMembershipPresent?: boolean
+    refuse?: RegExp
   } = {},
 ): FakeDatabase {
-  const statements: string[] = []
   const unsafeStatements: string[] = []
   const transaction = Object.assign(
     vi.fn(async (strings: TemplateStringsArray) => {
       const statement = strings.join('?')
-      statements.push(statement)
-      if (statement.includes('FROM pg_roles')) {
-        return existingRoles.map((roleName) => ({
-          roleName,
-          canLogin: true,
-          isSuperuser: false,
-          canCreateDatabase: false,
-          canCreateRole: options.unsafeAttributes?.includes(roleName) ?? false,
-          canReplicate: false,
-          canBypassRls: false,
-        }))
+      if (statement.includes('current_user')) return [{ administrator: ADMINISTRATOR }]
+      if (statement.includes('SELECT EXISTS') && statement.includes('pg_auth_members')) {
+        return [{ present: options.monitorMembershipPresent ?? false }]
       }
-      if (statement.includes('FROM pg_auth_members')) return options.memberships ?? []
       return []
     }),
     {
       unsafe: vi.fn(async (statement: string) => {
         unsafeStatements.push(statement)
+        if (statement.includes('FROM pg_roles')) {
+          return existingRoles.map((roleName) => ({
+            roleName,
+            canLogin: true,
+            isSuperuser: false,
+            canCreateDatabase: false,
+            canCreateRole: options.unsafeAttributes?.includes(roleName) ?? false,
+            canReplicate: false,
+            canBypassRls: false,
+            connectionLimit: -1,
+            configuration: [],
+          }))
+        }
+        if (statement.includes('FROM pg_auth_members')) return options.memberships ?? []
+        if (options.refuse?.test(statement)) throw new Error('statement refused')
         return []
       }),
+      savepoint: vi.fn(async (handler: (sql: unknown) => Promise<unknown>) => handler(transaction)),
     },
   )
   return {
     db: {} as DatabaseClient['db'],
     sql: {
-      begin: vi.fn(async (handler: (sql: typeof transaction) => Promise<void>) =>
+      begin: vi.fn(async (handler: (sql: typeof transaction) => Promise<unknown>) =>
         handler(transaction),
       ),
     } as unknown as DatabaseClient['sql'],
     close: vi.fn(),
-    statements,
     unsafeStatements,
   }
+}
+
+function appliedStatements(database: FakeDatabase): string {
+  return database.unsafeStatements.filter((statement) => !/^\s*SELECT/iu.test(statement)).join('\n')
 }
 
 describe('runtime database privilege provisioning', () => {
@@ -102,7 +114,7 @@ describe('runtime database privilege provisioning', () => {
       await expect(
         provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
       ).rejects.toThrow('doctl databases user create')
-      expect(database.unsafeStatements).toEqual([])
+      expect(appliedStatements(database)).toBe('')
     },
   )
 
@@ -114,12 +126,7 @@ describe('runtime database privilege provisioning', () => {
     await expect(bootstrapDatabase(database, { clusterScope: 'dedicated' })).rejects.toThrow(
       'xcs_admin_app',
     )
-    expect(database.unsafeStatements).toEqual([])
-    expect(
-      database.statements.some((statement) =>
-        /\bCREATE\s+(?:SCHEMA|TABLE|ROLE)\b/u.test(statement),
-      ),
-    ).toBe(false)
+    expect(appliedStatements(database)).toBe('')
   })
 
   it('validates and grants all eight users without managing their roles or authentication', async () => {
@@ -127,15 +134,17 @@ describe('runtime database privilege provisioning', () => {
 
     await expect(
       provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ administrator: ADMINISTRATOR, unappliedResourceControls: [] })
 
-    const applied = database.unsafeStatements.join('\n')
+    const applied = appliedStatements(database)
     expect(applied).not.toMatch(/CREATE ROLE/iu)
     expect(applied).not.toMatch(/PASSWORD/iu)
     expect(applied).not.toMatch(/NOLOGIN/iu)
     expect(applied).not.toMatch(/VALID UNTIL/iu)
-    expect(applied).not.toMatch(/ALTER ROLE/iu)
     expect(applied).not.toMatch(/RESET ALL/iu)
+    for (const attribute of ['SUPERUSER', 'CREATEDB', 'CREATEROLE', 'REPLICATION', 'BYPASSRLS']) {
+      expect(applied).not.toContain(attribute)
+    }
     for (const role of XCS_RUNTIME_DATABASE_ROLES) {
       expect(applied).toContain(role)
     }
@@ -156,7 +165,7 @@ describe('runtime database privilege provisioning', () => {
     await expect(
       provisionRuntimeDatabasePrivileges(elevated, { clusterScope: 'dedicated' }),
     ).rejects.toBeInstanceOf(UnsafeRuntimeDatabaseRolesError)
-    expect(elevated.unsafeStatements).toEqual([])
+    expect(appliedStatements(elevated)).toBe('')
 
     const delegated = databaseWithRoles(XCS_RUNTIME_DATABASE_ROLES, {
       memberships: [{ grantedRole: 'xcs_issuer', memberRole: 'xcs_app' }],
@@ -164,13 +173,52 @@ describe('runtime database privilege provisioning', () => {
     await expect(
       provisionRuntimeDatabasePrivileges(delegated, { clusterScope: 'dedicated' }),
     ).rejects.toThrow('xcs_app, xcs_issuer')
-    expect(delegated.unsafeStatements).toEqual([])
+    expect(appliedStatements(delegated)).toBe('')
+
+    const administered = databaseWithRoles(XCS_RUNTIME_DATABASE_ROLES, {
+      memberships: XCS_RUNTIME_DATABASE_ROLES.map((grantedRole) => ({
+        grantedRole,
+        memberRole: ADMINISTRATOR,
+      })),
+    })
+    await expect(
+      provisionRuntimeDatabasePrivileges(administered, { clusterScope: 'dedicated' }),
+    ).resolves.toEqual({ administrator: ADMINISTRATOR, unappliedResourceControls: [] })
 
     const monitor = databaseWithRoles(XCS_RUNTIME_DATABASE_ROLES, {
       memberships: [{ grantedRole: 'pg_monitor', memberRole: 'xcs_monitor' }],
     })
     await expect(
       provisionRuntimeDatabasePrivileges(monitor, { clusterScope: 'dedicated' }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ administrator: ADMINISTRATOR, unappliedResourceControls: [] })
+  })
+
+  it('reports a refused pg_monitor grant without rolling back application grants', async () => {
+    const database = databaseWithRoles(XCS_RUNTIME_DATABASE_ROLES, {
+      refuse: /^GRANT pg_monitor/iu,
+    })
+
+    await expect(
+      provisionRuntimeDatabasePrivileges(database, { clusterScope: 'dedicated' }),
+    ).resolves.toEqual({
+      administrator: ADMINISTRATOR,
+      unappliedResourceControls: [
+        {
+          role: 'xcs_monitor',
+          control: 'pg_monitor membership',
+          intended: 'granted',
+          actual: 'absent',
+        },
+      ],
+    })
+    expect(appliedStatements(database)).toContain('app_presentation_proofs TO xcs_issuer')
+
+    const alreadyHeld = databaseWithRoles(XCS_RUNTIME_DATABASE_ROLES, {
+      refuse: /^GRANT pg_monitor/iu,
+      monitorMembershipPresent: true,
+    })
+    await expect(
+      provisionRuntimeDatabasePrivileges(alreadyHeld, { clusterScope: 'dedicated' }),
+    ).resolves.toEqual({ administrator: ADMINISTRATOR, unappliedResourceControls: [] })
   })
 })

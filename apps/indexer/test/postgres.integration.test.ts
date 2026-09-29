@@ -23,6 +23,9 @@ import {
 import {
   initializeDatabase,
   provisionRuntimeDatabasePrivileges,
+  XCS_API_DATABASE_CONNECTION_LIMIT,
+  XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
+  XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
   XCS_RUNTIME_DATABASE_ROLES,
 } from '../src/lib/db/bootstrap.js'
 import { computeSchemaUid, createIpfsPayloadUri, type JsonValue } from '../src/lib/xcs/index.js'
@@ -931,7 +934,11 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       payloadWriterPassword: PAYLOAD_DATABASE_PASSWORD,
       monitorPassword: MONITOR_DATABASE_PASSWORD,
     })
-    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    const firstReport = await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    expect(firstReport).toEqual({
+      administrator: expect.any(String),
+      unappliedResourceControls: [],
+    })
     // Simulate the pre-split API grants: reprovisioning must remove them, not just add a writer.
     await database.client.sql`
       GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pin_challenges, demo_pins TO xcs_api
@@ -939,7 +946,11 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
     await database.client.sql`
       GRANT SELECT, INSERT ON TABLE hosted_payloads, hosted_payload_publications TO xcs_api
     `
-    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    const repeatedReport = await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    expect(repeatedReport).toEqual({
+      administrator: firstReport.administrator,
+      unappliedResourceControls: [],
+    })
 
     const roleProperties = await adminClient.sql<
       Array<{
@@ -981,6 +992,8 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       [...XCS_RUNTIME_DATABASE_ROLES].sort(),
     )
     for (const role of roleProperties) {
+      const monitor = role.roleName === 'xcs_monitor'
+      const indexer = role.roleName === 'xcs_indexer'
       expect(role).toMatchObject({
         canLogin: true,
         isSuperuser: false,
@@ -989,8 +1002,16 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canReplicate: false,
         canBypassRls: false,
         inheritsPrivileges: true,
-        connectionLimit: -1,
-        configuration: [],
+        connectionLimit: monitor
+          ? XCS_MONITOR_DATABASE_CONNECTION_LIMIT
+          : indexer
+            ? XCS_INDEXER_DATABASE_CONNECTION_LIMIT
+            : XCS_API_DATABASE_CONNECTION_LIMIT,
+        configuration: [
+          'idle_in_transaction_session_timeout=30s',
+          `lock_timeout=${monitor ? '10s' : indexer ? '30s' : '15s'}`,
+          `statement_timeout=${indexer ? '5min' : '30s'}`,
+        ],
       })
     }
 
