@@ -6,15 +6,24 @@ const { locale, t } = useI18n()
 const { getActiveNetworkProfile, getNetworkStatus, getStats } = useXcsApi()
 const { data, pending, error, refresh } = await useAsyncData('network-overview', async () => {
   const profile = await getActiveNetworkProfile()
-  const [status, stats] = await Promise.all([
-    getNetworkStatus(profile.profileId),
-    getStats(profile.profileId),
-  ])
+  const status = await getNetworkStatus(profile.profileId)
+  // Statistics are authoritative, so the API refuses them until the indexer
+  // reaches the network tip. That is the normal state of a fresh deployment,
+  // not a failure, so the page reports progress instead of an error.
+  const stats = await getStats(profile.profileId).catch(() => null)
   return { profile, status, stats }
+})
+const catchUp = computed(() => {
+  const status = data.value?.status
+  if (!status || data.value?.stats) return null
+  const indexed = status.lastAgreedLedger?.index
+  const tip = status.sourceTips.primary ?? status.sourceTips.secondary
+  if (indexed === undefined || tip === undefined || tip === null || tip <= indexed) return null
+  return { indexed, tip, remaining: tip - indexed }
 })
 const updatedAt = computed(() => displayDate(data.value?.status.updatedAt, locale.value))
 const checkpointCloseTime = computed(() =>
-  displayXrplTime(data.value?.stats.checkpoint.closeTime, locale.value),
+  displayXrplTime(data.value?.stats?.checkpoint.closeTime, locale.value),
 )
 const registryLabel = computed(() =>
   hasControlledPilotProfileId(data.value?.profile.profileId)
@@ -44,6 +53,26 @@ useSeoMeta({
         <StatusPill :value="data.status.state" />
         <strong>{{ $t(`networkStatus.states.${data.status.state}`) }}</strong>
       </div>
+      <StatusBox
+        v-if="!data.stats"
+        tone="notice"
+        :title="$t('networkStatus.catchingUpTitle')"
+        data-testid="network-catching-up"
+      >
+        <p>{{ $t('networkStatus.catchingUpBody') }}</p>
+        <p v-if="catchUp">
+          {{
+            $t('networkStatus.catchingUpProgress', {
+              indexed: catchUp.indexed,
+              tip: catchUp.tip,
+              remaining: catchUp.remaining,
+            })
+          }}
+        </p>
+        <UButton color="neutral" variant="link" class="px-0" @click="() => refresh()">
+          {{ $t('common.retry') }}
+        </UButton>
+      </StatusBox>
       <p class="my-4 border-l-2 border-accented pl-3 text-sm text-toned">
         {{ $t('networkStatus.failClosed') }}
       </p>
@@ -73,17 +102,19 @@ useSeoMeta({
           <code>{{ data.status.lastAgreedLedger.hash }}</code>
         </dd>
         <dd v-else>—</dd>
-        <dt>{{ $t('networkStatus.authoritativeCheckpoint') }}</dt>
-        <dd>
-          {{ data.stats.checkpoint.ledgerIndex }} ·
-          <code>{{ data.stats.checkpoint.ledgerHash }}</code>
-        </dd>
-        <dt>{{ $t('networkStatus.checkpointTime') }}</dt>
-        <dd>{{ checkpointCloseTime ?? data.stats.checkpoint.closeTime }}</dd>
-        <dt>{{ $t('networkStatus.transactionRoot') }}</dt>
-        <dd>
-          <code>{{ data.stats.checkpoint.transactionRoot }}</code>
-        </dd>
+        <template v-if="data.stats">
+          <dt>{{ $t('networkStatus.authoritativeCheckpoint') }}</dt>
+          <dd>
+            {{ data.stats.checkpoint.ledgerIndex }} ·
+            <code>{{ data.stats.checkpoint.ledgerHash }}</code>
+          </dd>
+          <dt>{{ $t('networkStatus.checkpointTime') }}</dt>
+          <dd>{{ checkpointCloseTime ?? data.stats.checkpoint.closeTime }}</dd>
+          <dt>{{ $t('networkStatus.transactionRoot') }}</dt>
+          <dd>
+            <code>{{ data.stats.checkpoint.transactionRoot }}</code>
+          </dd>
+        </template>
         <dt>{{ $t('networkStatus.updated') }}</dt>
         <dd>{{ updatedAt ?? data.status.updatedAt }}</dd>
         <template v-if="data.status.errorCode">

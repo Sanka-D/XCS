@@ -93,7 +93,10 @@
       "verify": "Verify four separate dimensions"
     },
     "pillars": {
-      "keys": { "title": "No custody", "copy": "Keys remain in each entity’s wallet or HSM." },
+      "keys": {
+        "title": "No custody",
+        "copy": "Keys remain in each entity’s wallet or HSM."
+      },
       "data": {
         "title": "Off-ledger claims",
         "copy": "The ledger stores a cryptographically bound URI, not the credential data."
@@ -332,7 +335,10 @@
       "catching_up": "Catching up",
       "ready": "Ready",
       "halted": "Halted"
-    }
+    },
+    "catchingUpTitle": "The indexer is catching up",
+    "catchingUpBody": "This network is being read from its activation ledger. Verification stays closed until the indexer reaches the network tip, so some figures below are not available yet.",
+    "catchingUpProgress": "Indexed to ledger {indexed} of {tip}, {remaining} remaining."
   },
   "studio": {
     "title": "Create verifiable credentials.",
