@@ -1,4 +1,4 @@
-// Copied from packages/db/src/bin/bootstrap.ts at 5ce8eaa; keep in sync by hand (see CONTRIBUTING.md).
+// Copied from packages/db/src/bin/bootstrap.ts at 61fb809; keep in sync by hand (see CONTRIBUTING.md).
 // Diverges by design (provisioning is grants-only, so no runtime password is read from the environment, and a missing role is reported by name); source sha256:d9142aa3fda17e3032510d9dd0405a01464b531e59ed59299d5823c06e2fa8fd.
 import {
   bootstrapDatabase,

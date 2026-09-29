@@ -35,6 +35,13 @@ The rule is therefore:
    Update the short sha when you re-copy the file, so the next mirroring pass can diff against a
    known point.
 
+   **The sha must name a commit that is reachable from `main`.** A pull request branch's own commits
+   are destroyed by a squash merge, so a header pinned to one resolves locally, where the objects
+   survive in your clone, and fails on a clean runner, where they never existed. That is how the
+   check broke on `main` between `25ea0b4` and `1b87875`: the headers pointed at a commit that only
+   ever existed on the branch behind #36, so every local run was a false green. When the source has
+   since been deleted, pin the last commit on `main` that still contained it.
+
 The copy locations are:
 
 | Copy                         | Source                                            |

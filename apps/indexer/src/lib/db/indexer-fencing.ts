@@ -1,4 +1,4 @@
-// Copied from packages/db/src/indexer-fencing.ts at 5ce8eaa; keep in sync by hand (see CONTRIBUTING.md).
+// Copied from packages/db/src/indexer-fencing.ts at 61fb809; keep in sync by hand (see CONTRIBUTING.md).
 import { and, eq, gt, isNull, lte, or, sql } from 'drizzle-orm'
 
 import type { XcsDatabase } from './client.js'

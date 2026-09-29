@@ -1,4 +1,4 @@
-// Copied from packages/db/src/provision.ts at 5ce8eaa; keep in sync by hand (see CONTRIBUTING.md).
+// Copied from packages/db/src/provision.ts at 61fb809; keep in sync by hand (see CONTRIBUTING.md).
 // Diverges by design (provisioning is grants-only: the managed PostgreSQL service owns the runtime users and their passwords, so this copy neither creates roles nor sets passwords); source sha256:ad624bb5a8d9403dda699767be589440680ac21bb4e2a3d7cfd648fb592b0fb5.
 import type { DatabaseClient } from './client.js'
 
