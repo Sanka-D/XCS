@@ -239,7 +239,6 @@ const REVOKE_CURRENT_DATABASE_ACCESS_SQL = `
 
 const GRANT_RUNTIME_ACCESS_SQL = `
   GRANT USAGE ON SCHEMA public TO xcs_indexer, xcs_api;
-  GRANT pg_monitor TO xcs_monitor WITH INHERIT TRUE, SET FALSE;
 
   GRANT SELECT, INSERT ON TABLE
     network_profiles, ledger_checkpoints, schema_events, schemas, credential_events
@@ -335,6 +334,25 @@ export async function provisionRuntimeDatabasePrivileges(
     await sql.unsafe(REVOKE_CURRENT_DATABASE_ACCESS_SQL)
     await sql.unsafe(GRANT_RUNTIME_ACCESS_SQL)
 
+    // pg_monitor is a predefined role the cluster owns. Passing it on requires
+    // the administrator to hold it WITH ADMIN OPTION, which a managed provider
+    // need not grant, so this is attempted rather than assumed: DigitalOcean
+    // refuses it at `check_role_membership_authorization`. A refusal costs the
+    // monitor role its server statistics, not the deployment, and it is named
+    // in the report rather than passing unnoticed.
+    const monitorGrants: { role: string; control: string; intended: string }[] = []
+    try {
+      await sql.savepoint(async (scoped) => {
+        await scoped.unsafe('GRANT pg_monitor TO xcs_monitor WITH INHERIT TRUE, SET FALSE')
+      })
+    } catch {
+      monitorGrants.push({
+        role: XCS_MONITOR_DATABASE_ROLE,
+        control: 'pg_monitor membership',
+        intended: 'granted',
+      })
+    }
+
     // Resource controls last, one statement each inside its own savepoint, so
     // a cluster that refuses one keeps the grants above.
     const refused: { role: string; control: string; intended: string }[] = []
@@ -380,6 +398,29 @@ export async function provisionRuntimeDatabasePrivileges(
       })
     }
 
-    return { administrator, unappliedResourceControls }
+    // A refused pg_monitor grant is only a loss when the membership is absent.
+    const unappliedMonitorGrants: UnappliedRuntimeRoleResourceControl[] = []
+    if (monitorGrants.length > 0) {
+      const [held] = await sql<Array<{ present: boolean }>>`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_auth_members membership
+          JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+          JOIN pg_roles member_role ON member_role.oid = membership.member
+          WHERE granted_role.rolname = 'pg_monitor'
+            AND member_role.rolname = ${XCS_MONITOR_DATABASE_ROLE}
+        ) AS present
+      `
+      if (held?.present !== true) {
+        unappliedMonitorGrants.push(
+          ...monitorGrants.map((entry) => ({ ...entry, actual: 'absent' })),
+        )
+      }
+    }
+
+    return {
+      administrator,
+      unappliedResourceControls: [...unappliedResourceControls, ...unappliedMonitorGrants],
+    }
   })
 }
