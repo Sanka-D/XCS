@@ -25,6 +25,7 @@ import {
   XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
   XCS_MONITOR_DATABASE_CONNECTION_LIMIT,
   MissingRuntimeDatabaseRolesError,
+  UnsafeRuntimeDatabaseRolesError,
   initializeDatabase,
   provisionRuntimeDatabasePrivileges,
 } from '../src/lib/db/bootstrap.js'
@@ -882,9 +883,44 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
       CREATE ROLE xcs_indexer LOGIN PASSWORD '${INDEXER_DATABASE_PASSWORD}';
       CREATE ROLE xcs_api LOGIN PASSWORD '${API_DATABASE_PASSWORD}';
       CREATE ROLE xcs_monitor LOGIN PASSWORD '${MONITOR_DATABASE_PASSWORD}';
+      GRANT xcs_indexer, xcs_api, xcs_monitor TO CURRENT_USER WITH ADMIN OPTION;
     `)
 
-    await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    // Reproduces a managed cluster: the platform makes its administrator a
+    // member of every user it creates. That membership is how the service
+    // administers those users, so provisioning accepts it instead of trying to
+    // revoke it -- which the administrator cannot do, not being the grantor.
+    const firstRun = await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    const secondRun = await provisionRuntimeDatabasePrivileges(database.client, provisioning)
+    const [session] = await adminClient.sql<{ administrator: string }[]>`
+      SELECT current_user AS "administrator"
+    `
+    expect(firstRun).toEqual({
+      administrator: session?.administrator,
+      unappliedResourceControls: [],
+    })
+    expect(secondRun).toEqual(firstRun)
+
+    // An unsafe attribute is verified, not altered away: provisioning cannot
+    // change it without a superuser, so it refuses and names the role.
+    await adminClient.sql.unsafe('ALTER ROLE xcs_api WITH CREATEDB')
+    await expect(
+      provisionRuntimeDatabasePrivileges(database.client, provisioning),
+    ).rejects.toBeInstanceOf(UnsafeRuntimeDatabaseRolesError)
+    await expect(provisionRuntimeDatabasePrivileges(database.client, provisioning)).rejects.toThrow(
+      'xcs_api can create databases',
+    )
+    await adminClient.sql.unsafe('ALTER ROLE xcs_api WITH NOCREATEDB')
+
+    // A membership between two runtime roles, or held by anyone other than the
+    // cluster administrator, is still rejected.
+    await adminClient.sql.unsafe('GRANT xcs_api TO xcs_indexer')
+    await expect(provisionRuntimeDatabasePrivileges(database.client, provisioning)).rejects.toThrow(
+      'xcs_indexer is a member of xcs_api',
+    )
+    await adminClient.sql.unsafe('REVOKE xcs_api FROM xcs_indexer')
+
+    // And the cluster is back to a state provisioning accepts.
     await provisionRuntimeDatabasePrivileges(database.client, provisioning)
 
     const roleProperties = await adminClient.sql<
@@ -929,7 +965,9 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canCreateRole: false,
         canReplicate: false,
         canBypassRls: false,
-        inheritsPrivileges: false,
+        // Left as the managed service created it: INHERIT is not in the unsafe
+        // set, and with no membership beyond pg_monitor -> xcs_monitor it is inert.
+        inheritsPrivileges: true,
         connectionLimit: XCS_API_DATABASE_CONNECTION_LIMIT,
         configuration: [
           'idle_in_transaction_session_timeout=30s',
@@ -945,7 +983,7 @@ describePostgres('PostgreSQL 18 indexer integration', () => {
         canCreateRole: false,
         canReplicate: false,
         canBypassRls: false,
-        inheritsPrivileges: false,
+        inheritsPrivileges: true,
         connectionLimit: XCS_INDEXER_DATABASE_CONNECTION_LIMIT,
         configuration: [
           'idle_in_transaction_session_timeout=30s',

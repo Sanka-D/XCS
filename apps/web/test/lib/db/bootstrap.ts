@@ -8,6 +8,7 @@ import type { DatabaseClient } from '../../../server/lib/db/client.js'
 import {
   provisionRuntimeDatabasePrivileges,
   type RuntimeDatabaseProvisioning,
+  type RuntimeDatabaseProvisioningReport,
 } from './provision.js'
 
 const BASELINE_FOLDER = fileURLToPath(new URL('../../../../../db/migrations', import.meta.url))
@@ -17,6 +18,7 @@ export {
   MissingRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
   provisionRuntimeDatabasePrivileges,
+  UnsafeRuntimeDatabaseRolesError,
   XCS_API_DATABASE_CONNECTION_LIMIT,
   XCS_API_DATABASE_ROLE,
   XCS_DATABASE_CLUSTER_SCOPE,
@@ -26,6 +28,8 @@ export {
   XCS_MONITOR_DATABASE_ROLE,
   XCS_RUNTIME_DATABASE_ROLES,
   type RuntimeDatabaseProvisioning,
+  type RuntimeDatabaseProvisioningReport,
+  type UnappliedRuntimeRoleResourceControl,
 } from './provision.js'
 
 export async function initializeDatabase(client: DatabaseClient): Promise<void> {
@@ -35,7 +39,7 @@ export async function initializeDatabase(client: DatabaseClient): Promise<void> 
 export async function bootstrapDatabase(
   client: DatabaseClient,
   provisioning: RuntimeDatabaseProvisioning,
-): Promise<void> {
+): Promise<RuntimeDatabaseProvisioningReport> {
   await initializeDatabase(client)
-  await provisionRuntimeDatabasePrivileges(client, provisioning)
+  return await provisionRuntimeDatabasePrivileges(client, provisioning)
 }

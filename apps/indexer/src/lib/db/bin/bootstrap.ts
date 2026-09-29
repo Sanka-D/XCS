@@ -5,6 +5,7 @@ import {
   DatabaseBootstrapConfigurationError,
   MissingRuntimeDatabaseRolesError,
   parseDatabaseClusterScope,
+  UnsafeRuntimeDatabaseRolesError,
 } from '../bootstrap.js'
 import { createDatabaseClient } from '../client.js'
 
@@ -25,11 +26,19 @@ async function main(): Promise<void> {
   const client = createDatabaseClient(databaseUrl)
 
   try {
-    await bootstrapDatabase(client, {
+    const report = await bootstrapDatabase(client, {
       clusterScope: parseDatabaseClusterScope(process.env.XCS_DATABASE_CLUSTER_SCOPE),
     })
+    // The unapplied controls are named so a cluster that refuses a connection
+    // limit or a timeout cannot cost a deployment one silently. They are role
+    // names, parameter names and durations, so none of them is a credential.
     process.stdout.write(
-      `${JSON.stringify({ ok: true, roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor'] })}\n`,
+      `${JSON.stringify({
+        ok: true,
+        roles: ['xcs_indexer', 'xcs_api', 'xcs_monitor'],
+        administrator: report.administrator,
+        unappliedResourceControls: report.unappliedResourceControls,
+      })}\n`,
     )
   } finally {
     await client.close()
@@ -40,16 +49,22 @@ try {
   await main()
 } catch (error) {
   // Never serialize an arbitrary thrown error: a driver error can carry the
-  // connection string and therefore the administrator password. Two kinds are
+  // connection string and therefore the administrator password. Three kinds are
   // built from fixed text and names alone, so their message is safe to print,
   // and for anything else only the driver's own short codes are emitted --
   // enough to tell a refused connection from a failed login or a missing
   // relation, and none of them contain a credential.
   if (
     error instanceof MissingRuntimeDatabaseRolesError ||
+    error instanceof UnsafeRuntimeDatabaseRolesError ||
     error instanceof DatabaseBootstrapConfigurationError
   ) {
-    const roles = error instanceof MissingRuntimeDatabaseRolesError ? { roles: error.roles } : {}
+    const roles =
+      error instanceof MissingRuntimeDatabaseRolesError
+        ? { roles: error.roles }
+        : error instanceof UnsafeRuntimeDatabaseRolesError
+          ? { roles: error.roles, findings: error.findings }
+          : {}
     process.stderr.write(
       `${JSON.stringify({ ok: false, code: error.code, ...roles, message: error.message })}\n`,
     )
@@ -64,6 +79,10 @@ try {
           errno?: unknown
           syscall?: unknown
           severity?: unknown
+          where?: unknown
+          routine?: unknown
+          schema_name?: unknown
+          table_name?: unknown
           cause?: unknown
         }
         if (typeof node.code === 'string' || typeof node.severity === 'string') return node
@@ -80,6 +99,13 @@ try {
         errno: typeof detail.errno === 'number' ? detail.errno : undefined,
         syscall: typeof detail.syscall === 'string' ? detail.syscall : undefined,
         severity: typeof detail.severity === 'string' ? detail.severity : undefined,
+        // The server's `where` quotes the failing statement. Since provisioning
+        // became grants-only, every statement this step runs is our own SQL and
+        // carries no password, so naming it costs nothing and saves a round trip.
+        where: typeof detail.where === 'string' ? detail.where : undefined,
+        routine: typeof detail.routine === 'string' ? detail.routine : undefined,
+        schema: typeof detail.schema_name === 'string' ? detail.schema_name : undefined,
+        table: typeof detail.table_name === 'string' ? detail.table_name : undefined,
         hint: 'The message is withheld because it can contain the connection string. Reproduce with `psql "$XCS_BOOTSTRAP_DATABASE_URL" -c \'select 1\'` for the full text.',
       })}\n`,
     )
