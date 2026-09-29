@@ -410,7 +410,12 @@ describe.skipIf(!url)('admin real PostgreSQL / shared auth / restricted pools', 
         const detail = (await fetch(
           `${process.env.XCS_TEST_MAILPIT_URL}/api/v1/message/${message.ID}`,
         ).then((r) => r.json())) as { Text: string }
-        if (detail.Text.includes(r.json().decision.id)) found = true
+        if (
+          detail.Text.includes('The verifier access for Synthetic organization is now approved.')
+        ) {
+          expect(detail.Text).not.toContain(r.json().decision.id)
+          found = true
+        }
       }
       expect(found).toBe(true)
     },
