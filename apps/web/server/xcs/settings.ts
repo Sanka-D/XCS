@@ -45,13 +45,51 @@ export const apiSettings = {
   XCS_UNTRUSTED_ISSUERS: '',
 } as const satisfies Record<string, string>
 
+function isHttpsLoopbackOrigin(value: string | undefined): value is string {
+  if (!value) return false
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  return (
+    (value === url.origin || value === `${url.origin}/`) &&
+    url.protocol === 'https:' &&
+    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) &&
+    url.pathname === '/' &&
+    !url.search &&
+    !url.hash &&
+    !url.username &&
+    !url.password
+  )
+}
+
+function identityIssuer(environment: NodeJS.ProcessEnv): string {
+  const qualification = environment.XCS_LOCAL_IDENTITY_QUALIFICATION
+  if (qualification === undefined || qualification === '') return apiSettings.XCS_IDENTITY_ISSUER
+  if (
+    qualification !== '1' ||
+    !isHttpsLoopbackOrigin(environment.XCS_AUTH_ORIGIN) ||
+    !isHttpsLoopbackOrigin(environment.XCS_IDENTITY_ISSUER)
+  ) {
+    throw new Error('LOCAL_IDENTITY_QUALIFICATION_INVALID')
+  }
+  return new URL(environment.XCS_IDENTITY_ISSUER).origin
+}
+
 /**
  * The environment `loadApiConfig` parses in production: the process environment
- * with the checked-in settings applied on top, so a deployment variable of the
- * same name cannot reintroduce a retired setting or weaken a flag.
+ * with the checked-in settings applied on top, so a deployment variable cannot
+ * reintroduce a retired setting or weaken a flag. The sole exception is the
+ * explicitly enabled, loopback-only Identity qualification contract above.
  */
 export function apiEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...environment, ...apiSettings }
+  return {
+    ...environment,
+    ...apiSettings,
+    XCS_IDENTITY_ISSUER: identityIssuer(environment),
+  }
 }
 
 /**

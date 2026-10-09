@@ -46,15 +46,22 @@ only the application URL. Bootstrap never manages passwords.
 
 Nuxt private runtime configuration:
 
-| Variable                                                                             | Meaning                                                                   |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| `XCS_AUTH_ORIGIN`                                                                    | Exact HTTPS site origin, without a path; defines callback and CSRF origin |
-| `XCS_IDENTITY_ISSUER`                                                                | Defaults to `https://account.xrpl.in`                                     |
-| `XCS_IDENTITY_CLIENT_ID`                                                             | Private client identifier; `_FILE` supported                              |
-| `XCS_IDENTITY_CLIENT_SECRET`                                                         | Private client secret; `_FILE` supported                                  |
-| `NUXT_APP_DATABASE_URL`                                                              | Private `xcs_app` PostgreSQL URL; `_FILE` supported                       |
-| Session lifetimes and the Identity issuer endpoint are checked-in settings in        |
-| `apps/web/server/xcs/settings.ts`, so changing them requires review and a new image. |
+| Variable                           | Meaning                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| `XCS_AUTH_ORIGIN`                  | Exact HTTPS site origin, without a path; defines callback and CSRF origin |
+| `XCS_IDENTITY_ISSUER`              | Defaults to `https://account.xrpl.in`                                     |
+| `XCS_LOCAL_IDENTITY_QUALIFICATION` | Local qualification only; see the restricted contract below               |
+| `XCS_IDENTITY_CLIENT_ID`           | Private client identifier; `_FILE` supported                              |
+| `XCS_IDENTITY_CLIENT_SECRET`       | Private client secret; `_FILE` supported                                  |
+| `NUXT_APP_DATABASE_URL`            | Private `xcs_app` PostgreSQL URL; `_FILE` supported                       |
+
+Session lifetimes and the Identity issuer endpoint are checked-in settings in
+`apps/web/server/xcs/settings.ts`, so changing them requires review and a new image. For a local
+end-to-end qualification against a real provider, and only for that purpose, set
+`XCS_LOCAL_IDENTITY_QUALIFICATION=1` and supply both `XCS_AUTH_ORIGIN` and
+`XCS_IDENTITY_ISSUER` as exact HTTPS loopback origins (`localhost`, `127.0.0.1` or `::1`). The
+process refuses this switch for HTTP, a path, a remote host or a non-loopback XCS origin. Never set
+it in a shared or production deployment.
 
 Use the provider's verified database TLS connection configuration. Never put these values in
 `NUXT_PUBLIC_*`, source files or logs. Direct values and matching `_FILE` values are mutually

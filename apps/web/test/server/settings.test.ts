@@ -67,6 +67,60 @@ describe('checked-in web settings', () => {
       loadApiConfig(apiEnvironment({ XCS_DATABASE_URL: 'postgres://localhost/xcs' })).demoPinning,
     ).toEqual({ enabled: false })
   })
+
+  it('keeps the canonical Identity issuer when local qualification is not enabled', () => {
+    expect(
+      apiEnvironment({
+        XCS_AUTH_ORIGIN: 'https://localhost:3445',
+        XCS_IDENTITY_ISSUER: 'https://localhost:3446',
+      }).XCS_IDENTITY_ISSUER,
+    ).toBe('https://account.xrpl.in')
+  })
+
+  it('allows an explicit HTTPS loopback Identity provider for local qualification', () => {
+    expect(
+      apiEnvironment({
+        XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+        XCS_AUTH_ORIGIN: 'https://localhost:3445',
+        XCS_IDENTITY_ISSUER: 'https://127.0.0.1:3446',
+      }).XCS_IDENTITY_ISSUER,
+    ).toBe('https://127.0.0.1:3446')
+  })
+
+  it.each([
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: 'true',
+      XCS_AUTH_ORIGIN: 'https://localhost:3445',
+      XCS_IDENTITY_ISSUER: 'https://localhost:3446',
+    },
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+      XCS_AUTH_ORIGIN: 'https://xcs.example',
+      XCS_IDENTITY_ISSUER: 'https://localhost:3446',
+    },
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+      XCS_AUTH_ORIGIN: 'https://localhost:3445',
+      XCS_IDENTITY_ISSUER: 'https://identity.example',
+    },
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+      XCS_AUTH_ORIGIN: 'https://localhost:3445',
+      XCS_IDENTITY_ISSUER: 'http://127.0.0.1:3446',
+    },
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+      XCS_AUTH_ORIGIN: 'https://localhost:3445',
+      XCS_IDENTITY_ISSUER: 'https://localhost:3446/path',
+    },
+    {
+      XCS_LOCAL_IDENTITY_QUALIFICATION: '1',
+      XCS_AUTH_ORIGIN: 'https://localhost:3445',
+      XCS_IDENTITY_ISSUER: ' https://localhost:3446',
+    },
+  ])('rejects an unsafe local Identity qualification contract', (environment) => {
+    expect(() => apiEnvironment(environment)).toThrow('LOCAL_IDENTITY_QUALIFICATION_INVALID')
+  })
 })
 
 describe('the browser-visible profile identifier', () => {
