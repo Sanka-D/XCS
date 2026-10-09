@@ -59,7 +59,7 @@ test('signs in through OIDC, persists a session, opens issuer onboarding, links 
   await page.getByTestId('auth-logout').click()
   await expect(page).toHaveURL(/\/auth\/login$/)
   await page.goto('/account')
-  await expect(page).toHaveURL(/\/auth\/login$/)
+  await expect(page).toHaveURL(/\/auth\/login\?returnTo=\/account$/)
   await page.goto('/schemas')
   await expect(page).toHaveURL(/\/schemas$/)
 })

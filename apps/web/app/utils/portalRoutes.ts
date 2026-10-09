@@ -1,10 +1,16 @@
 const AUTH_DESTINATIONS = new Set([
   '/account',
+  '/admin',
+  '/admin/audit',
+  '/admin/verifiers',
   '/issuer',
+  '/issuer/apply',
   '/issuer/application',
   '/issuer/credentials',
   '/issuer/recipients',
+  '/issuer/schemas',
   '/issuer/schemas/new',
+  '/issuer/settings',
   '/recipient',
   '/recipient/invitations',
   '/presentations',
@@ -12,8 +18,20 @@ const AUTH_DESTINATIONS = new Set([
   '/verifier/apply',
 ])
 
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/u
+const CREDENTIAL_DESTINATION_PATTERNS = [
+  /^\/issuer\/credentials\/[0-9a-f]{64}$/u,
+  /^\/recipient\/credentials\/[0-9a-f]{64}(?:\/present)?$/u,
+]
+const AUTH_DESTINATION_PATTERNS = [
+  new RegExp(`^/admin/applications/${UUID}/(?:issuer|verifier)$`, 'u'),
+  new RegExp(`^/issuer/issue/${UUID}$`, 'u'),
+  ...CREDENTIAL_DESTINATION_PATTERNS,
+]
+
 const WALLET_DESTINATIONS = [
-  /^\/issuer(?:\/(?:schemas\/new|recipients|issue\/[0-9a-f-]{36}))?$/u,
+  new RegExp(`^/issuer(?:/(?:schemas/new|recipients|issue/${UUID}))?$`, 'u'),
   /^\/recipient(?:\/credentials\/[0-9a-f]{64})?$/u,
 ]
 
@@ -25,11 +43,32 @@ function unlocalizedPath(value: string): string {
   return value.startsWith('/fr/') ? value.slice(3) : value
 }
 
-/** A fixed in-app auth destination, never a bearer, query, fragment or nested redirect. */
+/** A fixed in-app auth destination, never a bearer, fragment or nested redirect. */
 export function authReturnPath(value: unknown): string {
-  if (typeof value !== 'string' || value.includes('?') || value.includes('#')) return '/account'
-  const path = unlocalizedPath(value)
-  return AUTH_DESTINATIONS.has(path) ? value : '/account'
+  if (typeof value !== 'string' || value.includes('#')) return '/account'
+  let target: URL
+  try {
+    target = new URL(value, 'https://xcs.invalid')
+  } catch {
+    return '/account'
+  }
+  if (target.origin !== 'https://xcs.invalid' || !value.startsWith('/')) return '/account'
+  const path = unlocalizedPath(target.pathname)
+  if (target.search) {
+    const entries = [...target.searchParams.entries()]
+    const profile = target.searchParams.get('profile')
+    return CREDENTIAL_DESTINATION_PATTERNS.some((pattern) => pattern.test(path)) &&
+      entries.length === 1 &&
+      entries[0]?.[0] === 'profile' &&
+      profile !== null &&
+      PROFILE_ID.test(profile)
+      ? value
+      : '/account'
+  }
+  return AUTH_DESTINATIONS.has(path) ||
+    AUTH_DESTINATION_PATTERNS.some((pattern) => pattern.test(path))
+    ? value
+    : '/account'
 }
 
 /** Wallet onboarding may return only to the exact role screen that initiated it. */
