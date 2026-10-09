@@ -131,7 +131,7 @@
     }
   },
   "transaction": {
-    "rawWarning": "GemWallet will display a coded message. Signing it authorizes this Testnet action and its fee; it is not a sign-in request. Review the action above. The complete transaction is available in Technical details.",
+    "rawWarning": "GemWallet will display a coded message. Signing it authorizes this Testnet action and its fee; it is not a sign-in request. Review the action above before continuing.",
     "rawConsent": "I reviewed this action and authorize its signature and displayed fee.",
     "rawSign": "Raw sign and submit",
     "preview": "Review before signing",

@@ -131,7 +131,7 @@
     }
   },
   "transaction": {
-    "rawWarning": "GemWallet affichera un message codé. Le signer autorise cette action sur le réseau de test et ses frais ; ce n’est pas une connexion au site. Vérifiez l’action ci-dessus. La transaction complète est disponible dans les détails techniques.",
+    "rawWarning": "GemWallet affichera un message codé. Le signer autorise cette action sur le réseau de test et ses frais ; ce n’est pas une connexion au site. Vérifiez l’action ci-dessus avant de continuer.",
     "rawConsent": "J’ai vérifié cette action et j’autorise sa signature et les frais affichés.",
     "rawSign": "Signer en brut et soumettre",
     "preview": "Vérification avant signature",

@@ -366,15 +366,10 @@ describe.skipIf(!enabled)(
         await browserExpect(page.locator('#claims')).toHaveCount(0)
         await page.getByRole('checkbox', { name: 'course', exact: true }).check()
         await page.getByRole('button', { name: en.simpleIssuer.reviewIssue, exact: true }).click()
-        await page.getByTestId('transaction-technical-details').locator('summary').click()
-        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveAttribute(
-          'open',
-          '',
+        await browserExpect(page.getByTestId('transaction-preview')).toContainText(
+          en.simpleUi.signActions.issue,
         )
-        await browserExpect(page.getByTestId('transaction-technical-details')).toContainText(
-          'CredentialCreate',
-        )
-        await page.getByTestId('transaction-technical-details').locator('summary').click()
+        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveCount(0)
         await page
           .getByRole('checkbox', { name: en.simpleIssuer.visibilityReviewed, exact: true })
           .check()
@@ -399,20 +394,17 @@ describe.skipIf(!enabled)(
         await connectWallet()
         await page.getByRole('button', { name: en.accept.review, exact: true }).click()
         await browserExpect(page.getByTestId('credential-subject-review')).toBeVisible()
-        await page.getByTestId('payload-consent').check()
+        await page
+          .getByRole('button', { name: en.portal.recipient.showAndVerify, exact: true })
+          .click()
         await browserExpect(page.getByTestId('credential-claims')).toContainText(
           'PRIVATE RUNTIME CLAIM',
         )
         await page.getByTestId('issuer-trust-acknowledgement').getByRole('checkbox').check()
-        await page.getByTestId('transaction-technical-details').locator('summary').click()
-        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveAttribute(
-          'open',
-          '',
+        await browserExpect(page.getByTestId('transaction-preview')).toContainText(
+          en.simpleUi.signActions.accept,
         )
-        await browserExpect(page.getByTestId('transaction-technical-details')).toContainText(
-          'CredentialAccept',
-        )
-        await page.getByTestId('transaction-technical-details').locator('summary').click()
+        await browserExpect(page.getByTestId('transaction-technical-details')).toHaveCount(0)
         await page.getByTestId('raw-signing-consent').check()
         const reconciliation = page.waitForResponse(
           (response) =>
