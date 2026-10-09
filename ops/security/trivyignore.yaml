@@ -1,4 +1,20 @@
-vulnerabilities: []
+vulnerabilities:
+  - id: CVE-2026-85393
+    statement: >-
+      node-forge 1.4.0 is patched locally with the exact nested DigestAlgorithm
+      element-count fix proposed upstream in digitalbazaar/forge#1152; Trivy
+      identifies the published version and cannot recognize the pnpm patch.
+    expired_at: 2026-11-09
+    purls:
+      - pkg:npm/node-forge@1.4.0
+  - id: CVE-2026-93687
+    statement: >-
+      braces has no patched release; XCS reaches it through internal Nuxt build
+      globbing and does not pass request-controlled patterns to the package.
+      Recheck upstream and remove this exception when a fix is published.
+    expired_at: 2026-11-09
+    purls:
+      - pkg:npm/braces@3.0.3
 misconfigurations: []
 secrets: []
 licenses: []
