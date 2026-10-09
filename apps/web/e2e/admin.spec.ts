@@ -226,8 +226,11 @@ test('French queue, empty state, unavailable state and uncertain SMTP delivery',
 test('protects direct anonymous navigation and rejects a revoked administrator role', async ({
   page,
 }) => {
-  await page.goto(`/admin/applications/${application.organization_id}/verifier`)
-  await expect(page).toHaveURL(/\/auth\/login$/)
+  const protectedPath = `/admin/applications/${application.organization_id}/verifier`
+  await page.goto(protectedPath)
+  await expect(page).toHaveURL(
+    (url) => url.pathname === '/auth/login' && url.searchParams.get('returnTo') === protectedPath,
+  )
   await mockAdmin(page)
   await page.route('**/api/auth/access?**', (route) =>
     route.fulfill({ status: 403, json: { error: 'AUTH_FORBIDDEN' } }),
