@@ -25,6 +25,7 @@ services:
     user: node
     environment:
       XCS_NOTIFIER_DATABASE_URL: postgres://xcs_notifier:local-development-only-not-a-secret-notifier@postgres:5432/xcs
+      XCS_AUTH_ORIGIN: ${XCS_AUTH_ORIGIN:?Set exact local HTTPS origin}
       XCS_SMTP_HOST: mailpit
       XCS_SMTP_PORT: '1025'
     depends_on:
